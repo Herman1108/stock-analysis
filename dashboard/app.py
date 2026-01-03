@@ -376,29 +376,18 @@ def create_landing_page():
     stock_cards = []
     for stock_code in stocks:
         try:
-            # Get comprehensive analysis for summary
-            analysis = get_comprehensive_analysis(stock_code)
-            composite = analysis.get('composite', {})
-            foreign_flow = analysis.get('foreign_flow', {})
-            broker_sens = analysis.get('broker_sensitivity', {})
-            price_pos = analysis.get('price_position', {})
-
-            # Extract key metrics
-            score = composite.get('composite_score', 0)
-            action = composite.get('action', 'N/A')
-            color = composite.get('color', 'secondary')
-
-            # Foreign flow
-            foreign_net = foreign_flow.get('net_value_5d', 0)
-            foreign_trend = "Inflow" if foreign_net > 0 else "Outflow" if foreign_net < 0 else "Netral"
-            foreign_color = "success" if foreign_net > 0 else "danger" if foreign_net < 0 else "secondary"
-
-            # Price info
+            # Get basic data first (more reliable)
             broker_df = get_broker_data(stock_code)
             price_df = get_price_data(stock_code)
 
-            last_price = price_df['close'].iloc[-1] if not price_df.empty else 0
-            price_change = price_df['change'].iloc[-1] if not price_df.empty and 'change' in price_df.columns else 0
+            # Safe access to price data
+            last_price = 0
+            price_change = 0
+            if not price_df.empty:
+                if 'close' in price_df.columns and len(price_df) > 0:
+                    last_price = price_df['close'].iloc[-1]
+                if 'change' in price_df.columns and len(price_df) > 0:
+                    price_change = price_df['change'].iloc[-1] if pd.notna(price_df['change'].iloc[-1]) else 0
 
             # Date range
             if not broker_df.empty:
@@ -410,11 +399,39 @@ def create_landing_page():
 
             # Top accumulator
             if not broker_df.empty:
-                top_acc = broker_df.groupby('broker_code')['net_value'].sum().idxmax()
-                top_acc_val = broker_df.groupby('broker_code')['net_value'].sum().max()
+                broker_totals = broker_df.groupby('broker_code')['net_value'].sum()
+                top_acc = broker_totals.idxmax() if len(broker_totals) > 0 else "-"
             else:
                 top_acc = "-"
-                top_acc_val = 0
+
+            # Foreign flow (simple calculation from broker data)
+            foreign_net = 0
+            foreign_trend = "Netral"
+            foreign_color = "secondary"
+            if not broker_df.empty:
+                # Get last 5 days foreign flow
+                foreign_brokers = ['ML', 'CS', 'YU', 'RX', 'CG', 'BK', 'KZ', 'FS', 'AK', 'DB', 'UB', 'MS', 'JP', 'GS', 'MG']
+                recent_dates = broker_df['date'].drop_duplicates().nlargest(5)
+                recent_df = broker_df[broker_df['date'].isin(recent_dates)]
+                foreign_df = recent_df[recent_df['broker_code'].isin(foreign_brokers)]
+                if not foreign_df.empty:
+                    foreign_net = foreign_df['net_value'].sum()
+                    foreign_trend = "Inflow" if foreign_net > 0 else "Outflow" if foreign_net < 0 else "Netral"
+                    foreign_color = "success" if foreign_net > 0 else "danger" if foreign_net < 0 else "secondary"
+
+            # Try to get composite score (optional - fallback if fails)
+            score = 50  # Default
+            action = "HOLD"
+            color = "secondary"
+            try:
+                analysis = get_comprehensive_analysis(stock_code)
+                if analysis and 'composite' in analysis:
+                    composite = analysis.get('composite', {})
+                    score = composite.get('composite_score', 50)
+                    action = composite.get('action', 'HOLD')
+                    color = composite.get('color', 'secondary')
+            except:
+                pass  # Use defaults
 
             # Create card
             card = dbc.Col([
