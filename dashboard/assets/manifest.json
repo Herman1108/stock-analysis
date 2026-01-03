@@ -1,8 +1,10 @@
 {
-  "name": "Stock Broker Analysis Dashboard",
-  "short_name": "StockAnalysis",
-  "description": "Dashboard untuk analisis broker saham dengan Bandarmology",
-  "start_url": "/",
+  "name": "Herman Stock - Broker Analysis",
+  "short_name": "HermanStock",
+  "description": "Dashboard analisis broker saham Indonesia dengan Bandarmology - by Herman",
+  "start_url": "https://www.hermanstock.com/",
+  "scope": "https://www.hermanstock.com/",
+  "id": "com.hermanstock.app",
   "display": "standalone",
   "orientation": "any",
   "background_color": "#1a1a2e",
@@ -22,5 +24,7 @@
     }
   ],
   "categories": ["finance", "business"],
-  "lang": "id-ID"
+  "lang": "id-ID",
+  "dir": "ltr",
+  "prefer_related_applications": false
 }
