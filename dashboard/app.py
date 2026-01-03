@@ -179,7 +179,7 @@ def calculate_broker_current_position(stock_code: str) -> pd.DataFrame:
 
     # Get current price
     price_df = get_price_data(stock_code)
-    current_price = price_df['close'].iloc[-1] if not price_df.empty and 'close' in price_df.columns else 0
+    current_price = price_df['close_price'].iloc[-1] if not price_df.empty and 'close_price' in price_df.columns else 0
 
     # Merge IPO and daily data
     position_data = []
@@ -4371,9 +4371,12 @@ def create_position_page(stock_code='CDIA'):
     total_net_lot = position_df[position_df['net_lot'] > 0]['net_lot'].sum()
     avg_floating_pnl = position_df[position_df['net_lot'] > 0]['floating_pnl_pct'].mean()
 
+    # Add broker type for coloring
+    position_df['broker_type'] = position_df['broker_code'].apply(get_broker_type)
+
     # Top holders and sellers
-    top_holders = position_df[position_df['net_lot'] > 0].nlargest(10, 'net_lot')
-    top_sellers = position_df[position_df['net_lot'] < 0].nsmallest(10, 'net_lot')
+    top_holders = position_df[position_df['net_lot'] > 0].nlargest(10, 'net_lot').copy()
+    top_sellers = position_df[position_df['net_lot'] < 0].nsmallest(10, 'net_lot').copy()
 
     # Floating profit vs loss breakdown
     in_profit = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] > 0)]
@@ -4446,10 +4449,11 @@ def create_position_page(stock_code='CDIA'):
                     dbc.CardBody([
                         dash_table.DataTable(
                             data=top_holders[[
-                                'broker_code', 'net_lot', 'ipo_avg_buy', 'floating_pnl_pct'
+                                'broker_code', 'broker_type', 'net_lot', 'ipo_avg_buy', 'floating_pnl_pct'
                             ]].to_dict('records') if not top_holders.empty else [],
                             columns=[
                                 {'name': 'Broker', 'id': 'broker_code'},
+                                {'name': 'Type', 'id': 'broker_type'},
                                 {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
                                  'format': {'specifier': ',.0f'}},
                                 {'name': 'Avg Buy', 'id': 'ipo_avg_buy', 'type': 'numeric',
@@ -4463,6 +4467,20 @@ def create_position_page(stock_code='CDIA'):
                             style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
                             style_data_conditional=[
                                 {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
+                                # Broker type colors
+                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_code'},
+                                 'color': '#dc3545', 'fontWeight': 'bold'},
+                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_type'},
+                                 'backgroundColor': '#dc3545', 'color': 'white'},
+                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_code'},
+                                 'color': '#28a745', 'fontWeight': 'bold'},
+                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_type'},
+                                 'backgroundColor': '#28a745', 'color': 'white'},
+                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_code'},
+                                 'color': '#6f42c1', 'fontWeight': 'bold'},
+                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_type'},
+                                 'backgroundColor': '#6f42c1', 'color': 'white'},
+                                # Float P/L colors
                                 {'if': {'filter_query': '{floating_pnl_pct} > 0', 'column_id': 'floating_pnl_pct'},
                                  'color': '#00ff00'},
                                 {'if': {'filter_query': '{floating_pnl_pct} < 0', 'column_id': 'floating_pnl_pct'},
@@ -4470,6 +4488,12 @@ def create_position_page(stock_code='CDIA'):
                             ],
                             page_size=10,
                         ),
+                        # Legend
+                        html.Div([
+                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#dc3545", "fontSize": "8px"}), "Asing "], className="me-3", style={"fontSize": "11px"}),
+                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#28a745", "fontSize": "8px"}), "BUMN "], className="me-3", style={"fontSize": "11px"}),
+                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#6f42c1", "fontSize": "8px"}), "Lokal "], style={"fontSize": "11px"}),
+                        ], className="mt-2 mb-2"),
                         html.Hr(),
                         html.Small([
                             html.Strong("Cara Baca: "),
@@ -4490,10 +4514,11 @@ def create_position_page(stock_code='CDIA'):
                     dbc.CardBody([
                         dash_table.DataTable(
                             data=top_sellers[[
-                                'broker_code', 'net_lot', 'total_sell_lot'
+                                'broker_code', 'broker_type', 'net_lot', 'total_sell_lot'
                             ]].to_dict('records') if not top_sellers.empty else [],
                             columns=[
                                 {'name': 'Broker', 'id': 'broker_code'},
+                                {'name': 'Type', 'id': 'broker_type'},
                                 {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
                                  'format': {'specifier': ',.0f'}},
                                 {'name': 'Total Sell', 'id': 'total_sell_lot', 'type': 'numeric',
@@ -4505,10 +4530,30 @@ def create_position_page(stock_code='CDIA'):
                             style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
                             style_data_conditional=[
                                 {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
+                                # Broker type colors
+                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_code'},
+                                 'color': '#dc3545', 'fontWeight': 'bold'},
+                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_type'},
+                                 'backgroundColor': '#dc3545', 'color': 'white'},
+                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_code'},
+                                 'color': '#28a745', 'fontWeight': 'bold'},
+                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_type'},
+                                 'backgroundColor': '#28a745', 'color': 'white'},
+                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_code'},
+                                 'color': '#6f42c1', 'fontWeight': 'bold'},
+                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_type'},
+                                 'backgroundColor': '#6f42c1', 'color': 'white'},
+                                # Net lot always red for sellers
                                 {'if': {'column_id': 'net_lot'}, 'color': '#ff4444'},
                             ],
                             page_size=10,
                         ),
+                        # Legend
+                        html.Div([
+                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#dc3545", "fontSize": "8px"}), "Asing "], className="me-3", style={"fontSize": "11px"}),
+                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#28a745", "fontSize": "8px"}), "BUMN "], className="me-3", style={"fontSize": "11px"}),
+                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#6f42c1", "fontSize": "8px"}), "Lokal "], style={"fontSize": "11px"}),
+                        ], className="mt-2 mb-2"),
                         html.Hr(),
                         html.Small([
                             html.Strong("Cara Baca: "),
