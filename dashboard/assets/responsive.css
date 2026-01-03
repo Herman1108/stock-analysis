@@ -2,175 +2,233 @@
    RESPONSIVE PWA STYLES
    Stock Broker Analysis Dashboard
 
-   IMPORTANT: Desktop styles are PRESERVED
-   Mobile styles only apply for screens < 768px
+   MOBILE-FIRST APPROACH
    ============================================ */
-
-/* CSS Variables (does not affect existing styles) */
-:root {
-  --primary-bg: #1a1a2e;
-  --secondary-bg: #16213e;
-  --accent-color: #0f3460;
-  --text-color: #e8e8e8;
-  --success-color: #28a745;
-  --danger-color: #dc3545;
-  --warning-color: #ffc107;
-  --info-color: #17a2b8;
-}
 
 /* ============================================
-   DESKTOP STYLES (>= 1025px) - NO CHANGES
-   Keep original dashboard appearance
+   MOBILE STYLES (Default - for phones)
    ============================================ */
-@media screen and (min-width: 1025px) {
-  /* Desktop: No modifications - use original styles */
-  body {
-    /* Original styles preserved */
-  }
+
+/* Navigation - Hamburger style */
+.navbar {
+  padding: 0.25rem 0.5rem !important;
 }
 
-/* PWA specific - only when running as installed app */
-@media all and (display-mode: standalone) {
-  body {
-    -webkit-user-select: none;
-    user-select: none;
-  }
+.navbar-brand {
+  font-size: 0.9rem !important;
+  padding: 0 !important;
 }
 
-/* ============================================
-   MOBILE STYLES (< 768px)
-   ============================================ */
-@media screen and (max-width: 767px) {
-  /* Font size adjustments */
-  html {
-    font-size: 12px;
-  }
-
-  h1, .h1 { font-size: 1.5rem; }
-  h2, .h2 { font-size: 1.3rem; }
-  h3, .h3 { font-size: 1.15rem; }
-  h4, .h4 { font-size: 1rem; }
-  h5, .h5 { font-size: 0.9rem; }
-  h6, .h6 { font-size: 0.85rem; }
-
-  /* Navigation/Header */
-  .navbar {
+/* Hide text nav links on mobile, show as dropdown */
+@media screen and (max-width: 991px) {
+  .navbar-nav {
+    flex-direction: column !important;
+    background: #16213e;
     padding: 0.5rem;
-  }
-
-  .navbar-brand {
-    font-size: 1rem !important;
-  }
-
-  /* Cards - full width on mobile */
-  .card {
-    margin-bottom: 0.75rem;
     border-radius: 8px;
+    margin-top: 0.5rem;
+  }
+
+  .nav-link {
+    padding: 0.5rem 1rem !important;
+    font-size: 0.85rem !important;
+  }
+
+  .navbar-toggler {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.8rem;
+    border-color: rgba(255,255,255,0.3);
+  }
+}
+
+/* Stock Selector */
+@media screen and (max-width: 767px) {
+  /* Container */
+  .container-fluid {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+  }
+
+  /* Emiten selector row */
+  .row {
+    margin-left: -4px !important;
+    margin-right: -4px !important;
+  }
+
+  .row > [class*='col'] {
+    padding-left: 4px !important;
+    padding-right: 4px !important;
+  }
+
+  /* Select dropdown */
+  .Select, .Select-control {
+    font-size: 14px !important;
+  }
+
+  .Select-menu-outer {
+    font-size: 14px !important;
+  }
+
+  /* ============================================
+     CARDS - Full width, compact
+     ============================================ */
+  .card {
+    margin-bottom: 8px !important;
+    border-radius: 6px !important;
   }
 
   .card-header {
-    padding: 0.5rem 0.75rem;
+    padding: 0.4rem 0.6rem !important;
+  }
+
+  .card-header h5,
+  .card-header .h5 {
+    font-size: 0.85rem !important;
+    margin: 0 !important;
   }
 
   .card-body {
-    padding: 0.75rem;
+    padding: 0.5rem !important;
   }
 
-  /* Tables - horizontal scroll */
-  .table-responsive {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
+  /* ============================================
+     SUMMARY CARDS ROW (Price, Phase, etc)
+     ============================================ */
+  /* Make summary cards 2 per row */
+  .card-body > .row > .col-md-3,
+  .card-body > .row > .col-lg-3,
+  .card-body > .row > .col-xl-3 {
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    padding: 3px !important;
   }
 
-  table {
-    font-size: 0.75rem;
+  /* Inner cards in summary */
+  .card .card {
+    height: 100%;
   }
 
-  table th, table td {
-    padding: 0.35rem 0.5rem;
+  .card .card .card-body {
+    padding: 0.4rem !important;
+  }
+
+  .card .card h6,
+  .card .card .h6 {
+    font-size: 0.7rem !important;
+    margin-bottom: 0.2rem !important;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .card .card h4,
+  .card .card .h4 {
+    font-size: 0.9rem !important;
+    margin-bottom: 0.1rem !important;
+  }
+
+  .card .card p,
+  .card .card small {
+    font-size: 0.65rem !important;
+    line-height: 1.2 !important;
+    margin-bottom: 0.1rem !important;
+  }
+
+  /* ============================================
+     TYPOGRAPHY
+     ============================================ */
+  h1, .h1 { font-size: 1.3rem !important; }
+  h2, .h2 { font-size: 1.15rem !important; }
+  h3, .h3 { font-size: 1rem !important; }
+  h4, .h4 { font-size: 0.9rem !important; }
+  h5, .h5 { font-size: 0.8rem !important; }
+  h6, .h6 { font-size: 0.7rem !important; }
+
+  p, .small, small {
+    font-size: 0.75rem !important;
+  }
+
+  .text-muted {
+    font-size: 0.7rem !important;
+  }
+
+  /* ============================================
+     BADGES
+     ============================================ */
+  .badge {
+    font-size: 0.6rem !important;
+    padding: 0.2rem 0.4rem !important;
     white-space: nowrap;
   }
 
-  /* Badges */
-  .badge {
-    font-size: 0.7rem;
-    padding: 0.25rem 0.4rem;
-  }
-
-  /* Buttons */
+  /* ============================================
+     BUTTONS
+     ============================================ */
   .btn {
-    padding: 0.375rem 0.75rem;
-    font-size: 0.85rem;
+    font-size: 0.75rem !important;
+    padding: 0.25rem 0.5rem !important;
   }
 
   .btn-sm {
-    padding: 0.25rem 0.5rem;
-    font-size: 0.75rem;
+    font-size: 0.65rem !important;
+    padding: 0.15rem 0.35rem !important;
   }
 
-  /* Dropdown */
-  .dropdown-menu {
-    font-size: 0.85rem;
-  }
-
-  /* Select/Input */
-  select, input, .Select-control {
-    font-size: 16px !important; /* Prevent iOS zoom */
-  }
-
-  /* Stock selector dropdown */
-  .Select-menu-outer {
-    max-height: 300px !important;
-  }
-
-  /* Grid adjustments - stack columns */
-  .row > [class*='col-'] {
-    padding-left: 5px;
-    padding-right: 5px;
-  }
-
-  /* Charts - make them scrollable if needed */
+  /* ============================================
+     CHARTS - Plotly
+     ============================================ */
   .js-plotly-plot {
     width: 100% !important;
   }
 
-  .js-plotly-plot .plotly {
+  .js-plotly-plot .plotly .main-svg {
     width: 100% !important;
   }
 
-  /* Progress bars */
-  .progress {
-    height: 0.75rem;
-    font-size: 0.65rem;
+  /* Smaller modebar */
+  .modebar {
+    transform: scale(0.7) !important;
+    transform-origin: top right !important;
   }
 
-  /* Buy Signal Tracker mobile layout */
-  .buy-signal-tracker .row > .col-4,
-  .buy-signal-tracker .row > .col-md-4 {
-    flex: 0 0 100%;
-    max-width: 100%;
-    margin-bottom: 0.5rem;
+  .modebar-btn {
+    font-size: 12px !important;
   }
 
-  /* Phase Analysis card */
-  .phase-analysis .row > .col-6 {
-    flex: 0 0 100%;
-    max-width: 100%;
+  /* ============================================
+     TABLES
+     ============================================ */
+  .table-responsive {
+    font-size: 0.65rem !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
   }
 
-  /* Accumulation criteria - 2 columns on mobile */
-  .accumulation-criteria .col-md-2 {
-    flex: 0 0 50%;
-    max-width: 50%;
-    padding: 3px;
+  .table {
+    font-size: 0.65rem !important;
   }
 
-  /* Tabs - scrollable */
+  .table th,
+  .table td {
+    padding: 0.25rem 0.35rem !important;
+    white-space: nowrap;
+    vertical-align: middle !important;
+  }
+
+  .table thead th {
+    font-size: 0.6rem !important;
+    font-weight: 600 !important;
+  }
+
+  /* ============================================
+     TABS
+     ============================================ */
   .nav-tabs {
-    flex-wrap: nowrap;
-    overflow-x: auto;
+    flex-wrap: nowrap !important;
+    overflow-x: auto !important;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+    border-bottom: none !important;
   }
 
   .nav-tabs::-webkit-scrollbar {
@@ -178,38 +236,94 @@
   }
 
   .nav-tabs .nav-link {
+    font-size: 0.7rem !important;
+    padding: 0.4rem 0.6rem !important;
     white-space: nowrap;
-    padding: 0.5rem 0.75rem;
-    font-size: 0.8rem;
+    border-radius: 4px 4px 0 0 !important;
   }
 
-  /* Alerts */
+  /* ============================================
+     BUY SIGNAL TRACKER
+     ============================================ */
+  /* Stack columns vertically */
+  .buy-signal-tracker .col-md-4,
+  .buy-signal-tracker .col-4 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 0.3rem;
+  }
+
+  /* ============================================
+     PHASE ANALYSIS
+     ============================================ */
+  .phase-analysis .col-6,
+  .phase-analysis .col-md-6 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* ============================================
+     ACCUMULATION CRITERIA
+     ============================================ */
+  .accumulation-criteria .col-md-2,
+  .accumulation-criteria .col-2 {
+    flex: 0 0 50% !important;
+    max-width: 50% !important;
+    padding: 2px !important;
+  }
+
+  /* ============================================
+     PROGRESS BARS
+     ============================================ */
+  .progress {
+    height: 0.6rem !important;
+    font-size: 0.55rem !important;
+  }
+
+  .progress-bar {
+    font-size: 0.5rem !important;
+    line-height: 0.6rem !important;
+  }
+
+  /* ============================================
+     ALERTS
+     ============================================ */
   .alert {
-    padding: 0.5rem 0.75rem;
-    font-size: 0.85rem;
+    padding: 0.4rem 0.6rem !important;
+    font-size: 0.75rem !important;
+    margin-bottom: 0.5rem !important;
   }
 
-  /* Modal */
-  .modal-dialog {
-    margin: 0.5rem;
-    max-width: calc(100% - 1rem);
+  /* ============================================
+     SPACING OVERRIDES
+     ============================================ */
+  .mb-4 { margin-bottom: 0.75rem !important; }
+  .mb-3 { margin-bottom: 0.5rem !important; }
+  .mb-2 { margin-bottom: 0.35rem !important; }
+  .mt-4 { margin-top: 0.75rem !important; }
+  .mt-3 { margin-top: 0.5rem !important; }
+  .py-4 { padding-top: 0.75rem !important; padding-bottom: 0.75rem !important; }
+  .py-3 { padding-top: 0.5rem !important; padding-bottom: 0.5rem !important; }
+  .px-4 { padding-left: 0.75rem !important; padding-right: 0.75rem !important; }
+  .px-3 { padding-left: 0.5rem !important; padding-right: 0.5rem !important; }
+
+  /* ============================================
+     SPECIFIC FIXES
+     ============================================ */
+  /* Refresh button & time */
+  .refresh-section {
+    font-size: 0.7rem !important;
   }
 
-  /* Spacing utilities override */
-  .mb-4 { margin-bottom: 1rem !important; }
-  .mb-3 { margin-bottom: 0.75rem !important; }
-  .mt-4 { margin-top: 1rem !important; }
-  .py-4 { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+  /* Force text wrap for long content */
+  .text-wrap-mobile {
+    white-space: normal !important;
+    word-break: break-word;
+  }
 
-  /* Hide less important elements on mobile */
+  /* Hide non-essential on mobile */
   .d-none-mobile {
     display: none !important;
-  }
-
-  /* Fullscreen charts button */
-  .modebar {
-    transform: scale(0.8);
-    transform-origin: top right;
   }
 }
 
@@ -217,158 +331,126 @@
    TABLET STYLES (768px - 1024px)
    ============================================ */
 @media screen and (min-width: 768px) and (max-width: 1024px) {
-  html {
-    font-size: 13px;
-  }
-
   .container-fluid {
-    padding-left: 15px;
-    padding-right: 15px;
+    padding-left: 12px !important;
+    padding-right: 12px !important;
   }
 
-  /* 2-column layout for some cards */
-  .accumulation-criteria .col-md-2 {
-    flex: 0 0 33.33%;
-    max-width: 33.33%;
+  .card-body > .row > .col-md-3 {
+    flex: 0 0 25% !important;
+    max-width: 25% !important;
+  }
+
+  .card-header h5 {
+    font-size: 0.95rem !important;
+  }
+
+  .table {
+    font-size: 0.8rem !important;
   }
 }
 
 /* ============================================
-   LANDSCAPE MOBILE
+   DESKTOP STYLES (> 1024px) - NO CHANGES
    ============================================ */
-@media screen and (max-width: 896px) and (orientation: landscape) {
-  .card {
-    margin-bottom: 0.5rem;
+@media screen and (min-width: 1025px) {
+  /* Desktop: Keep original styles */
+}
+
+/* ============================================
+   PWA STANDALONE MODE
+   ============================================ */
+@media all and (display-mode: standalone) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
   }
 
-  .card-body {
-    padding: 0.5rem;
-  }
-
-  /* Charts smaller in landscape */
-  .js-plotly-plot {
-    max-height: 250px;
+  /* Extra padding for notch/status bar */
+  .navbar {
+    padding-top: env(safe-area-inset-top) !important;
   }
 }
 
 /* ============================================
-   TOUCH-FRIENDLY ENHANCEMENTS
+   TOUCH DEVICE ENHANCEMENTS
    ============================================ */
 @media (hover: none) and (pointer: coarse) {
   /* Larger touch targets */
   .btn, .nav-link, .dropdown-item {
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
+    min-height: 40px;
   }
 
   /* Remove hover effects */
-  .btn:hover, .card:hover {
-    transform: none;
+  .btn:hover, .card:hover, .nav-link:hover {
+    transform: none !important;
   }
 
-  /* Better tap highlighting */
-  button, a, select {
-    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
-  }
-}
-
-/* ============================================
-   DARK THEME OPTIMIZATION
-   ============================================ */
-@media (prefers-color-scheme: dark) {
-  body {
-    background-color: var(--primary-bg);
-    color: var(--text-color);
+  /* Better tap feedback */
+  button, a, select, input {
+    -webkit-tap-highlight-color: rgba(23, 162, 184, 0.2);
   }
 }
 
 /* ============================================
-   PRINT STYLES
-   ============================================ */
-@media print {
-  .no-print, .nav-tabs, .btn, .dropdown {
-    display: none !important;
-  }
-
-  .card {
-    break-inside: avoid;
-    border: 1px solid #ddd !important;
-  }
-}
-
-/* ============================================
-   NOTCH/SAFE AREA SUPPORT (iPhone X+)
+   SAFE AREA (iPhone X+, Android notch)
    ============================================ */
 @supports (padding: max(0px)) {
   .container-fluid {
-    padding-left: max(10px, env(safe-area-inset-left));
-    padding-right: max(10px, env(safe-area-inset-right));
+    padding-left: max(8px, env(safe-area-inset-left)) !important;
+    padding-right: max(8px, env(safe-area-inset-right)) !important;
   }
 
-  .fixed-bottom {
+  body {
     padding-bottom: env(safe-area-inset-bottom);
   }
 }
 
 /* ============================================
-   CUSTOM SCROLLBAR (Desktop)
+   LANDSCAPE PHONE
    ============================================ */
-@media (hover: hover) {
-  ::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
+@media screen and (max-height: 500px) and (orientation: landscape) {
+  .card {
+    margin-bottom: 4px !important;
   }
 
-  ::-webkit-scrollbar-track {
-    background: var(--secondary-bg);
+  .card-body {
+    padding: 0.35rem !important;
   }
 
-  ::-webkit-scrollbar-thumb {
-    background: var(--accent-color);
-    border-radius: 4px;
-  }
-
-  ::-webkit-scrollbar-thumb:hover {
-    background: #1a5490;
+  .navbar {
+    padding: 0.15rem 0.5rem !important;
   }
 }
 
 /* ============================================
-   LOADING SPINNER (Full screen)
+   DARK SCROLLBAR
    ============================================ */
-.loading-overlay {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  background: rgba(26, 26, 46, 0.9);
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  z-index: 9999;
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #1a1a2e;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #0f3460;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #17a2b8;
 }
 
 /* ============================================
-   PULL-TO-REFRESH INDICATOR (future use)
+   LOADING STATE
    ============================================ */
-.pull-indicator {
-  position: fixed;
-  top: 0;
-  left: 50%;
-  transform: translateX(-50%);
-  padding: 10px 20px;
-  background: var(--accent-color);
-  color: white;
-  border-radius: 0 0 8px 8px;
-  font-size: 0.85rem;
-  z-index: 1000;
-  opacity: 0;
-  transition: opacity 0.3s;
+._dash-loading {
+  background: #1a1a2e !important;
 }
 
-.pull-indicator.visible {
-  opacity: 1;
+._dash-loading-callback {
+  background: rgba(26, 26, 46, 0.8) !important;
 }
