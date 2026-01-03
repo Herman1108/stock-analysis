@@ -210,13 +210,9 @@ def calculate_broker_current_position(stock_code: str) -> pd.DataFrame:
         total_sell_lot = ipo_sell_lot + daily_sell_lot
         net_lot = total_buy_lot - total_sell_lot
 
-        # Weighted average buy price
-        total_buy_value = ipo_buy_value + daily_buy_value
-        weighted_avg_buy = total_buy_value / total_buy_lot if total_buy_lot > 0 else ipo_avg_buy
-
-        # Use IPO avg if weighted is unreasonable
-        if weighted_avg_buy > ipo_avg_buy * 100 or weighted_avg_buy < 1:
-            weighted_avg_buy = ipo_avg_buy
+        # Weighted average buy price - use IPO avg directly (more reliable)
+        # Value/lot calculation doesn't work because value is in Rupiah, lot is in lots (not shares)
+        weighted_avg_buy = ipo_avg_buy if ipo_avg_buy > 0 else 0
 
         # Floating P&L
         if net_lot > 0 and weighted_avg_buy > 0 and current_price > 0:
