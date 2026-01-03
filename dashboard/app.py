@@ -4557,8 +4557,8 @@ def create_position_page(stock_code='CDIA'):
                         html.Hr(),
                         html.Small([
                             html.Strong("Cara Baca: "),
-                            "Broker dengan Net Lot negatif = sudah menjual lebih banyak dari yang dibeli. ",
-                            "Ini menunjukkan broker yang sudah keluar dari saham."
+                            "Net Lot negatif = Broker DISTRIBUTOR. Klien broker ini adalah pemegang awal (early holder/IPO allotment) ",
+                            "yang sedang distribusi/profit taking. Mereka menjual saham yang diperoleh sebelum periode tracking."
                         ], className="text-muted")
                     ])
                 ])
