@@ -1106,6 +1106,817 @@ def create_sr_levels_card(sr_analysis, stock_code):
 
 
 # ============================================================
+# NEW DASHBOARD SECTIONS - Replacing Top 10 Acc/Dist duplicates
+# ============================================================
+
+def create_quick_sentiment_summary(stock_code='CDIA'):
+    """
+    Section 1: Quick Sentiment Summary
+    - Foreign flow hari ini vs kemarin
+    - Rasio akumulasi vs distribusi
+    - Trend mingguan
+    - By broker type
+    """
+    try:
+        broker_df = get_broker_data(stock_code)
+        price_df = get_price_data(stock_code)
+        foreign_flow = calculate_foreign_flow_momentum(stock_code)
+
+        if broker_df.empty:
+            return dbc.Card([
+                dbc.CardHeader("📊 Market Sentiment"),
+                dbc.CardBody(html.P("No data available", className="text-muted"))
+            ], className="mb-3", color="dark")
+
+        # Get latest and previous day data
+        latest_date = broker_df['date'].max()
+        prev_date = broker_df[broker_df['date'] < latest_date]['date'].max() if len(broker_df['date'].unique()) > 1 else latest_date
+
+        # Today's data
+        today_data = broker_df[broker_df['date'] == latest_date]
+        prev_data = broker_df[broker_df['date'] == prev_date]
+
+        # Calculate accumulation ratio
+        today_buy = today_data[today_data['net_value'] > 0]['net_value'].sum()
+        today_sell = abs(today_data[today_data['net_value'] < 0]['net_value'].sum())
+        total_flow = today_buy + today_sell
+        accum_ratio = (today_buy / total_flow * 100) if total_flow > 0 else 50
+
+        # Foreign flow
+        foreign_today = foreign_flow.get('latest_value', 0) / 1e9
+        foreign_yesterday = foreign_flow.get('prev_value', 0) / 1e9
+        foreign_signal = foreign_flow.get('signal', 'NEUTRAL')
+        foreign_streak = foreign_flow.get('streak_days', 0)
+
+        # Weekly trend (last 5 days)
+        weekly_data = []
+        dates_sorted = sorted(broker_df['date'].unique(), reverse=True)[:5]
+        for d in reversed(dates_sorted):
+            day_net = broker_df[broker_df['date'] == d]['net_value'].sum() / 1e9
+            weekly_data.append({'date': d, 'net': day_net})
+        weekly_total = sum([d['net'] for d in weekly_data])
+
+        # By broker type
+        type_flow = {}
+        for _, row in today_data.iterrows():
+            broker_type = get_broker_info(row['broker_code'])['type']
+            if broker_type not in type_flow:
+                type_flow[broker_type] = 0
+            type_flow[broker_type] += row['net_value']
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-pie me-2"),
+                html.Span("Market Sentiment Today", className="fw-bold")
+            ]),
+            dbc.CardBody([
+                # Top row: 3 metric cards
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Foreign Flow", className="text-muted"),
+                            html.H4([
+                                f"{foreign_today:+.1f}B ",
+                                html.Span("🟢" if foreign_today > 0 else "🔴", style={"fontSize": "16px"})
+                            ], className="mb-0"),
+                            html.Small(f"vs {foreign_yesterday:+.1f}B yesterday", className="text-muted")
+                        ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+                    ], width=4),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Accum Ratio", className="text-muted"),
+                            html.H4([
+                                f"{accum_ratio:.0f}% Buy",
+                            ], className=f"mb-0 text-{'success' if accum_ratio > 55 else ('danger' if accum_ratio < 45 else 'warning')}"),
+                            html.Small(f"{100-accum_ratio:.0f}% Sell", className="text-muted")
+                        ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+                    ], width=4),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Foreign Streak", className="text-muted"),
+                            html.H4([
+                                f"{foreign_streak} days ",
+                                html.Span(foreign_signal[:3] if foreign_signal else "NEU",
+                                         className=f"badge bg-{'success' if 'INFLOW' in foreign_signal else ('danger' if 'OUTFLOW' in foreign_signal else 'secondary')}")
+                            ], className="mb-0"),
+                            html.Small("consecutive", className="text-muted")
+                        ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+                    ], width=4),
+                ], className="mb-3"),
+
+                # Weekly trend mini chart
+                html.Div([
+                    html.Small("Weekly Trend: ", className="text-muted me-2"),
+                    *[html.Span([
+                        html.Span(f"{d['net']:+.1f}B ",
+                                 className=f"text-{'success' if d['net'] > 0 else 'danger'} me-2",
+                                 style={"fontSize": "11px"})
+                    ]) for d in weekly_data],
+                    html.Span(f"Total: {weekly_total:+.1f}B",
+                             className=f"fw-bold text-{'success' if weekly_total > 0 else 'danger'}")
+                ], className="mb-2", style={"fontSize": "11px"}),
+
+                # By broker type
+                html.Div([
+                    html.Small("By Type: ", className="text-muted me-2"),
+                    html.Span([
+                        html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS.get('FOREIGN', '#dc3545'), "fontSize": "8px"}),
+                        f"Asing: {type_flow.get('FOREIGN', 0)/1e9:+.1f}B "
+                    ], className="me-2", style={"fontSize": "11px"}),
+                    html.Span([
+                        html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS.get('BUMN', '#28a745'), "fontSize": "8px"}),
+                        f"BUMN: {type_flow.get('BUMN', 0)/1e9:+.1f}B "
+                    ], className="me-2", style={"fontSize": "11px"}),
+                    html.Span([
+                        html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS.get('LOCAL', '#6f42c1'), "fontSize": "8px"}),
+                        f"Lokal: {type_flow.get('LOCAL', 0)/1e9:+.1f}B"
+                    ], style={"fontSize": "11px"}),
+                ]),
+
+                html.Hr(className="my-2"),
+
+                # Penjelasan Section
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Cara Baca: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("• Foreign Flow: "), "Net beli/jual investor asing hari ini. ",
+                        html.Span("Positif (+) = asing masuk (bullish), ", className="text-success"),
+                        html.Span("Negatif (-) = asing keluar (bearish)", className="text-danger"),
+                        html.Br(),
+                        html.Strong("• Accum Ratio: "), "Perbandingan total pembelian vs penjualan semua broker. ",
+                        ">55% Buy = sentiment beli kuat, <45% = sentiment jual",
+                        html.Br(),
+                        html.Strong("• Foreign Streak: "), "Berapa hari berturut-turut asing konsisten beli/jual. ",
+                        "Streak panjang = trend kuat",
+                        html.Br(),
+                        html.Strong("• Weekly Trend: "), "Net flow 5 hari terakhir. Lihat apakah trend naik/turun",
+                        html.Br(),
+                        html.Strong("• By Type: "), "Siapa yang mendominasi? Asing biasanya punya riset lebih dalam"
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+            ])
+        ], className="mb-3", color="dark", outline=True)
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardHeader("📊 Market Sentiment"),
+            dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
+        ], className="mb-3", color="dark")
+
+
+def create_key_metrics_compact(stock_code='CDIA'):
+    """
+    Section 2: Key Metrics Compact
+    - 6 metric cards in compact view
+    """
+    try:
+        full_analysis = get_comprehensive_analysis(stock_code)
+        broker_sens = full_analysis.get('broker_sensitivity', {})
+        foreign_flow = full_analysis.get('foreign_flow', {})
+        smart_money = full_analysis.get('smart_money', {})
+        accum_phase = full_analysis.get('accumulation_phase', {})
+        volume_analysis = full_analysis.get('volume_analysis', {})
+        sr_analysis = analyze_support_resistance(stock_code)
+
+        def metric_card(title, value, subtitle, color="info"):
+            return html.Div([
+                html.Small(title, className="text-muted", style={"fontSize": "10px"}),
+                html.H5(value, className=f"text-{color} mb-0"),
+                html.Small(subtitle, className="text-muted", style={"fontSize": "9px"})
+            ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+
+        # Get values
+        sens_score = broker_sens.get('avg_win_rate', 0) if broker_sens else 0
+        top_brokers = broker_sens.get('top_5_brokers', [])[:2] if broker_sens else []
+
+        foreign_score = foreign_flow.get('score', 0)
+        foreign_signal = foreign_flow.get('signal', 'NEUTRAL')
+
+        smart_score = smart_money.get('score', 0)
+        smart_detected = smart_money.get('detection', 'NO')
+
+        accum_in = accum_phase.get('in_accumulation', False)
+        accum_range = accum_phase.get('range_pct', 0)
+
+        rvol = volume_analysis.get('rvol', 1.0)
+        vpt_signal = volume_analysis.get('vpt_signal', 'NEUTRAL')
+
+        key_support = sr_analysis.get('key_support', 0) if sr_analysis else 0
+        key_resistance = sr_analysis.get('key_resistance', 0) if sr_analysis else 0
+        current_price = sr_analysis.get('current_price', 0) if sr_analysis else 0
+
+        support_pct = ((current_price - key_support) / current_price * 100) if current_price > 0 and key_support > 0 else 0
+        resist_pct = ((key_resistance - current_price) / current_price * 100) if current_price > 0 and key_resistance > 0 else 0
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-tachometer-alt me-2"),
+                html.Span("Key Metrics at Glance", className="fw-bold")
+            ]),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        metric_card(
+                            "Broker Sensitivity",
+                            f"{sens_score:.0f}%",
+                            f"Top: {', '.join(top_brokers)}" if top_brokers else "N/A",
+                            "info" if sens_score > 50 else "warning"
+                        )
+                    ], width=4),
+                    dbc.Col([
+                        metric_card(
+                            "Foreign Flow",
+                            f"{foreign_score:.0f}",
+                            foreign_signal[:10] if foreign_signal else "N/A",
+                            "success" if foreign_score > 0 else ("danger" if foreign_score < 0 else "secondary")
+                        )
+                    ], width=4),
+                    dbc.Col([
+                        metric_card(
+                            "Volume",
+                            f"RVOL {rvol:.1f}x",
+                            vpt_signal[:10] if vpt_signal else "N/A",
+                            "success" if rvol > 1.2 else ("warning" if rvol > 0.8 else "danger")
+                        )
+                    ], width=4),
+                ], className="mb-2"),
+                dbc.Row([
+                    dbc.Col([
+                        metric_card(
+                            "Smart Money",
+                            f"{smart_score:.0f}",
+                            f"Detected: {smart_detected[:3]}" if smart_detected else "N/A",
+                            "success" if smart_score > 60 else "secondary"
+                        )
+                    ], width=4),
+                    dbc.Col([
+                        metric_card(
+                            "Accum Phase",
+                            "IN ✅" if accum_in else "OUT",
+                            f"Range: {accum_range:.1f}%",
+                            "success" if accum_in else "secondary"
+                        )
+                    ], width=4),
+                    dbc.Col([
+                        metric_card(
+                            "S/R Levels",
+                            f"S: -{support_pct:.1f}%",
+                            f"R: +{resist_pct:.1f}%",
+                            "info"
+                        )
+                    ], width=4),
+                ]),
+
+                html.Hr(className="my-2"),
+
+                # Penjelasan Section
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Cara Baca 6 Indikator: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("• Broker Sensitivity: "), "Win rate broker 'pintar' memprediksi kenaikan. >50% = bagus",
+                        html.Br(),
+                        html.Strong("• Foreign Flow: "), "Skor momentum asing. Positif = asing aktif beli, Negatif = jual",
+                        html.Br(),
+                        html.Strong("• Volume (RVOL): "), "Relative Volume vs rata-rata. >1.2x = volume tinggi (ada interest)",
+                        html.Br(),
+                        html.Strong("• Smart Money: "), "Deteksi pembelian besar tersembunyi. >60 = terdeteksi akumulasi",
+                        html.Br(),
+                        html.Strong("• Accum Phase: "), "IN = sedang fase akumulasi (sideways, range sempit). Ideal untuk beli",
+                        html.Br(),
+                        html.Strong("• S/R Levels: "), "Support (-%) = jarak ke bawah, Resistance (+%) = jarak ke atas"
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+            ])
+        ], className="mb-3", color="dark", outline=True)
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardHeader("🎯 Key Metrics"),
+            dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
+        ], className="mb-3", color="dark")
+
+
+def create_broker_movement_alert(stock_code='CDIA'):
+    """
+    Section 3: Broker Movement Alert
+    - New accumulation signals
+    - New distribution warnings
+    - Biggest movement today vs yesterday
+    """
+    try:
+        broker_df = get_broker_data(stock_code)
+
+        if broker_df.empty:
+            return dbc.Card([
+                dbc.CardHeader("🔔 Broker Movement Alert"),
+                dbc.CardBody(html.P("No data available", className="text-muted"))
+            ], className="mb-3", color="dark")
+
+        # Get last 2 days
+        dates_sorted = sorted(broker_df['date'].unique(), reverse=True)
+        if len(dates_sorted) < 2:
+            return dbc.Card([
+                dbc.CardHeader("🔔 Broker Movement Alert"),
+                dbc.CardBody(html.P("Need at least 2 days of data", className="text-muted"))
+            ], className="mb-3", color="dark")
+
+        today = dates_sorted[0]
+        yesterday = dates_sorted[1]
+
+        today_df = broker_df[broker_df['date'] == today].copy()
+        yesterday_df = broker_df[broker_df['date'] == yesterday].copy()
+
+        # Calculate daily net by broker
+        today_net = today_df.groupby('broker_code')['net_value'].sum().to_dict()
+        yesterday_net = yesterday_df.groupby('broker_code')['net_value'].sum().to_dict()
+
+        # Find biggest movements (change from yesterday)
+        movements = []
+        for broker in set(list(today_net.keys()) + list(yesterday_net.keys())):
+            t_val = today_net.get(broker, 0)
+            y_val = yesterday_net.get(broker, 0)
+            change = t_val - y_val
+            movements.append({
+                'broker': broker,
+                'today': t_val,
+                'yesterday': y_val,
+                'change': change,
+                'type': get_broker_info(broker)['type_name']
+            })
+
+        # Sort by absolute change
+        movements.sort(key=lambda x: abs(x['change']), reverse=True)
+        top_movements = movements[:5]
+
+        # Find new accumulation (was negative/neutral, now positive)
+        new_accum = [m for m in movements if m['yesterday'] <= 0 and m['today'] > 1e9][:3]
+
+        # Find new distribution (was positive/neutral, now negative)
+        new_dist = [m for m in movements if m['yesterday'] >= 0 and m['today'] < -1e9][:3]
+
+        # Build accumulation list
+        accum_items = [html.Div([
+            html.Span(f"{m['broker']} ", className="fw-bold"),
+            html.Small(f"+{m['today']/1e9:.1f}B", className="text-success")
+        ], style={"fontSize": "11px"}) for m in new_accum] if new_accum else [html.Small("None today", className="text-muted")]
+
+        # Build distribution list
+        dist_items = [html.Div([
+            html.Span(f"{m['broker']} ", className="fw-bold"),
+            html.Small(f"{m['today']/1e9:.1f}B", className="text-danger")
+        ], style={"fontSize": "11px"}) for m in new_dist] if new_dist else [html.Small("None today", className="text-muted")]
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-bell me-2"),
+                html.Span("Broker Movement Alert", className="fw-bold")
+            ]),
+            dbc.CardBody([
+                dbc.Row([
+                    # New Accumulation Signal
+                    dbc.Col([
+                        html.Div([
+                            html.Small("🟢 New Accumulation", className="text-success fw-bold"),
+                            *accum_items
+                        ], className="p-2 rounded", style={"backgroundColor": "#2d3a2d"})
+                    ], width=6),
+                    # New Distribution Warning
+                    dbc.Col([
+                        html.Div([
+                            html.Small("🔴 New Distribution", className="text-danger fw-bold"),
+                            *dist_items
+                        ], className="p-2 rounded", style={"backgroundColor": "#3a2d2d"})
+                    ], width=6),
+                ], className="mb-3"),
+
+                # Biggest Movement Table
+                html.Small("Biggest Movement Today vs Yesterday", className="text-muted fw-bold mb-2 d-block"),
+                dash_table.DataTable(
+                    data=[{
+                        'Broker': m['broker'],
+                        'Type': m['type'][:6],
+                        'Today': f"{m['today']/1e9:+.1f}B",
+                        'Yesterday': f"{m['yesterday']/1e9:+.1f}B",
+                        'Change': f"{m['change']/1e9:+.1f}B"
+                    } for m in top_movements],
+                    columns=[
+                        {'name': 'Broker', 'id': 'Broker'},
+                        {'name': 'Type', 'id': 'Type'},
+                        {'name': 'Today', 'id': 'Today'},
+                        {'name': 'Yest', 'id': 'Yesterday'},
+                        {'name': 'Change', 'id': 'Change'}
+                    ],
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '4px', 'fontSize': '11px'},
+                    style_header={'backgroundColor': '#404040', 'fontWeight': 'bold', 'fontSize': '10px'},
+                    style_data_conditional=[
+                        {'if': {'filter_query': '{Change} contains "+"'}, 'color': '#28a745'},
+                        {'if': {'filter_query': '{Change} contains "-"'}, 'color': '#dc3545'},
+                    ]
+                ),
+
+                html.Hr(className="my-2"),
+
+                # Penjelasan Section
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Cara Baca: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("• New Accumulation: "), "Broker yang kemarin jual/netral, HARI INI mulai beli besar (>1B). ",
+                        html.Span("Sinyal awal bullish!", className="text-success"),
+                        html.Br(),
+                        html.Strong("• New Distribution: "), "Broker yang kemarin beli/netral, HARI INI mulai jual besar. ",
+                        html.Span("Sinyal awal bearish!", className="text-danger"),
+                        html.Br(),
+                        html.Strong("• Biggest Movement: "), "Broker dengan perubahan TERBESAR dari kemarin ke hari ini.",
+                        html.Br(),
+                        html.Strong("• Today vs Yest: "), "Bandingkan net hari ini vs kemarin untuk lihat perubahan perilaku",
+                        html.Br(),
+                        html.Strong("💡 Tip: "), "Perhatikan jika broker asing/sensitif muncul di New Accumulation!"
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+            ])
+        ], className="mb-3", color="dark", outline=True)
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardHeader("🔔 Broker Movement"),
+            dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
+        ], className="mb-3", color="dark")
+
+
+def create_broker_sensitivity_pattern(stock_code='CDIA'):
+    """
+    Section 4: Top 5 Broker Sensitivity Pattern
+    - Historical pattern: win rate, lead time, duration, lot, gain
+    - Current status: apakah sedang akumulasi
+    """
+    try:
+        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+        broker_df = get_broker_data(stock_code)
+        avg_buy_df = get_broker_avg_buy(stock_code, days=60)
+
+        if not broker_sens or not broker_sens.get('brokers'):
+            return dbc.Card([
+                dbc.CardHeader("🎯 Top 5 Broker Sensitivity Pattern"),
+                dbc.CardBody(html.P("No sensitivity data available", className="text-muted"))
+            ], className="mb-3", color="dark")
+
+        top_5 = broker_sens['brokers'][:5]
+
+        # Get current status for each broker
+        latest_date = broker_df['date'].max() if not broker_df.empty else None
+
+        # Calculate current accumulation status
+        broker_status = []
+        for b in top_5:
+            broker_code = b['broker_code']
+            broker_data = broker_df[broker_df['broker_code'] == broker_code].sort_values('date', ascending=False)
+
+            # Check last 5 days for streak
+            last_5 = broker_data.head(5)
+            streak = 0
+            status = "NEUTRAL"
+            total_lot = 0
+            today_net = 0
+
+            if not last_5.empty:
+                today_net = last_5.iloc[0]['net_value'] if len(last_5) > 0 else 0
+
+                for _, row in last_5.iterrows():
+                    if row['net_value'] > 0:
+                        streak += 1
+                        total_lot += row.get('net_lot', 0)
+                    else:
+                        break
+
+                if streak >= 2:
+                    status = "ACCUM"
+                elif today_net < -1e9:
+                    status = "DIST"
+
+            # Get avg buy for this broker
+            avg_buy = 0
+            if not avg_buy_df.empty:
+                broker_avg = avg_buy_df[avg_buy_df['broker_code'] == broker_code]
+                if not broker_avg.empty:
+                    avg_buy = broker_avg.iloc[0]['avg_buy_price']
+
+            broker_status.append({
+                'broker': broker_code,
+                'win_rate': b['win_rate'],
+                'lead_time': b['avg_lead_time'],
+                'signals': b['successful_signals'],
+                'status': status,
+                'streak': streak,
+                'today_net': today_net,
+                'total_lot': total_lot,
+                'avg_buy': avg_buy
+            })
+
+        # Find brokers currently accumulating
+        accum_brokers = [b for b in broker_status if b['status'] == 'ACCUM']
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-crosshairs me-2"),
+                html.Span("Top 5 Broker Sensitivity Pattern", className="fw-bold"),
+                html.Small(" - Pola akumulasi sampai harga naik ≥10%", className="text-muted ms-2")
+            ]),
+            dbc.CardBody([
+                # Historical Pattern Table
+                html.Small("Historical Performance", className="text-muted fw-bold mb-2 d-block"),
+                dash_table.DataTable(
+                    data=[{
+                        'Rank': f"{'🥇' if i==0 else '🥈' if i==1 else '🥉' if i==2 else str(i+1)}",
+                        'Broker': b['broker'],
+                        'Win Rate': f"{b['win_rate']:.0f}%",
+                        'Lead Time': f"{b['lead_time']:.0f}d",
+                        'Signals': b['signals'],
+                        'Avg Buy': f"Rp {b['avg_buy']:,.0f}" if b['avg_buy'] > 0 else "-"
+                    } for i, b in enumerate(broker_status)],
+                    columns=[
+                        {'name': '', 'id': 'Rank'},
+                        {'name': 'Broker', 'id': 'Broker'},
+                        {'name': 'Win%', 'id': 'Win Rate'},
+                        {'name': 'Lead', 'id': 'Lead Time'},
+                        {'name': 'Sigs', 'id': 'Signals'},
+                        {'name': 'Avg Buy', 'id': 'Avg Buy'}
+                    ],
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '4px', 'fontSize': '11px'},
+                    style_header={'backgroundColor': '#404040', 'fontWeight': 'bold', 'fontSize': '10px'},
+                ),
+
+                html.Hr(className="my-2"),
+
+                # Current Status
+                html.Small("Current Status - Are they accumulating now?", className="text-muted fw-bold mb-2 d-block"),
+                dash_table.DataTable(
+                    data=[{
+                        'Broker': b['broker'],
+                        'Status': f"{'🟢 ACCUM' if b['status']=='ACCUM' else '🔴 DIST' if b['status']=='DIST' else '⚪ NEUTRAL'}",
+                        'Streak': f"{b['streak']}d" if b['streak'] > 0 else "-",
+                        'Today': f"{b['today_net']/1e9:+.1f}B",
+                        'Lot': f"{b['total_lot']/1e6:.1f}M" if b['total_lot'] > 0 else "-"
+                    } for b in broker_status],
+                    columns=[
+                        {'name': 'Broker', 'id': 'Broker'},
+                        {'name': 'Status', 'id': 'Status'},
+                        {'name': 'Streak', 'id': 'Streak'},
+                        {'name': 'Today', 'id': 'Today'},
+                        {'name': 'Tot Lot', 'id': 'Lot'}
+                    ],
+                    style_table={'overflowX': 'auto'},
+                    style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '4px', 'fontSize': '11px'},
+                    style_header={'backgroundColor': '#404040', 'fontWeight': 'bold', 'fontSize': '10px'},
+                ),
+
+                # Insight box
+                html.Div([
+                    html.Small("💡 Insight: ", className="fw-bold"),
+                    html.Small(
+                        f"{len(accum_brokers)} broker sensitif sedang akumulasi: {', '.join([b['broker'] for b in accum_brokers])}"
+                        if accum_brokers else "Belum ada broker sensitif yang mulai akumulasi",
+                        className="text-success" if accum_brokers else "text-muted"
+                    )
+                ], className="mt-2 p-2 rounded", style={"backgroundColor": "#2d3a2d" if accum_brokers else "#383838"}),
+
+                html.Hr(className="my-2"),
+
+                # Penjelasan Section
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Cara Baca: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("TABEL HISTORICAL:"),
+                        html.Br(),
+                        html.Strong("• Win%: "), "Persentase kejadian broker ini akumulasi → harga naik ≥10% dalam 10 hari. ",
+                        html.Span("Makin tinggi makin bagus!", className="text-success"),
+                        html.Br(),
+                        html.Strong("• Lead: "), "Rata-rata berapa hari SEBELUM harga naik, broker ini mulai akumulasi. ",
+                        "Lead 3d = beli 3 hari sebelum harga naik",
+                        html.Br(),
+                        html.Strong("• Sigs: "), "Jumlah sinyal berhasil (akumulasi → harga naik ≥10%)",
+                        html.Br(),
+                        html.Strong("• Avg Buy: "), "Harga rata-rata pembelian broker ini (60 hari)",
+                        html.Br(), html.Br(),
+                        html.Strong("TABEL CURRENT STATUS:"),
+                        html.Br(),
+                        html.Strong("• Status: "), "ACCUM = sedang akumulasi ≥2 hari, DIST = sedang distribusi, NEUTRAL = tidak ada pola",
+                        html.Br(),
+                        html.Strong("• Streak: "), "Berapa hari berturut-turut akumulasi",
+                        html.Br(),
+                        html.Strong("• Tot Lot: "), "Total lot yang dibeli selama streak",
+                        html.Br(), html.Br(),
+                        html.Strong("💡 Strategi: "), "Jika broker dengan Win% tinggi dan Lead Time pendek mulai akumulasi, ",
+                        html.Span("pertimbangkan untuk ikut beli!", className="text-warning")
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+            ])
+        ], className="mb-3", color="dark", outline=True)
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardHeader("🎯 Broker Sensitivity Pattern"),
+            dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
+        ], className="mb-3", color="dark")
+
+
+def create_broker_watchlist(stock_code='CDIA'):
+    """
+    Section 5: Broker Watchlist
+    - Accumulation streak
+    - Distribution warning
+    - Floating loss terbesar
+    """
+    try:
+        broker_df = get_broker_data(stock_code)
+        avg_buy_df = get_broker_avg_buy(stock_code, days=60)
+        price_df = get_price_data(stock_code)
+
+        if broker_df.empty:
+            return dbc.Card([
+                dbc.CardHeader("👁️ Broker Watchlist"),
+                dbc.CardBody(html.P("No data available", className="text-muted"))
+            ], className="mb-3", color="dark")
+
+        current_price = price_df['close_price'].iloc[-1] if not price_df.empty else 0
+
+        # Calculate streaks for all brokers
+        brokers = broker_df['broker_code'].unique()
+        broker_streaks = []
+
+        for broker in brokers:
+            b_data = broker_df[broker_df['broker_code'] == broker].sort_values('date', ascending=False)
+
+            # Calculate accumulation streak
+            accum_streak = 0
+            dist_streak = 0
+            total_net = b_data['net_value'].sum()
+
+            for _, row in b_data.iterrows():
+                if row['net_value'] > 0:
+                    if dist_streak == 0:
+                        accum_streak += 1
+                    else:
+                        break
+                elif row['net_value'] < 0:
+                    if accum_streak == 0:
+                        dist_streak += 1
+                    else:
+                        break
+                else:
+                    break
+
+            # Get avg buy
+            avg_buy = 0
+            floating_pct = 0
+            if not avg_buy_df.empty and current_price > 0:
+                broker_avg = avg_buy_df[avg_buy_df['broker_code'] == broker]
+                if not broker_avg.empty:
+                    avg_buy = broker_avg.iloc[0]['avg_buy_price']
+                    if avg_buy > 0:
+                        floating_pct = (current_price - avg_buy) / avg_buy * 100
+
+            broker_type = get_broker_info(broker)['type_name']
+
+            broker_streaks.append({
+                'broker': broker,
+                'type': broker_type,
+                'accum_streak': accum_streak,
+                'dist_streak': dist_streak,
+                'total_net': total_net,
+                'avg_buy': avg_buy,
+                'floating_pct': floating_pct
+            })
+
+        # Top accumulation streaks (>= 2 days)
+        accum_watch = [b for b in broker_streaks if b['accum_streak'] >= 2]
+        accum_watch.sort(key=lambda x: (x['accum_streak'], x['total_net']), reverse=True)
+        accum_watch = accum_watch[:5]
+
+        # Top distribution warning (>= 2 days)
+        dist_watch = [b for b in broker_streaks if b['dist_streak'] >= 2]
+        dist_watch.sort(key=lambda x: (x['dist_streak'], abs(x['total_net'])), reverse=True)
+        dist_watch = dist_watch[:5]
+
+        # Biggest floating loss
+        float_loss = [b for b in broker_streaks if b['floating_pct'] < -5 and b['avg_buy'] > 0]
+        float_loss.sort(key=lambda x: x['floating_pct'])
+        float_loss = float_loss[:5]
+
+        # Build list items
+        accum_items = [html.Div([
+            html.Span(f"{b['broker']} ", className="fw-bold"),
+            html.Span(f"{b['accum_streak']}d ", className="badge bg-success me-1"),
+            html.Small(f"{b['total_net']/1e9:+.1f}B", className="text-muted")
+        ], style={"fontSize": "11px"}) for b in accum_watch] if accum_watch else [html.Small("No streak", className="text-muted")]
+
+        dist_items = [html.Div([
+            html.Span(f"{b['broker']} ", className="fw-bold"),
+            html.Span(f"{b['dist_streak']}d ", className="badge bg-danger me-1"),
+            html.Small(f"{b['total_net']/1e9:.1f}B", className="text-muted")
+        ], style={"fontSize": "11px"}) for b in dist_watch] if dist_watch else [html.Small("No warning", className="text-muted")]
+
+        float_items = [html.Div([
+            html.Span(f"{b['broker']} ", className="fw-bold"),
+            html.Small(f"{b['floating_pct']:.1f}% ", className="text-danger"),
+            html.Small(f"@{b['avg_buy']:,.0f}", className="text-muted")
+        ], style={"fontSize": "11px"}) for b in float_loss] if float_loss else [html.Small("No significant loss", className="text-muted")]
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-eye me-2"),
+                html.Span("Broker Watchlist", className="fw-bold")
+            ]),
+            dbc.CardBody([
+                dbc.Row([
+                    # Accumulation Streak
+                    dbc.Col([
+                        html.Div([
+                            html.Small("🔥 Accumulation Streak", className="text-success fw-bold mb-2 d-block"),
+                            *accum_items
+                        ], className="p-2 rounded h-100", style={"backgroundColor": "#2d3a2d"})
+                    ], width=4),
+
+                    # Distribution Warning
+                    dbc.Col([
+                        html.Div([
+                            html.Small("⚠️ Distribution Warning", className="text-danger fw-bold mb-2 d-block"),
+                            *dist_items
+                        ], className="p-2 rounded h-100", style={"backgroundColor": "#3a2d2d"})
+                    ], width=4),
+
+                    # Floating Loss
+                    dbc.Col([
+                        html.Div([
+                            html.Small("💸 Floating Loss", className="text-warning fw-bold mb-2 d-block"),
+                            *float_items
+                        ], className="p-2 rounded h-100", style={"backgroundColor": "#3a3a2d"})
+                    ], width=4),
+                ]),
+
+                html.Hr(className="my-2"),
+
+                # Penjelasan Section
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Cara Baca: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("🔥 ACCUMULATION STREAK:"),
+                        html.Br(),
+                        "Broker yang BELI berturut-turut ≥2 hari. Badge menunjukkan jumlah hari streak.",
+                        html.Br(),
+                        html.Span("Streak panjang + Net besar = broker punya conviction kuat. Ikuti mereka!", className="text-success"),
+                        html.Br(), html.Br(),
+                        html.Strong("⚠️ DISTRIBUTION WARNING:"),
+                        html.Br(),
+                        "Broker yang JUAL berturut-turut ≥2 hari. ",
+                        html.Span("Hati-hati jika broker besar/sensitif muncul di sini!", className="text-danger"),
+                        html.Br(), html.Br(),
+                        html.Strong("💸 FLOATING LOSS:"),
+                        html.Br(),
+                        "Broker yang Avg Buy-nya >5% di atas harga sekarang (floating rugi).",
+                        html.Br(),
+                        "Implikasi: Mungkin mereka akan DEFEND di level Avg Buy atau CUT LOSS.",
+                        html.Br(),
+                        "• Defend = support sementara di Avg Buy mereka",
+                        html.Br(),
+                        "• Cut Loss = tekanan jual tambahan",
+                        html.Br(), html.Br(),
+                        html.Strong("💡 Strategi: "),
+                        html.Br(),
+                        "• Ikuti broker dengan Accum Streak panjang",
+                        html.Br(),
+                        "• Hindari/jual jika banyak Dist Warning dari broker besar",
+                        html.Br(),
+                        "• Perhatikan level Avg Buy broker Float Loss sebagai potensi support/resistance"
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+            ])
+        ], className="mb-3", color="dark", outline=True)
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardHeader("👁️ Broker Watchlist"),
+            dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
+        ], className="mb-3", color="dark")
+
+
+# ============================================================
 # PAGE: COMPREHENSIVE ANALYSIS (Merged Bandarmology + Summary)
 # ============================================================
 
@@ -2282,11 +3093,28 @@ def create_dashboard_page(stock_code='CDIA'):
             dbc.CardBody(id="flow-chart-container")
         ], className="mb-4"),
 
-        # Top Brokers
-        dbc.Card([
-            dbc.CardHeader("Top Brokers Summary"),
-            dbc.CardBody(id="top-brokers-container")
-        ], className="mb-4"),
+        # ============================================================
+        # NEW SECTIONS - Replacing Top 10 Acc/Dist duplicates
+        # ============================================================
+
+        # Row 1: Quick Sentiment + Key Metrics
+        dbc.Row([
+            dbc.Col([
+                html.Div(id="sentiment-container")
+            ], width=6),
+            dbc.Col([
+                html.Div(id="metrics-container")
+            ], width=6),
+        ], className="mb-3"),
+
+        # Row 2: Broker Movement Alert
+        html.Div(id="movement-container"),
+
+        # Row 3: Broker Sensitivity Pattern
+        html.Div(id="sensitivity-container"),
+
+        # Row 4: Broker Watchlist
+        html.Div(id="watchlist-container"),
 
         # Broker Detail
         dbc.Card([
@@ -3052,7 +3880,10 @@ def update_broker_options(pathname, stock_code):
 
 @app.callback(
     [Output("summary-cards", "children"), Output("price-chart-container", "children"),
-     Output("flow-chart-container", "children"), Output("top-brokers-container", "children"),
+     Output("flow-chart-container", "children"),
+     Output("sentiment-container", "children"), Output("metrics-container", "children"),
+     Output("movement-container", "children"), Output("sensitivity-container", "children"),
+     Output("watchlist-container", "children"),
      Output("last-refresh", "children")],
     [Input("refresh-btn", "n_clicks"), Input('selected-stock', 'data')],
     prevent_initial_call=False
@@ -3063,7 +3894,12 @@ def refresh_dashboard(n_clicks, stock_code):
         create_summary_cards(stock_code),
         create_price_chart(stock_code),
         create_broker_flow_chart(stock_code),
-        create_top_brokers_table(stock_code),
+        # New sections replacing Top Brokers Summary
+        create_quick_sentiment_summary(stock_code),
+        create_key_metrics_compact(stock_code),
+        create_broker_movement_alert(stock_code),
+        create_broker_sensitivity_pattern(stock_code),
+        create_broker_watchlist(stock_code),
         f"Refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
 
