@@ -382,29 +382,39 @@ def create_upload_page():
                             ], width=4),
                         ]),
 
-                        # File Upload
-                        dcc.Upload(
-                            id='upload-data',
-                            children=html.Div([
-                                'Drag and Drop atau ',
-                                html.A('Klik untuk Upload', className="text-primary")
-                            ]),
-                            style={
-                                'width': '100%',
-                                'height': '100px',
-                                'lineHeight': '100px',
-                                'borderWidth': '2px',
-                                'borderStyle': 'dashed',
-                                'borderRadius': '10px',
-                                'textAlign': 'center',
-                                'margin': '10px 0',
-                                'backgroundColor': '#2a2a2a'
-                            },
-                            multiple=False,
-                            accept='.xlsx,.xls'
+                        # File Upload with Loading
+                        dcc.Loading(
+                            id="upload-loading",
+                            type="circle",
+                            color="#0d6efd",
+                            children=[
+                                dcc.Upload(
+                                    id='upload-data',
+                                    children=html.Div([
+                                        html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
+                                        html.Br(),
+                                        'Drag and Drop atau ',
+                                        html.A('Klik untuk Upload', className="text-primary")
+                                    ]),
+                                    style={
+                                        'width': '100%',
+                                        'height': '120px',
+                                        'lineHeight': '40px',
+                                        'borderWidth': '2px',
+                                        'borderStyle': 'dashed',
+                                        'borderRadius': '10px',
+                                        'textAlign': 'center',
+                                        'padding': '20px',
+                                        'margin': '10px 0',
+                                        'backgroundColor': '#2a2a2a',
+                                        'cursor': 'pointer'
+                                    },
+                                    multiple=False,
+                                    accept='.xlsx,.xls'
+                                ),
+                                html.Div(id='upload-status', className="mt-3"),
+                            ]
                         ),
-
-                        html.Div(id='upload-status', className="mt-3"),
 
                         html.Hr(),
 
@@ -2899,9 +2909,13 @@ def update_broker_detail(broker_code, stock_code):
 @app.callback(
     [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children')],
     [Input('upload-data', 'contents')],
-    [State('upload-data', 'filename'), State('upload-stock-code', 'value')]
+    [State('upload-data', 'filename'), State('upload-stock-code', 'value')],
+    prevent_initial_call=True
 )
 def handle_upload(contents, filename, stock_code):
+    import tempfile
+    import traceback
+
     stocks_list = create_stocks_list()
 
     if contents is None:
@@ -2913,27 +2927,46 @@ def handle_upload(contents, filename, stock_code):
     stock_code = stock_code.upper().strip()
 
     try:
+        print(f"[UPLOAD] Starting upload for {stock_code}, file: {filename}")
+
         content_type, content_string = contents.split(',')
         decoded = base64.b64decode(content_string)
 
-        # Save to temp file
-        temp_path = os.path.join(os.path.dirname(__file__), f'temp_{stock_code}.xlsx')
+        print(f"[UPLOAD] Decoded file size: {len(decoded)} bytes")
+
+        # Save to temp file (use system temp directory for cloud compatibility)
+        temp_dir = tempfile.gettempdir()
+        temp_path = os.path.join(temp_dir, f'upload_{stock_code}_{datetime.now().strftime("%Y%m%d%H%M%S")}.xlsx')
+
+        print(f"[UPLOAD] Saving to temp path: {temp_path}")
+
         with open(temp_path, 'wb') as f:
             f.write(decoded)
+
+        print(f"[UPLOAD] File saved, parsing...")
 
         # Parse and import
         broker_df, price_df = read_excel_data(temp_path)
 
+        print(f"[UPLOAD] Parsed - Price: {len(price_df)} rows, Broker: {len(broker_df)} rows")
+
         price_count = import_price_data(price_df, stock_code)
+        print(f"[UPLOAD] Price imported: {price_count} records")
+
         broker_count = import_broker_data(broker_df, stock_code)
+        print(f"[UPLOAD] Broker imported: {broker_count} records")
 
         # Clean up
-        os.remove(temp_path)
+        try:
+            os.remove(temp_path)
+        except:
+            pass  # Ignore cleanup errors
 
         status = dbc.Alert([
             html.H5("Import Berhasil!", className="alert-heading"),
             html.P([
                 f"Stock: {stock_code}", html.Br(),
+                f"File: {filename}", html.Br(),
                 f"Price records: {price_count}", html.Br(),
                 f"Broker records: {broker_count}"
             ])
@@ -2944,10 +2977,23 @@ def handle_upload(contents, filename, stock_code):
             html.P(f"  - Price: {price_count} records, Broker: {broker_count} records", className="text-muted small")
         ])
 
+        print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records")
+
         return status, create_stocks_list(), log
 
     except Exception as e:
-        return dbc.Alert(f"Error: {str(e)}", color="danger"), stocks_list, html.Div(f"Error: {e}", className="text-danger")
+        error_detail = traceback.format_exc()
+        print(f"[UPLOAD] ERROR: {str(e)}")
+        print(f"[UPLOAD] Traceback: {error_detail}")
+
+        return dbc.Alert([
+            html.H5("Error Import!", className="alert-heading"),
+            html.P(f"Error: {str(e)}"),
+            html.Details([
+                html.Summary("Detail Error"),
+                html.Pre(error_detail, style={'fontSize': '10px', 'maxHeight': '200px', 'overflow': 'auto'})
+            ])
+        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger")
 
 
 def create_stocks_list():
