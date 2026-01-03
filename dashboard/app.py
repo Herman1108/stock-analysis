@@ -20,7 +20,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 from datetime import datetime, timedelta
 
-from database import execute_query, get_cursor
+from database import execute_query, get_cursor, clear_cache, get_cache_stats, preload_stock_data
 from analyzer import (
     get_price_data, get_broker_data, run_full_analysis,
     get_top_accumulators, get_top_distributors,
@@ -59,10 +59,31 @@ FA_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.DARKLY, FA_CSS],
-    suppress_callback_exceptions=True
+    suppress_callback_exceptions=True,
+    compress=True,  # Enable response compression
+    meta_tags=[
+        {"name": "viewport", "content": "width=device-width, initial-scale=1"},
+        {"http-equiv": "X-UA-Compatible", "content": "IE=edge"}
+    ]
 )
 app.title = "Stock Broker Analysis"
 server = app.server
+
+# Enable Gzip compression for all responses
+try:
+    from flask_compress import Compress
+    Compress(server)
+    print("Flask-Compress enabled")
+except ImportError:
+    print("Flask-Compress not available, skipping compression")
+
+# Configure server for better performance
+server.config['COMPRESS_MIMETYPES'] = [
+    'text/html', 'text/css', 'text/xml', 'application/json',
+    'application/javascript', 'text/javascript'
+]
+server.config['COMPRESS_LEVEL'] = 6
+server.config['COMPRESS_MIN_SIZE'] = 500
 
 # ============================================================
 # HELPER FUNCTIONS
