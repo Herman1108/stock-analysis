@@ -282,35 +282,36 @@
   /* ============================================
      SCORING REFERENCE - Full width stacked on mobile
      ============================================ */
-  .row > [class*='col-md-4'],
-  .row > [class*='col-lg-4'],
-  .row > [class*='col-md-6'],
-  .row > [class*='col-lg-6'] {
+  .col-md-4,
+  .col-lg-4,
+  .col-md-6,
+  .col-lg-6,
+  [class*='col-md-4'],
+  [class*='col-lg-4'],
+  [class*='col-md-6'],
+  [class*='col-lg-6'] {
     flex: 0 0 100% !important;
     max-width: 100% !important;
-    margin-bottom: 0.75rem !important;
+    width: 100% !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  /* Force row to stack vertically */
+  .row {
+    flex-direction: column !important;
+  }
+
+  /* But keep summary cards as 2-column grid */
+  .card > .card-body > .row {
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
   }
 
   /* ============================================
-     CHARTS - Fixed height with horizontal scroll
+     CHARTS - Keep original, just responsive width
      ============================================ */
-  .card-body > .js-plotly-plot,
-  .card-body > div > .js-plotly-plot {
-    width: 100% !important;
-    overflow-x: auto !important;
-    overflow-y: hidden !important;
-    -webkit-overflow-scrolling: touch !important;
-  }
-
-  /* Chart container - fixed dimensions */
   .js-plotly-plot {
-    max-height: 350px !important;
-    overflow: auto !important;
-  }
-
-  .js-plotly-plot .plotly {
-    min-width: 500px !important;
-    width: max-content !important;
+    width: 100% !important;
   }
 
   /* ============================================
