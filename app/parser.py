@@ -251,8 +251,10 @@ def import_price_data(price_df: pd.DataFrame, stock_code: str = 'CDIA'):
     return records_imported
 
 def import_broker_data(broker_df: pd.DataFrame, stock_code: str = 'CDIA'):
-    """Import data broker ke database (REPLACE mode - data lama di-overwrite)"""
-    print(f"Importing {len(broker_df)} broker records...")
+    """Import data broker ke database dengan BATCH INSERT (optimized for speed)"""
+    from psycopg2.extras import execute_batch
+
+    print(f"Importing {len(broker_df)} broker records (batch mode)...")
 
     insert_query = """
         INSERT INTO broker_summary
@@ -270,29 +272,44 @@ def import_broker_data(broker_df: pd.DataFrame, stock_code: str = 'CDIA'):
             net_lot = EXCLUDED.net_lot
     """
 
-    records_imported = 0
-    with get_cursor() as cursor:
-        for _, row in broker_df.iterrows():
-            try:
-                net_value = row['buy_value'] - row['sell_value']
-                net_lot = row['buy_lot'] - row['sell_lot']
+    # Prepare batch data
+    batch_data = []
+    for _, row in broker_df.iterrows():
+        net_value = row['buy_value'] - row['sell_value']
+        net_lot = row['buy_lot'] - row['sell_lot']
+        batch_data.append((
+            stock_code,
+            row['date'],
+            row['broker_code'],
+            row['buy_value'],
+            row['buy_lot'],
+            row['buy_avg'],
+            row['sell_value'],
+            row['sell_lot'],
+            row['sell_avg'],
+            net_value,
+            net_lot
+        ))
 
-                cursor.execute(insert_query, (
-                    stock_code,
-                    row['date'],
-                    row['broker_code'],
-                    row['buy_value'],
-                    row['buy_lot'],
-                    row['buy_avg'],
-                    row['sell_value'],
-                    row['sell_lot'],
-                    row['sell_avg'],
-                    net_value,
-                    net_lot
-                ))
-                records_imported += 1
-            except Exception as e:
-                print(f"Error importing broker {row['broker_code']} on {row['date']}: {e}")
+    records_imported = 0
+    try:
+        with get_cursor() as cursor:
+            # Batch insert - much faster than individual inserts
+            # page_size=500 means 500 records per batch
+            execute_batch(cursor, insert_query, batch_data, page_size=500)
+            records_imported = len(batch_data)
+            print(f"Batch import successful: {records_imported} records")
+    except Exception as e:
+        print(f"Batch import error: {e}")
+        # Fallback to individual inserts if batch fails
+        print("Falling back to individual inserts...")
+        with get_cursor() as cursor:
+            for data in batch_data:
+                try:
+                    cursor.execute(insert_query, data)
+                    records_imported += 1
+                except Exception as inner_e:
+                    print(f"Error: {inner_e}")
 
     print(f"Imported {records_imported} broker records")
     return records_imported

@@ -3831,10 +3831,11 @@ def create_broker_history_chart(broker_code, stock_code='CDIA'):
 # MAIN LAYOUT
 # ============================================================
 
+# Render navbar sekali di layout (tidak re-render setiap URL change)
 app.layout = html.Div([
-    dcc.Store(id='selected-stock', data='CDIA'),
+    dcc.Store(id='selected-stock', data='CDIA', storage_type='session'),  # Persist across page navigation
     dcc.Location(id='url', refresh=False),
-    html.Div(id='navbar-container'),
+    create_navbar(),  # Navbar statis, tidak re-render
     dbc.Container(id='page-content', fluid=True)
 ])
 
@@ -3842,9 +3843,15 @@ app.layout = html.Div([
 # CALLBACKS
 # ============================================================
 
-@app.callback(Output('navbar-container', 'children'), Input('url', 'pathname'))
-def update_navbar(pathname):
-    return create_navbar()
+# Sync dropdown value dengan store (untuk saat page reload/initial load)
+@app.callback(
+    Output('stock-selector', 'value'),
+    Input('selected-stock', 'data'),
+    prevent_initial_call=True
+)
+def sync_dropdown_with_store(stored_value):
+    """Sync dropdown dengan store untuk maintain selection"""
+    return stored_value if stored_value else 'CDIA'
 
 @app.callback(Output('selected-stock', 'data'), Input('stock-selector', 'value'))
 def update_selected_stock(value):
