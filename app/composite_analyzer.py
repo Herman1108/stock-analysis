@@ -846,7 +846,7 @@ def analyze_support_resistance(stock_code: str) -> Dict:
     # Get data from all methods
     volume_profile = calculate_volume_profile(stock_code)
     price_bounces = detect_price_bounces(stock_code)
-    broker_pl = analyze_broker_floating_pl(stock_code)
+    broker_pl = analyze_avg_buy_position(stock_code)
 
     current_price = volume_profile.get('current_price') or price_bounces.get('current_price') or 0
 
