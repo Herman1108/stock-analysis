@@ -287,26 +287,41 @@
     margin-bottom: 1rem !important;
   }
 
-  /* Reference tables - horizontal scroll instead of compress */
-  .card-body .table-responsive,
-  .table-responsive {
+  /* ONLY Dash DataTable - horizontal scroll */
+  .dash-table-container {
     overflow-x: auto !important;
     -webkit-overflow-scrolling: touch !important;
-    display: block !important;
-    width: 100% !important;
+    max-width: 100% !important;
   }
 
-  .card-body table,
-  .dash-table-container {
-    font-size: 0.75rem !important;
-    min-width: 500px !important;
-    width: max-content !important;
+  .dash-spreadsheet-container {
+    overflow-x: auto !important;
+    min-width: 100% !important;
   }
 
-  .card-body table td,
-  .card-body table th {
-    padding: 0.3rem 0.5rem !important;
+  .dash-table-container .dash-spreadsheet {
+    font-size: 0.7rem !important;
+  }
+
+  .dash-table-container td,
+  .dash-table-container th {
+    padding: 0.25rem 0.4rem !important;
     white-space: nowrap !important;
+    min-width: 60px !important;
+  }
+
+  /* Regular content - NO horizontal scroll, wrap text */
+  .card-body {
+    overflow-x: hidden !important;
+    overflow-y: visible !important;
+  }
+
+  .card-body p,
+  .card-body span,
+  .card-body div:not(.dash-table-container):not(.dash-spreadsheet-container) {
+    white-space: normal !important;
+    word-wrap: break-word !important;
+    overflow-wrap: break-word !important;
   }
 
   /* Lists in reference sections */
