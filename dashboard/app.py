@@ -329,6 +329,354 @@ def get_support_resistance_from_positions(position_df: pd.DataFrame) -> dict:
 
 
 # ============================================================
+# PHASE ANALYSIS FUNCTIONS
+# ============================================================
+
+def get_recent_price_data(stock_code: str, days: int = 60) -> pd.DataFrame:
+    """Get recent price data for phase analysis"""
+    query = """
+        SELECT date, open_price, high_price, low_price, close_price, volume
+        FROM stock_daily
+        WHERE stock_code = %s
+        ORDER BY date DESC
+        LIMIT %s
+    """
+    results = execute_query(query, (stock_code, days))
+    if results:
+        df = pd.DataFrame(results)
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date')
+        return df
+    return pd.DataFrame()
+
+
+def get_recent_broker_flow(stock_code: str, days: int = 30) -> dict:
+    """Get recent broker flow analysis (30 days)"""
+    query = """
+        SELECT
+            date,
+            SUM(CASE WHEN net_value > 0 THEN net_value ELSE 0 END) as total_buy_value,
+            SUM(CASE WHEN net_value < 0 THEN ABS(net_value) ELSE 0 END) as total_sell_value,
+            SUM(net_value) as net_value,
+            SUM(CASE WHEN net_lot > 0 THEN net_lot ELSE 0 END) as total_buy_lot,
+            SUM(CASE WHEN net_lot < 0 THEN ABS(net_lot) ELSE 0 END) as total_sell_lot,
+            SUM(net_lot) as net_lot,
+            COUNT(DISTINCT CASE WHEN net_lot > 0 THEN broker_code END) as buyer_count,
+            COUNT(DISTINCT CASE WHEN net_lot < 0 THEN broker_code END) as seller_count
+        FROM broker_summary
+        WHERE stock_code = %s AND date >= CURRENT_DATE - INTERVAL '%s days'
+        GROUP BY date
+        ORDER BY date
+    """
+    results = execute_query(query, (stock_code, days))
+
+    if not results:
+        return {
+            'net_buy_days': 0, 'net_sell_days': 0,
+            'total_net_lot': 0, 'total_net_value': 0,
+            'avg_buyer_count': 0, 'avg_seller_count': 0,
+            'trend': 'NEUTRAL', 'daily_data': []
+        }
+
+    df = pd.DataFrame(results)
+
+    net_buy_days = len(df[df['net_lot'] > 0])
+    net_sell_days = len(df[df['net_lot'] < 0])
+    total_net_lot = df['net_lot'].sum()
+    total_net_value = df['net_value'].sum()
+    avg_buyer_count = df['buyer_count'].mean()
+    avg_seller_count = df['seller_count'].mean()
+
+    # Determine trend
+    if net_buy_days > net_sell_days * 1.5 and total_net_lot > 0:
+        trend = 'ACCUMULATION'
+    elif net_sell_days > net_buy_days * 1.5 and total_net_lot < 0:
+        trend = 'DISTRIBUTION'
+    else:
+        trend = 'NEUTRAL'
+
+    return {
+        'net_buy_days': net_buy_days,
+        'net_sell_days': net_sell_days,
+        'total_net_lot': total_net_lot,
+        'total_net_value': total_net_value,
+        'avg_buyer_count': avg_buyer_count,
+        'avg_seller_count': avg_seller_count,
+        'trend': trend,
+        'daily_data': df.to_dict('records') if not df.empty else []
+    }
+
+
+def get_foreign_flow(stock_code: str, days: int = 30) -> dict:
+    """Get foreign investor flow"""
+    # Foreign brokers typically have codes starting with specific letters
+    foreign_codes = ['CC', 'CG', 'CP', 'CS', 'DB', 'GI', 'GS', 'KK', 'KZ', 'LG',
+                     'ML', 'MS', 'NI', 'RX', 'SK', 'UB', 'XA', 'YP', 'ZP']
+
+    placeholders = ','.join(['%s'] * len(foreign_codes))
+    query = f"""
+        SELECT
+            date,
+            SUM(net_value) as foreign_net_value,
+            SUM(net_lot) as foreign_net_lot
+        FROM broker_summary
+        WHERE stock_code = %s
+          AND date >= CURRENT_DATE - INTERVAL '{days} days'
+          AND broker_code IN ({placeholders})
+        GROUP BY date
+        ORDER BY date
+    """
+
+    params = [stock_code] + foreign_codes
+    results = execute_query(query, tuple(params))
+
+    if not results:
+        return {'total_net_lot': 0, 'total_net_value': 0, 'trend': 'NEUTRAL', 'consecutive_days': 0}
+
+    df = pd.DataFrame(results)
+    total_net_lot = df['foreign_net_lot'].sum()
+    total_net_value = df['foreign_net_value'].sum()
+
+    # Calculate consecutive days of same direction
+    if len(df) > 0:
+        last_direction = 1 if df['foreign_net_lot'].iloc[-1] > 0 else -1
+        consecutive = 0
+        for i in range(len(df) - 1, -1, -1):
+            current_direction = 1 if df['foreign_net_lot'].iloc[i] > 0 else -1
+            if current_direction == last_direction:
+                consecutive += 1
+            else:
+                break
+    else:
+        consecutive = 0
+
+    if total_net_lot > 0:
+        trend = 'INFLOW'
+    elif total_net_lot < 0:
+        trend = 'OUTFLOW'
+    else:
+        trend = 'NEUTRAL'
+
+    return {
+        'total_net_lot': total_net_lot,
+        'total_net_value': total_net_value,
+        'trend': trend,
+        'consecutive_days': consecutive
+    }
+
+
+def detect_market_phase(stock_code: str) -> dict:
+    """
+    Detect current market phase based on price action and broker flow
+
+    Phases:
+    - ACCUMULATION: Smart money buying, price sideways/bottom
+    - MARKUP: Price trending up
+    - DISTRIBUTION: Smart money selling, price sideways/top
+    - MARKDOWN: Price trending down
+    """
+    # Get price data
+    price_df = get_recent_price_data(stock_code, 60)
+    if price_df.empty:
+        return {'phase': 'UNKNOWN', 'confidence': 0, 'signals': []}
+
+    # Get broker flow
+    broker_flow = get_recent_broker_flow(stock_code, 30)
+    foreign_flow = get_foreign_flow(stock_code, 30)
+
+    signals = []
+    phase_scores = {'ACCUMULATION': 0, 'MARKUP': 0, 'DISTRIBUTION': 0, 'MARKDOWN': 0}
+
+    # Price trend analysis (20 days)
+    if len(price_df) >= 20:
+        recent_20 = price_df.tail(20)
+        price_change_20d = (recent_20['close_price'].iloc[-1] - recent_20['close_price'].iloc[0]) / recent_20['close_price'].iloc[0] * 100
+
+        # Volatility (range)
+        avg_range = ((recent_20['high_price'] - recent_20['low_price']) / recent_20['low_price'] * 100).mean()
+
+        # Higher highs / lower lows pattern
+        highs = recent_20['high_price'].values
+        lows = recent_20['low_price'].values
+        higher_highs = sum(1 for i in range(1, len(highs)) if highs[i] > highs[i-1])
+        lower_lows = sum(1 for i in range(1, len(lows)) if lows[i] < lows[i-1])
+
+        # Price trend signals
+        if price_change_20d > 10:
+            signals.append(('Harga naik >10% dalam 20 hari', 'MARKUP'))
+            phase_scores['MARKUP'] += 2
+        elif price_change_20d < -10:
+            signals.append(('Harga turun >10% dalam 20 hari', 'MARKDOWN'))
+            phase_scores['MARKDOWN'] += 2
+        elif abs(price_change_20d) < 5:
+            if broker_flow['trend'] == 'ACCUMULATION':
+                signals.append(('Harga sideways + broker akumulasi', 'ACCUMULATION'))
+                phase_scores['ACCUMULATION'] += 2
+            elif broker_flow['trend'] == 'DISTRIBUTION':
+                signals.append(('Harga sideways + broker distribusi', 'DISTRIBUTION'))
+                phase_scores['DISTRIBUTION'] += 2
+
+        # Pattern signals
+        if higher_highs > 12:
+            signals.append(('Higher highs dominan (uptrend)', 'MARKUP'))
+            phase_scores['MARKUP'] += 1
+        if lower_lows > 12:
+            signals.append(('Lower lows dominan (downtrend)', 'MARKDOWN'))
+            phase_scores['MARKDOWN'] += 1
+
+        # Volatility signals
+        if avg_range < 2:
+            signals.append(('Volatilitas rendah (konsolidasi)', 'ACCUMULATION'))
+            phase_scores['ACCUMULATION'] += 1
+
+    # Broker flow signals
+    if broker_flow['trend'] == 'ACCUMULATION':
+        signals.append((f"Net buy {broker_flow['net_buy_days']} hari dari 30 hari", 'ACCUMULATION'))
+        phase_scores['ACCUMULATION'] += 2
+    elif broker_flow['trend'] == 'DISTRIBUTION':
+        signals.append((f"Net sell {broker_flow['net_sell_days']} hari dari 30 hari", 'DISTRIBUTION'))
+        phase_scores['DISTRIBUTION'] += 2
+
+    # Foreign flow signals
+    if foreign_flow['trend'] == 'INFLOW':
+        signals.append((f"Foreign inflow {foreign_flow['consecutive_days']} hari berturut", 'ACCUMULATION'))
+        phase_scores['ACCUMULATION'] += 1
+        phase_scores['MARKUP'] += 1
+    elif foreign_flow['trend'] == 'OUTFLOW':
+        signals.append((f"Foreign outflow {foreign_flow['consecutive_days']} hari berturut", 'DISTRIBUTION'))
+        phase_scores['DISTRIBUTION'] += 1
+        phase_scores['MARKDOWN'] += 1
+
+    # Determine phase
+    max_score = max(phase_scores.values())
+    if max_score == 0:
+        phase = 'UNKNOWN'
+        confidence = 0
+    else:
+        phase = max(phase_scores, key=phase_scores.get)
+        total_signals = sum(phase_scores.values())
+        confidence = int((max_score / total_signals) * 100) if total_signals > 0 else 0
+
+    return {
+        'phase': phase,
+        'confidence': confidence,
+        'signals': signals,
+        'broker_flow': broker_flow,
+        'foreign_flow': foreign_flow,
+        'phase_scores': phase_scores
+    }
+
+
+def create_phase_analysis_card(stock_code: str, current_price: float):
+    """Create the Phase Analysis UI card"""
+    phase_data = detect_market_phase(stock_code)
+
+    # Phase colors and icons
+    phase_styles = {
+        'ACCUMULATION': {'color': '#17a2b8', 'icon': 'fa-layer-group', 'label': 'ACCUMULATION'},
+        'MARKUP': {'color': '#28a745', 'icon': 'fa-arrow-trend-up', 'label': 'MARKUP / RALLY'},
+        'DISTRIBUTION': {'color': '#ffc107', 'icon': 'fa-hand-holding-dollar', 'label': 'DISTRIBUTION'},
+        'MARKDOWN': {'color': '#dc3545', 'icon': 'fa-arrow-trend-down', 'label': 'MARKDOWN / DECLINE'},
+        'UNKNOWN': {'color': '#6c757d', 'icon': 'fa-question', 'label': 'UNKNOWN'}
+    }
+
+    phase = phase_data['phase']
+    style = phase_styles.get(phase, phase_styles['UNKNOWN'])
+
+    # Create signal list
+    signal_items = []
+    for signal_text, signal_phase in phase_data['signals']:
+        signal_color = phase_styles.get(signal_phase, {}).get('color', '#6c757d')
+        signal_items.append(
+            html.Li([
+                html.I(className="fas fa-circle me-2", style={"color": signal_color, "fontSize": "8px"}),
+                signal_text
+            ], className="mb-1")
+        )
+
+    # Broker flow summary
+    broker_flow = phase_data['broker_flow']
+    foreign_flow = phase_data['foreign_flow']
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="fas fa-chart-line me-2"),
+                "Phase Analysis (30 Hari Terakhir)"
+            ], className="mb-0")
+        ]),
+        dbc.CardBody([
+            # Current Phase Indicator
+            html.Div([
+                html.Div([
+                    html.I(className=f"fas {style['icon']} me-2", style={"fontSize": "24px"}),
+                    html.Span(style['label'], className="fw-bold", style={"fontSize": "20px"})
+                ], style={"color": style['color']}),
+                html.Div([
+                    html.Small(f"Confidence: {phase_data['confidence']}%", className="text-muted")
+                ])
+            ], className="text-center mb-3 p-3", style={
+                "backgroundColor": "#2a2a2a",
+                "borderRadius": "10px",
+                "border": f"2px solid {style['color']}"
+            }),
+
+            # Flow Summary
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.Small("Broker Flow", className="text-muted d-block"),
+                        html.Span(
+                            f"{broker_flow['net_buy_days']} Buy / {broker_flow['net_sell_days']} Sell days",
+                            className="fw-bold"
+                        ),
+                        html.Br(),
+                        html.Small(
+                            f"Net: {broker_flow['total_net_lot']:+,.0f} lot",
+                            className="text-success" if broker_flow['total_net_lot'] > 0 else "text-danger"
+                        )
+                    ], className="text-center p-2", style={"backgroundColor": "#353535", "borderRadius": "5px"})
+                ], md=6),
+                dbc.Col([
+                    html.Div([
+                        html.Small("Foreign Flow", className="text-muted d-block"),
+                        html.Span(
+                            foreign_flow['trend'],
+                            className="fw-bold",
+                            style={"color": "#28a745" if foreign_flow['trend'] == 'INFLOW' else "#dc3545" if foreign_flow['trend'] == 'OUTFLOW' else "#6c757d"}
+                        ),
+                        html.Br(),
+                        html.Small(
+                            f"Net: {foreign_flow['total_net_lot']:+,.0f} lot",
+                            className="text-success" if foreign_flow['total_net_lot'] > 0 else "text-danger"
+                        )
+                    ], className="text-center p-2", style={"backgroundColor": "#353535", "borderRadius": "5px"})
+                ], md=6),
+            ], className="mb-3"),
+
+            # Signals
+            html.Hr(),
+            html.H6("Sinyal Terdeteksi:", className="mb-2"),
+            html.Ul(signal_items if signal_items else [
+                html.Li("Tidak ada sinyal kuat", className="text-muted")
+            ], className="small mb-3", style={"paddingLeft": "20px"}),
+
+            # Phase explanation
+            html.Hr(),
+            html.Div([
+                html.H6("Cara Baca:", className="text-info mb-2"),
+                html.Ul([
+                    html.Li([html.Strong("ACCUMULATION: ", style={"color": "#17a2b8"}), "Smart money sedang beli, harga sideways di bottom"]),
+                    html.Li([html.Strong("MARKUP: ", style={"color": "#28a745"}), "Harga uptrend, momentum bullish"]),
+                    html.Li([html.Strong("DISTRIBUTION: ", style={"color": "#ffc107"}), "Smart money sedang jual, harga sideways di top"]),
+                    html.Li([html.Strong("MARKDOWN: ", style={"color": "#dc3545"}), "Harga downtrend, momentum bearish"]),
+                ], className="small")
+            ])
+        ])
+    ])
+
+
+# ============================================================
 # METRIC EXPLANATIONS (untuk user minimal knowledge)
 # ============================================================
 METRIC_EXPLANATIONS = {
@@ -4503,65 +4851,8 @@ def create_position_page(stock_code='CDIA'):
                     ])
                 ], className="mb-4"),
 
-                # Net Sellers
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.H5([
-                            html.I(className="fas fa-sign-out-alt me-2"),
-                            "Top 10 Net Sellers"
-                        ], className="mb-0 text-danger")
-                    ]),
-                    dbc.CardBody([
-                        dash_table.DataTable(
-                            data=top_sellers[[
-                                'broker_code', 'broker_type', 'net_lot', 'total_sell_lot'
-                            ]].to_dict('records') if not top_sellers.empty else [],
-                            columns=[
-                                {'name': 'Broker', 'id': 'broker_code'},
-                                {'name': 'Type', 'id': 'broker_type'},
-                                {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
-                                 'format': {'specifier': ',.0f'}},
-                                {'name': 'Total Sell', 'id': 'total_sell_lot', 'type': 'numeric',
-                                 'format': {'specifier': ',.0f'}},
-                            ],
-                            style_table={'overflowX': 'auto'},
-                            style_cell={'textAlign': 'center', 'padding': '8px',
-                                       'backgroundColor': '#303030', 'color': 'white'},
-                            style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
-                            style_data_conditional=[
-                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
-                                # Broker type colors
-                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_code'},
-                                 'color': '#dc3545', 'fontWeight': 'bold'},
-                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_type'},
-                                 'backgroundColor': '#dc3545', 'color': 'white'},
-                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_code'},
-                                 'color': '#28a745', 'fontWeight': 'bold'},
-                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_type'},
-                                 'backgroundColor': '#28a745', 'color': 'white'},
-                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_code'},
-                                 'color': '#6f42c1', 'fontWeight': 'bold'},
-                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_type'},
-                                 'backgroundColor': '#6f42c1', 'color': 'white'},
-                                # Net lot always red for sellers
-                                {'if': {'column_id': 'net_lot'}, 'color': '#ff4444'},
-                            ],
-                            page_size=10,
-                        ),
-                        # Legend
-                        html.Div([
-                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#dc3545", "fontSize": "8px"}), "Asing "], className="me-3", style={"fontSize": "11px"}),
-                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#28a745", "fontSize": "8px"}), "BUMN "], className="me-3", style={"fontSize": "11px"}),
-                            html.Span([html.I(className="fas fa-circle me-1", style={"color": "#6f42c1", "fontSize": "8px"}), "Lokal "], style={"fontSize": "11px"}),
-                        ], className="mt-2 mb-2"),
-                        html.Hr(),
-                        html.Small([
-                            html.Strong("Cara Baca: "),
-                            "Net Lot negatif = Broker DISTRIBUTOR. Klien broker ini adalah pemegang awal (early holder/IPO allotment) ",
-                            "yang sedang distribusi/profit taking. Mereka menjual saham yang diperoleh sebelum periode tracking."
-                        ], className="text-muted")
-                    ])
-                ])
+                # Phase Analysis
+                create_phase_analysis_card(stock_code, current_price)
             ], md=7),
 
             # Right column - Support/Resistance & Ownership
