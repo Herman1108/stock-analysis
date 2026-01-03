@@ -757,10 +757,11 @@ def create_multi_period_card(stock_code):
 # HELPER: AVG BUY ANALYSIS CARD
 # ============================================================
 
-def create_avg_buy_card(avg_buy_analysis, stock_code):
+def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
     """
     Create Avg Buy Analysis card
     Menunjukkan rata-rata harga beli broker dan support/resistance level
+    Support/Resistance sekarang menggunakan multi-method analysis dari sr_analysis
     """
     if 'error' in avg_buy_analysis:
         return dbc.Card([
@@ -772,25 +773,24 @@ def create_avg_buy_card(avg_buy_analysis, stock_code):
 
     summary = avg_buy_analysis.get('summary', {})
     current_price = avg_buy_analysis.get('current_price', 0)
-    support_levels = avg_buy_analysis.get('support_levels', [])  # Below current price
     resistance_levels = avg_buy_analysis.get('resistance_levels', [])  # Above current price
     interest_zone = avg_buy_analysis.get('interest_zone', None)
     interpretation = avg_buy_analysis.get('interpretation', {})
     brokers = avg_buy_analysis.get('brokers', [])[:10]  # Top 10
 
-    # Determine support display
-    if support_levels:
-        # Support dari broker profit (Avg Buy di bawah harga sekarang)
-        support_price = max(support_levels)  # Closest support below
+    # Use multi-method S/R analysis if available
+    if sr_analysis and 'key_support' in sr_analysis:
+        support_price = sr_analysis['key_support']
         support_display = f"Rp {support_price:,.0f}"
         support_class = "text-success"
-        support_note = f"(dari {len(support_levels)} broker profit)"
+        support_pct = sr_analysis.get('interpretation', {}).get('support_distance_pct', 0)
+        support_note = f"(-{abs(support_pct):.1f}% dari harga sekarang)"
     else:
-        # Tidak ada support kuat, semua broker loss
+        # Fallback: estimasi -5%
         estimated_support = current_price * 0.95
         support_display = f"~Rp {estimated_support:,.0f}"
         support_class = "text-warning"
-        support_note = "(estimasi -5%, semua broker loss)"
+        support_note = "(estimasi -5%)"
 
     # Determine interest zone display (where loss brokers bought)
     if interest_zone and interest_zone > current_price:
@@ -1196,7 +1196,7 @@ def create_analysis_page(stock_code='CDIA'):
         create_multi_period_card(stock_code),
 
         # ========== AVG BUY ANALYSIS ==========
-        create_avg_buy_card(avg_buy_analysis, stock_code),
+        create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis),
 
         # ========== SUPPORT/RESISTANCE LEVELS (Multi-Method) ==========
         create_sr_levels_card(sr_analysis, stock_code),
