@@ -583,105 +583,142 @@ def create_landing_page():
     ])
 
 # ============================================================
-# PAGE: UPLOAD DATA
+# PAGE: UPLOAD DATA (Password Protected)
 # ============================================================
 
+UPLOAD_PASSWORD = "12153800"  # Password untuk akses upload
+
 def create_upload_page():
+    """Create upload page with password protection"""
     return html.Div([
         html.H4("Upload Data Broker Summary", className="mb-4"),
 
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("Upload Excel File", className="mb-0")),
-                    dbc.CardBody([
-                        # Stock Code Input
-                        dbc.Row([
-                            dbc.Col([
-                                dbc.Label("Kode Saham:"),
-                                dbc.Input(
-                                    id='upload-stock-code',
-                                    type='text',
-                                    placeholder='Contoh: CDIA, BBCA, TLKM',
-                                    value='',
-                                    className="mb-3"
-                                ),
-                            ], width=4),
-                        ]),
-
-                        # File Upload with Loading
-                        dcc.Loading(
-                            id="upload-loading",
-                            type="circle",
-                            color="#0d6efd",
-                            children=[
-                                dcc.Upload(
-                                    id='upload-data',
-                                    children=html.Div([
-                                        html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
-                                        html.Br(),
-                                        'Drag and Drop atau ',
-                                        html.A('Klik untuk Upload', className="text-primary")
-                                    ]),
-                                    style={
-                                        'width': '100%',
-                                        'height': '120px',
-                                        'lineHeight': '40px',
-                                        'borderWidth': '2px',
-                                        'borderStyle': 'dashed',
-                                        'borderRadius': '10px',
-                                        'textAlign': 'center',
-                                        'padding': '20px',
-                                        'margin': '10px 0',
-                                        'backgroundColor': '#2a2a2a',
-                                        'cursor': 'pointer'
-                                    },
-                                    multiple=False,
-                                    accept='.xlsx,.xls'
-                                ),
-                                html.Div(id='upload-status', className="mt-3"),
-                            ]
-                        ),
-
-                        html.Hr(),
-
-                        # Format Info
-                        dbc.Alert([
-                            html.H6("Format Excel yang Diharapkan:", className="alert-heading"),
-                            html.P("File Excel harus memiliki format seperti berikut:", className="mb-2"),
-                            html.Ul([
-                                html.Li([html.Strong("Kolom A-H: "), "Data Broker Summary (Buy/Sell)"]),
-                                html.Li("Kolom A: Buy Broker Code"),
-                                html.Li("Kolom B: Buy Value (contoh: 35.7B, 500M)"),
-                                html.Li("Kolom C: Buy Lot"),
-                                html.Li("Kolom D: Buy Avg Price"),
-                                html.Li("Kolom E: Sell Broker Code"),
-                                html.Li("Kolom F: Sell Value"),
-                                html.Li("Kolom G: Sell Lot"),
-                                html.Li("Kolom H: Sell Avg Price"),
-                                html.Li([html.Strong("Kolom L-X: "), "Data Harga (Date, Close, Change, Volume, dll)"]),
-                            ], className="small"),
-                            html.P([
-                                "Contoh file: ",
-                                html.Code("C:\\doc Herman\\cdia.xlsx")
-                            ], className="mb-0 small")
-                        ], color="info"),
+        # Password Gate
+        html.Div(id='upload-password-gate', children=[
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H5([
+                        html.I(className="fas fa-lock me-2"),
+                        "Akses Terbatas"
+                    ], className="mb-0")
+                ]),
+                dbc.CardBody([
+                    html.P("Halaman ini memerlukan password untuk mengakses.", className="text-muted"),
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("Password:"),
+                            dbc.Input(
+                                id='upload-password-input',
+                                type='password',
+                                placeholder='Masukkan password',
+                                className="mb-3"
+                            ),
+                            dbc.Button([
+                                html.I(className="fas fa-unlock me-2"),
+                                "Masuk"
+                            ], id='upload-password-submit', color="primary", className="w-100"),
+                            html.Div(id='upload-password-error', className="mt-2")
+                        ], md=4)
                     ])
                 ])
-            ], width=8),
+            ], className="mb-4")
+        ]),
 
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("Data yang Tersedia", className="mb-0")),
-                    dbc.CardBody(id='available-stocks-list')
-                ])
-            ], width=4),
-        ], className="mb-4"),
+        # Upload Form (hidden until password correct)
+        html.Div(id='upload-form-container', style={'display': 'none'}, children=[
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Upload Excel File", className="mb-0")),
+                        dbc.CardBody([
+                            # Stock Code Input
+                            dbc.Row([
+                                dbc.Col([
+                                    dbc.Label("Kode Saham:"),
+                                    dbc.Input(
+                                        id='upload-stock-code',
+                                        type='text',
+                                        placeholder='Contoh: CDIA, BBCA, TLKM',
+                                        value='',
+                                        className="mb-3"
+                                    ),
+                                ], width=4),
+                            ]),
 
-        # Import History/Log
-        dbc.Card([
-            dbc.CardHeader("Import Log"),
-            dbc.CardBody(id='import-log')
+                            # File Upload with Loading
+                            dcc.Loading(
+                                id="upload-loading",
+                                type="circle",
+                                color="#0d6efd",
+                                children=[
+                                    dcc.Upload(
+                                        id='upload-data',
+                                        children=html.Div([
+                                            html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
+                                            html.Br(),
+                                            'Drag and Drop atau ',
+                                            html.A('Klik untuk Upload', className="text-primary")
+                                        ]),
+                                        style={
+                                            'width': '100%',
+                                            'height': '120px',
+                                            'lineHeight': '40px',
+                                            'borderWidth': '2px',
+                                            'borderStyle': 'dashed',
+                                            'borderRadius': '10px',
+                                            'textAlign': 'center',
+                                            'padding': '20px',
+                                            'margin': '10px 0',
+                                            'backgroundColor': '#2a2a2a',
+                                            'cursor': 'pointer'
+                                        },
+                                        multiple=False,
+                                        accept='.xlsx,.xls'
+                                    ),
+                                    html.Div(id='upload-status', className="mt-3"),
+                                ]
+                            ),
+
+                            html.Hr(),
+
+                            # Format Info
+                            dbc.Alert([
+                                html.H6("Format Excel yang Diharapkan:", className="alert-heading"),
+                                html.P("File Excel harus memiliki format seperti berikut:", className="mb-2"),
+                                html.Ul([
+                                    html.Li([html.Strong("Kolom A-H: "), "Data Broker Summary (Buy/Sell)"]),
+                                    html.Li("Kolom A: Buy Broker Code"),
+                                    html.Li("Kolom B: Buy Value (contoh: 35.7B, 500M)"),
+                                    html.Li("Kolom C: Buy Lot"),
+                                    html.Li("Kolom D: Buy Avg Price"),
+                                    html.Li("Kolom E: Sell Broker Code"),
+                                    html.Li("Kolom F: Sell Value"),
+                                    html.Li("Kolom G: Sell Lot"),
+                                    html.Li("Kolom H: Sell Avg Price"),
+                                    html.Li([html.Strong("Kolom L-X: "), "Data Harga (Date, Close, Change, Volume, dll)"]),
+                                ], className="small"),
+                                html.P([
+                                    "Contoh file: ",
+                                    html.Code("C:\\doc Herman\\cdia.xlsx")
+                                ], className="mb-0 small")
+                            ], color="info"),
+                        ])
+                    ])
+                ], width=8),
+
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader(html.H5("Data yang Tersedia", className="mb-0")),
+                        dbc.CardBody(id='available-stocks-list')
+                    ])
+                ], width=4),
+            ], className="mb-4"),
+
+            # Import History/Log
+            dbc.Card([
+                dbc.CardHeader("Import Log"),
+                dbc.CardBody(id='import-log')
+            ])
         ])
     ])
 
@@ -4123,6 +4160,30 @@ def display_page(pathname, search, stored_stock):
 
     # Return content and update store if stock from URL
     return content, stock_code
+
+# Password validation callback for upload page
+@app.callback(
+    [Output('upload-password-gate', 'style'),
+     Output('upload-form-container', 'style'),
+     Output('upload-password-error', 'children')],
+    [Input('upload-password-submit', 'n_clicks')],
+    [State('upload-password-input', 'value')],
+    prevent_initial_call=True
+)
+def validate_upload_password(n_clicks, password):
+    if not n_clicks:
+        return {'display': 'block'}, {'display': 'none'}, ""
+
+    if password == UPLOAD_PASSWORD:
+        # Password correct - show upload form, hide password gate
+        return {'display': 'none'}, {'display': 'block'}, ""
+    else:
+        # Password incorrect
+        return (
+            {'display': 'block'},
+            {'display': 'none'},
+            dbc.Alert("Password salah! Silakan coba lagi.", color="danger", className="mt-2")
+        )
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('selected-stock', 'data')])
 def update_broker_options(pathname, stock_code):
