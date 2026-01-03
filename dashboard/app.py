@@ -529,23 +529,31 @@ def detect_market_phase(stock_code: str) -> dict:
             signals.append(('Volatilitas rendah (konsolidasi)', 'ACCUMULATION'))
             phase_scores['ACCUMULATION'] += 1
 
-    # Broker flow signals
+    # Broker flow signals (local brokers)
     if broker_flow['trend'] == 'ACCUMULATION':
-        signals.append((f"Net buy {broker_flow['net_buy_days']} hari dari 30 hari", 'ACCUMULATION'))
+        signals.append((f"Broker net buy {broker_flow['net_buy_days']} hari dari 30 hari", 'ACCUMULATION'))
         phase_scores['ACCUMULATION'] += 2
     elif broker_flow['trend'] == 'DISTRIBUTION':
-        signals.append((f"Net sell {broker_flow['net_sell_days']} hari dari 30 hari", 'DISTRIBUTION'))
-        phase_scores['DISTRIBUTION'] += 2
+        signals.append((f"Broker net sell {broker_flow['net_sell_days']} hari dari 30 hari", 'DISTRIBUTION'))
+        phase_scores['DISTRIBUTION'] += 1  # Lower weight, could be retail selling to foreign
 
-    # Foreign flow signals
+    # Foreign flow signals (SMART MONEY - higher weight)
+    # Foreign INFLOW = Smart money buying = ACCUMULATION/MARKUP, CONTRADICTS Distribution
+    # Foreign OUTFLOW = Smart money selling = DISTRIBUTION/MARKDOWN, CONTRADICTS Accumulation
     if foreign_flow['trend'] == 'INFLOW':
-        signals.append((f"Foreign inflow {foreign_flow['consecutive_days']} hari berturut", 'ACCUMULATION'))
-        phase_scores['ACCUMULATION'] += 1
-        phase_scores['MARKUP'] += 1
+        signals.append((f"Foreign INFLOW +{foreign_flow['total_net_lot']:,.0f} lot (Smart Money Buy)", 'ACCUMULATION'))
+        phase_scores['ACCUMULATION'] += 3  # High weight - smart money signal
+        phase_scores['MARKUP'] += 2
+        # CONTRADICTS distribution - smart money buying, not selling
+        phase_scores['DISTRIBUTION'] = max(0, phase_scores['DISTRIBUTION'] - 2)
+        phase_scores['MARKDOWN'] = max(0, phase_scores['MARKDOWN'] - 1)
     elif foreign_flow['trend'] == 'OUTFLOW':
-        signals.append((f"Foreign outflow {foreign_flow['consecutive_days']} hari berturut", 'DISTRIBUTION'))
-        phase_scores['DISTRIBUTION'] += 1
-        phase_scores['MARKDOWN'] += 1
+        signals.append((f"Foreign OUTFLOW {foreign_flow['total_net_lot']:,.0f} lot (Smart Money Sell)", 'DISTRIBUTION'))
+        phase_scores['DISTRIBUTION'] += 3  # High weight - smart money signal
+        phase_scores['MARKDOWN'] += 2
+        # CONTRADICTS accumulation - smart money selling, not buying
+        phase_scores['ACCUMULATION'] = max(0, phase_scores['ACCUMULATION'] - 2)
+        phase_scores['MARKUP'] = max(0, phase_scores['MARKUP'] - 1)
 
     # Determine phase
     max_score = max(phase_scores.values())
