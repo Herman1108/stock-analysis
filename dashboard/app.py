@@ -4393,7 +4393,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Span("✓", className="text-success"), " = Range <10%  ",
                                 html.Span("✗", className="text-danger"), " = Range >10%"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                         dbc.Col([
                             html.Small([
                                 html.Strong("2. Volume Increasing"), html.Br(),
@@ -4401,7 +4401,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Span("✓", className="text-success"), " = Vol naik  ",
                                 html.Span("✗", className="text-danger"), " = Vol turun"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                         dbc.Col([
                             html.Small([
                                 html.Strong("3. Foreign Positive"), html.Br(),
@@ -4409,7 +4409,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Span("✓", className="text-success"), " = Net buy  ",
                                 html.Span("✗", className="text-danger"), " = Net sell"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                     ], className="mb-2"),
                     dbc.Row([
                         dbc.Col([
@@ -4419,7 +4419,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Span("✓", className="text-success"), " = >2 broker aktif  ",
                                 html.Span("✗", className="text-danger"), " = <2 broker"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                         dbc.Col([
                             html.Small([
                                 html.Strong("5. Not Breakout"), html.Br(),
@@ -4427,14 +4427,14 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Span("✓", className="text-success"), " = Belum breakout  ",
                                 html.Span("✗", className="text-danger"), " = Sudah breakout"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                         dbc.Col([
                             html.Small([
                                 html.Strong("Ideal Akumulasi:"), html.Br(),
                                 "Minimal 3-4 kriteria terpenuhi (✓)", html.Br(),
                                 html.Span("Score tinggi = lebih baik", className="text-success")
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                     ]),
                 ])
             ])
@@ -4502,7 +4502,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 "• >= 1.2x = Above Average", html.Br(),
                                 "• < 0.8x = Low (aktivitas rendah)"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                         dbc.Col([
                             html.Small([
                                 html.Strong("Volume-Price Trend (VPT)"), html.Br(),
@@ -4512,7 +4512,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 "• Vol ↓ + Price ↑ = WEAK RALLY", html.Br(),
                                 "• Vol ↓ + Price ↓ = CONSOLIDATION"
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                         dbc.Col([
                             html.Small([
                                 html.Strong("Interpretasi"), html.Br(),
@@ -4521,7 +4521,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 "RVOL rendah = Kurang menarik", html.Br(),
                                 html.Span("Consecutive High Vol >= 3 hari = Strong interest!", className="text-success")
                             ], className="text-muted")
-                        ], width=4),
+                        ], xs=12, md=4),
                     ]),
                 ])
             ])
@@ -4548,7 +4548,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Tr([html.Td("Vol +50%, Freq +50%"), html.Td("-1"), html.Td("Retail FOMO", className="text-danger")]),
                             ])
                         ], className="table table-sm table-dark")
-                    ], width=6),
+                    ], xs=12, md=6),
                     dbc.Col([
                         html.H6("Foreign Flow Scoring", className="text-info"),
                         html.P("Formula: (Direction x 10) + (Momentum x 20) + (Consistency x 7)"),
@@ -4566,7 +4566,7 @@ def create_analysis_page(stock_code='CDIA'):
                             html.Li("Price Position: 15%"),
                             html.Li("Accumulation Phase: 15%"),
                         ], className="small")
-                    ], width=6)
+                    ], xs=12, md=6)
                 ])
             ])
         ])
