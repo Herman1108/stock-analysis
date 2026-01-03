@@ -333,7 +333,8 @@ def create_navbar():
         dbc.Container([
             dbc.NavbarBrand("Stock Broker Analysis", href="/", className="ms-2"),
             dbc.Nav([
-                dbc.NavItem(dbc.NavLink("Dashboard", href="/", id="nav-dashboard")),
+                dbc.NavItem(dbc.NavLink("Home", href="/", id="nav-home")),
+                dbc.NavItem(dbc.NavLink("Dashboard", href="/dashboard", id="nav-dashboard")),
                 dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
                 dbc.NavItem(dbc.NavLink("Broker Ranking", href="/ranking", id="nav-ranking")),
                 dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
@@ -355,6 +356,214 @@ def create_navbar():
         dark=True,
         className="mb-4"
     )
+
+
+# ============================================================
+# PAGE: LANDING / HOME
+# ============================================================
+
+def create_landing_page():
+    """Create landing page with stock selection and overview"""
+    stocks = get_available_stocks()
+
+    if not stocks:
+        return html.Div([
+            dbc.Alert("Tidak ada data saham. Silakan upload data terlebih dahulu.", color="warning"),
+            dbc.Button("Upload Data", href="/upload", color="primary")
+        ])
+
+    # Build stock cards with summary
+    stock_cards = []
+    for stock_code in stocks:
+        try:
+            # Get comprehensive analysis for summary
+            analysis = get_comprehensive_analysis(stock_code)
+            composite = analysis.get('composite', {})
+            foreign_flow = analysis.get('foreign_flow', {})
+            broker_sens = analysis.get('broker_sensitivity', {})
+            price_pos = analysis.get('price_position', {})
+
+            # Extract key metrics
+            score = composite.get('composite_score', 0)
+            action = composite.get('action', 'N/A')
+            color = composite.get('color', 'secondary')
+
+            # Foreign flow
+            foreign_net = foreign_flow.get('net_value_5d', 0)
+            foreign_trend = "Inflow" if foreign_net > 0 else "Outflow" if foreign_net < 0 else "Netral"
+            foreign_color = "success" if foreign_net > 0 else "danger" if foreign_net < 0 else "secondary"
+
+            # Price info
+            broker_df = get_broker_data(stock_code)
+            price_df = get_price_data(stock_code)
+
+            last_price = price_df['close'].iloc[-1] if not price_df.empty else 0
+            price_change = price_df['change'].iloc[-1] if not price_df.empty and 'change' in price_df.columns else 0
+
+            # Date range
+            if not broker_df.empty:
+                date_range = f"{broker_df['date'].min().strftime('%d %b')} - {broker_df['date'].max().strftime('%d %b %Y')}"
+                trading_days = broker_df['date'].nunique()
+            else:
+                date_range = "No data"
+                trading_days = 0
+
+            # Top accumulator
+            if not broker_df.empty:
+                top_acc = broker_df.groupby('broker_code')['net_value'].sum().idxmax()
+                top_acc_val = broker_df.groupby('broker_code')['net_value'].sum().max()
+            else:
+                top_acc = "-"
+                top_acc_val = 0
+
+            # Create card
+            card = dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.Div([
+                            html.H3(stock_code, className="mb-0 d-inline"),
+                            dbc.Badge(action, color=color, className="ms-2 fs-6")
+                        ])
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        # Composite Score
+                        html.Div([
+                            html.Div([
+                                html.Span("Composite Score", className="text-muted small"),
+                                html.H2(f"{score:.0f}", className=f"mb-0 text-{color}")
+                            ], className="text-center mb-3"),
+                        ]),
+
+                        html.Hr(className="my-2"),
+
+                        # Key Metrics Grid
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Harga", className="text-muted d-block"),
+                                html.Strong(f"Rp {last_price:,.0f}")
+                            ], width=6),
+                            dbc.Col([
+                                html.Small("Change", className="text-muted d-block"),
+                                html.Strong(
+                                    f"{price_change:+.1f}%",
+                                    className=f"text-{'success' if price_change > 0 else 'danger' if price_change < 0 else 'muted'}"
+                                )
+                            ], width=6),
+                        ], className="mb-2"),
+
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Foreign Flow", className="text-muted d-block"),
+                                dbc.Badge(foreign_trend, color=foreign_color, className="mt-1")
+                            ], width=6),
+                            dbc.Col([
+                                html.Small("Top Broker", className="text-muted d-block"),
+                                html.Strong(top_acc)
+                            ], width=6),
+                        ], className="mb-2"),
+
+                        html.Hr(className="my-2"),
+
+                        # Data Info
+                        html.Div([
+                            html.Small([
+                                html.I(className="fas fa-calendar me-1"),
+                                f"{trading_days} trading days"
+                            ], className="text-muted d-block"),
+                            html.Small([
+                                html.I(className="fas fa-clock me-1"),
+                                date_range
+                            ], className="text-muted"),
+                        ], className="mb-3"),
+
+                        # Action Buttons
+                        html.Div([
+                            dbc.Button([
+                                html.I(className="fas fa-chart-line me-1"),
+                                "Dashboard"
+                            ], href=f"/dashboard?stock={stock_code}", color="primary", size="sm", className="me-1"),
+                            dbc.Button([
+                                html.I(className="fas fa-search me-1"),
+                                "Analysis"
+                            ], href=f"/analysis?stock={stock_code}", color="outline-info", size="sm"),
+                        ], className="d-flex justify-content-center")
+                    ])
+                ], className="h-100 shadow-sm", color="dark", outline=True)
+            ], md=6, lg=4, className="mb-4")
+
+            stock_cards.append(card)
+
+        except Exception as e:
+            # Fallback card for error
+            card = dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader(html.H4(stock_code, className="mb-0")),
+                    dbc.CardBody([
+                        dbc.Alert(f"Error loading data: {str(e)[:50]}", color="warning", className="small"),
+                        dbc.Button("Dashboard", href=f"/dashboard?stock={stock_code}", color="primary", size="sm")
+                    ])
+                ], className="h-100", color="dark", outline=True)
+            ], md=6, lg=4, className="mb-4")
+            stock_cards.append(card)
+
+    return html.Div([
+        # Hero Section
+        dbc.Container([
+            html.Div([
+                html.H1([
+                    html.I(className="fas fa-chart-bar me-3"),
+                    "Stock Broker Analysis"
+                ], className="display-5 text-center mb-3"),
+                html.P(
+                    "Analisis mendalam pergerakan broker, akumulasi/distribusi, dan sinyal trading untuk saham pilihan Anda",
+                    className="lead text-center text-muted mb-4"
+                ),
+                html.Hr(className="my-4"),
+            ], className="py-4")
+        ]),
+
+        # Stock Selection
+        dbc.Container([
+            html.H4([
+                html.I(className="fas fa-list-alt me-2"),
+                f"Pilih Emiten ({len(stocks)} tersedia)"
+            ], className="mb-4"),
+
+            dbc.Row(stock_cards),
+
+            # Quick Links
+            html.Hr(className="my-4"),
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H5([html.I(className="fas fa-upload me-2"), "Upload Data"], className="mb-2"),
+                            html.P("Import data broker summary dari file Excel", className="text-muted small mb-2"),
+                            dbc.Button("Upload", href="/upload", color="outline-light", size="sm")
+                        ])
+                    ], color="secondary")
+                ], md=4),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H5([html.I(className="fas fa-trophy me-2"), "Broker Ranking"], className="mb-2"),
+                            html.P("Lihat peringkat broker akumulator & distributor", className="text-muted small mb-2"),
+                            dbc.Button("Ranking", href="/ranking", color="outline-light", size="sm")
+                        ])
+                    ], color="info")
+                ], md=4),
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.H5([html.I(className="fas fa-bell me-2"), "Alerts"], className="mb-2"),
+                            html.P("Monitor sinyal akumulasi dan pergerakan broker", className="text-muted small mb-2"),
+                            dbc.Button("Alerts", href="/alerts", color="outline-light", size="sm")
+                        ])
+                    ], color="warning")
+                ], md=4),
+            ], className="mb-4")
+        ], fluid=True)
+    ])
 
 # ============================================================
 # PAGE: UPLOAD DATA
@@ -3857,10 +4066,30 @@ def sync_dropdown_with_store(stored_value):
 def update_selected_stock(value):
     return value if value else 'CDIA'
 
-@app.callback(Output('page-content', 'children'), [Input('url', 'pathname'), Input('selected-stock', 'data')])
-def display_page(pathname, stock_code):
-    stock_code = stock_code or 'CDIA'
-    if pathname == '/analysis':
+@app.callback(
+    [Output('page-content', 'children'), Output('selected-stock', 'data', allow_duplicate=True)],
+    [Input('url', 'pathname'), Input('url', 'search')],
+    [State('selected-stock', 'data')],
+    prevent_initial_call='initial_duplicate'
+)
+def display_page(pathname, search, stored_stock):
+    from urllib.parse import parse_qs
+
+    # Parse query parameter ?stock=XXX
+    stock_from_url = None
+    if search:
+        params = parse_qs(search.lstrip('?'))
+        stock_from_url = params.get('stock', [None])[0]
+
+    # Use URL param if provided, otherwise use stored value
+    stock_code = stock_from_url or stored_stock or 'CDIA'
+
+    # Route to appropriate page
+    if pathname == '/':
+        content = create_landing_page()
+    elif pathname == '/dashboard':
+        content = create_dashboard_page(stock_code)
+    elif pathname == '/analysis':
         content = create_analysis_page(stock_code)
     elif pathname == '/bandarmology':
         content = create_bandarmology_page(stock_code)  # Legacy
@@ -3873,9 +4102,10 @@ def display_page(pathname, stock_code):
     elif pathname == '/upload':
         content = create_upload_page()
     else:
-        content = create_dashboard_page(stock_code)
-    # Return as single element (Dash 3.x compatible)
-    return content
+        content = create_landing_page()
+
+    # Return content and update store if stock from URL
+    return content, stock_code
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('selected-stock', 'data')])
 def update_broker_options(pathname, stock_code):
