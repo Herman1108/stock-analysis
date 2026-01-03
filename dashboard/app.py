@@ -50,21 +50,137 @@ from composite_analyzer import (
 )
 from broker_config import (
     get_broker_type, get_broker_color, get_broker_info,
-    classify_brokers, BROKER_COLORS, BROKER_TYPE_NAMES
+    classify_brokers, BROKER_COLORS, BROKER_TYPE_NAMES,
+    FOREIGN_BROKER_CODES, is_foreign_broker
 )
 from parser import read_excel_data, import_price_data, import_broker_data
 
 # Initialize Dash app with Font Awesome for help icons
 FA_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
+
+# PWA Meta Tags for mobile optimization
+PWA_META_TAGS = [
+    # Viewport for responsive design
+    {"name": "viewport", "content": "width=device-width, initial-scale=1, maximum-scale=5, user-scalable=yes, viewport-fit=cover"},
+    {"http-equiv": "X-UA-Compatible", "content": "IE=edge"},
+    # PWA specific
+    {"name": "mobile-web-app-capable", "content": "yes"},
+    {"name": "apple-mobile-web-app-capable", "content": "yes"},
+    {"name": "apple-mobile-web-app-status-bar-style", "content": "black-translucent"},
+    {"name": "apple-mobile-web-app-title", "content": "StockAnalysis"},
+    # Theme colors
+    {"name": "theme-color", "content": "#0f3460"},
+    {"name": "msapplication-TileColor", "content": "#0f3460"},
+    {"name": "msapplication-navbutton-color", "content": "#0f3460"},
+    # Description
+    {"name": "description", "content": "Dashboard analisis broker saham dengan Bandarmology"},
+    {"name": "author", "content": "Stock Analysis Team"},
+]
+
+# Custom index string for PWA with manifest and service worker
+PWA_INDEX_STRING = '''
+<!DOCTYPE html>
+<html lang="id">
+    <head>
+        {%metas%}
+        <title>{%title%}</title>
+        <!-- PWA Manifest -->
+        <link rel="manifest" href="/assets/manifest.json">
+        <!-- Apple Touch Icons -->
+        <link rel="apple-touch-icon" sizes="192x192" href="/assets/icon-192.png">
+        <link rel="apple-touch-icon" sizes="512x512" href="/assets/icon-512.png">
+        <!-- Favicon -->
+        <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png">
+        {%favicon%}
+        {%css%}
+        <!-- Splash screen for iOS -->
+        <meta name="apple-mobile-web-app-title" content="StockAnalysis">
+        <style>
+            /* Critical CSS for fast first paint */
+            body {
+                background-color: #1a1a2e;
+                color: #e8e8e8;
+                margin: 0;
+                padding: 0;
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            }
+            /* Loading placeholder */
+            #_dash-loading {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                flex-direction: column;
+            }
+            #_dash-loading::after {
+                content: 'Loading Stock Analysis...';
+                color: #17a2b8;
+                font-size: 1.2rem;
+                margin-top: 1rem;
+            }
+            .loading-spinner {
+                width: 50px;
+                height: 50px;
+                border: 4px solid #16213e;
+                border-top: 4px solid #17a2b8;
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        {%app_entry%}
+        <footer>
+            {%config%}
+            {%scripts%}
+            {%renderer%}
+        </footer>
+        <!-- Service Worker Registration -->
+        <script>
+            if ('serviceWorker' in navigator) {
+                window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/assets/service-worker.js')
+                        .then(function(registration) {
+                            console.log('ServiceWorker registered:', registration.scope);
+                        })
+                        .catch(function(error) {
+                            console.log('ServiceWorker registration failed:', error);
+                        });
+                });
+            }
+
+            // Handle PWA install prompt
+            let deferredPrompt;
+            window.addEventListener('beforeinstallprompt', (e) => {
+                e.preventDefault();
+                deferredPrompt = e;
+                console.log('PWA install prompt available');
+            });
+
+            // Detect standalone mode
+            if (window.matchMedia('(display-mode: standalone)').matches ||
+                window.navigator.standalone === true) {
+                console.log('Running as PWA');
+                document.body.classList.add('pwa-mode');
+            }
+        </script>
+    </body>
+</html>
+'''
+
 app = dash.Dash(
     __name__,
     external_stylesheets=[dbc.themes.DARKLY, FA_CSS],
     suppress_callback_exceptions=True,
     compress=True,  # Enable response compression
-    meta_tags=[
-        {"name": "viewport", "content": "width=device-width, initial-scale=1"},
-        {"http-equiv": "X-UA-Compatible", "content": "IE=edge"}
-    ]
+    meta_tags=PWA_META_TAGS,
+    index_string=PWA_INDEX_STRING,
+    # Assets folder for manifest, icons, css
+    assets_folder='assets'
 )
 app.title = "Stock Broker Analysis"
 server = app.server
@@ -281,6 +397,84 @@ def calculate_broker_current_position(stock_code: str) -> pd.DataFrame:
     return pd.DataFrame(position_data)
 
 
+def calculate_broker_position_from_daily(stock_code: str, days: int = 90) -> pd.DataFrame:
+    """
+    Calculate broker position from daily broker_summary data only.
+    Used when IPO data is not available.
+
+    Returns DataFrame with broker positions based on net accumulation over the period.
+    """
+    # Get current price
+    price_df = get_price_data(stock_code)
+    current_price = price_df['close_price'].iloc[-1] if not price_df.empty and 'close_price' in price_df.columns else 0
+
+    # Query broker summary data
+    # Note: buy_value is in Rupiah, buy_lot is in lots (100 shares)
+    # weighted_avg_buy = buy_value / buy_lot / 100 = price per share
+    query = """
+        SELECT
+            broker_code,
+            SUM(buy_lot) as total_buy_lot,
+            SUM(sell_lot) as total_sell_lot,
+            SUM(buy_value) as total_buy_value,
+            SUM(sell_value) as total_sell_value,
+            SUM(net_lot) as net_lot,
+            CASE WHEN SUM(buy_lot) > 0
+                 THEN SUM(buy_value) / SUM(buy_lot) / 100
+                 ELSE 0 END as weighted_avg_buy,
+            COUNT(DISTINCT date) as active_days,
+            MIN(date) as first_date,
+            MAX(date) as last_date
+        FROM broker_summary
+        WHERE stock_code = %s
+        AND date >= CURRENT_DATE - INTERVAL '%s days'
+        GROUP BY broker_code
+        HAVING SUM(net_lot) != 0
+        ORDER BY SUM(net_lot) DESC
+    """
+    results = execute_query(query, (stock_code, days))
+
+    if not results:
+        return pd.DataFrame()
+
+    position_data = []
+    for row in results:
+        broker = row['broker_code']
+        net_lot = int(row['net_lot']) if row['net_lot'] else 0
+        total_buy_lot = int(row['total_buy_lot']) if row['total_buy_lot'] else 0
+        total_sell_lot = int(row['total_sell_lot']) if row['total_sell_lot'] else 0
+        weighted_avg_buy = float(row['weighted_avg_buy']) if row['weighted_avg_buy'] else current_price
+
+        # Calculate floating P&L
+        if net_lot > 0 and weighted_avg_buy > 0 and current_price > 0:
+            floating_pnl_pct = ((current_price - weighted_avg_buy) / weighted_avg_buy) * 100
+            floating_pnl_value = (current_price - weighted_avg_buy) * net_lot
+        else:
+            floating_pnl_pct = 0
+            floating_pnl_value = 0
+
+        position_data.append({
+            'broker_code': broker,
+            'ipo_buy_lot': 0,
+            'ipo_sell_lot': 0,
+            'ipo_avg_buy': 0,
+            'daily_buy_lot': total_buy_lot,
+            'daily_sell_lot': total_sell_lot,
+            'total_buy_lot': total_buy_lot,
+            'total_sell_lot': total_sell_lot,
+            'net_lot': net_lot,
+            'weighted_avg_buy': weighted_avg_buy,
+            'current_price': current_price,
+            'floating_pnl_pct': floating_pnl_pct,
+            'floating_pnl_value': floating_pnl_value,
+            'active_days': row['active_days'],
+            'first_date': row['first_date'],
+            'last_date': row['last_date']
+        })
+
+    return pd.DataFrame(position_data)
+
+
 def get_support_resistance_from_positions(position_df: pd.DataFrame) -> dict:
     """
     Calculate support/resistance levels from broker cost basis
@@ -409,9 +603,10 @@ def get_recent_broker_flow(stock_code: str, days: int = 30) -> dict:
 
 def get_foreign_flow(stock_code: str, days: int = 30) -> dict:
     """Get foreign investor flow"""
-    # Foreign brokers typically have codes starting with specific letters
-    foreign_codes = ['CC', 'CG', 'CP', 'CS', 'DB', 'GI', 'GS', 'KK', 'KZ', 'LG',
-                     'ML', 'MS', 'NI', 'RX', 'SK', 'UB', 'XA', 'YP', 'ZP']
+    # Use correct foreign broker codes from broker_config
+    # These are brokers with ACTUAL foreign parent companies
+    # NOT including BUMN (CC=Mandiri, NI=BNI) which are local government-owned
+    foreign_codes = list(FOREIGN_BROKER_CODES)  # From broker_config.py
 
     placeholders = ','.join(['%s'] * len(foreign_codes))
     query = f"""
@@ -685,6 +880,932 @@ def create_phase_analysis_card(stock_code: str, current_price: float):
 
 
 # ============================================================
+# ACCUMULATION SCORE CALCULATION (Backtest-based Formula)
+# ============================================================
+
+def calculate_accumulation_score(stock_code: str, lookback_days: int = 30) -> dict:
+    """
+    Calculate Accumulation Score based on backtested formula from PANI cycles.
+
+    Formula Components (Total 100 points):
+    1. Top Broker Buy/Sell Ratio (15 pts) - High ratio = aggressive buying
+    2. Consolidation Pattern (20 pts) - Sideways = accumulation zone
+    3. Price Distance from 52w Low (20 pts) - Near bottom = better entry
+    4. Volume Contraction (15 pts) - Low volume = stealth accumulation
+    5. Domestic Broker Net Positive (15 pts) - Local smart money
+    6. Foreign Flow Starting (15 pts) - Foreign starting to enter
+
+    Returns dict with score, components, and interpretation.
+    """
+    result = {
+        'score': 0,
+        'components': {},
+        'interpretation': 'NO DATA',
+        'signal': 'NEUTRAL',
+        'details': []
+    }
+
+    try:
+        # 1. TOP BROKER BUY/SELL RATIO (15 points)
+        # Query top 5 net buyers and their buy/sell ratio
+        ratio_query = """
+            SELECT
+                broker_code,
+                SUM(buy_lot) as total_buy,
+                SUM(sell_lot) as total_sell,
+                CASE WHEN SUM(sell_lot) > 0
+                     THEN ROUND(SUM(buy_lot)::numeric / SUM(sell_lot), 2)
+                     ELSE 99 END as buy_sell_ratio
+            FROM broker_summary
+            WHERE stock_code = %s
+            AND date >= CURRENT_DATE - INTERVAL '%s days'
+            GROUP BY broker_code
+            HAVING SUM(net_lot) > 0
+            ORDER BY SUM(net_lot) DESC
+            LIMIT 5
+        """
+        ratio_results = execute_query(ratio_query, (stock_code, lookback_days))
+
+        if ratio_results:
+            avg_ratio = float(sum(float(r['buy_sell_ratio']) for r in ratio_results) / len(ratio_results))
+            # Score: ratio 1.5 = 5pts, ratio 3.0 = 10pts, ratio 5+ = 15pts
+            ratio_score = min(15, max(0, (avg_ratio - 1) * 5))
+            result['components']['broker_ratio'] = {
+                'value': round(avg_ratio, 2),
+                'score': round(ratio_score, 1),
+                'max': 15,
+                'top_brokers': [r['broker_code'] for r in ratio_results[:3]]
+            }
+            result['details'].append(f"Top5 Broker Avg Ratio: {avg_ratio:.2f}x = {ratio_score:.1f}/15 pts")
+        else:
+            ratio_score = 0
+            result['components']['broker_ratio'] = {'value': 0, 'score': 0, 'max': 15, 'top_brokers': []}
+
+        # 2. CONSOLIDATION PATTERN (20 points)
+        # Check price range over lookback period - tight range = consolidation
+        consol_query = """
+            SELECT
+                MAX(high_price) as period_high,
+                MIN(low_price) as period_low,
+                (array_agg(close_price ORDER BY date))[1] as first_close,
+                (array_agg(close_price ORDER BY date DESC))[1] as last_close,
+                COUNT(*) as days
+            FROM stock_daily
+            WHERE stock_code = %s
+            AND date >= CURRENT_DATE - INTERVAL '%s days'
+        """
+        consol_results = execute_query(consol_query, (stock_code, lookback_days))
+
+        if consol_results and consol_results[0]['period_high']:
+            r = consol_results[0]
+            period_high = float(r['period_high'])
+            period_low = float(r['period_low'])
+            first_close = float(r['first_close'])
+            last_close = float(r['last_close'])
+            price_range_pct = ((period_high - period_low) / period_low * 100) if period_low > 0 else 100
+            price_change_pct = ((last_close - first_close) / first_close * 100) if first_close > 0 else 0
+
+            # Consolidation: range < 15% and change < 10% = good accumulation zone
+            if price_range_pct < 10 and abs(price_change_pct) < 5:
+                consol_score = 20  # Perfect consolidation
+            elif price_range_pct < 15 and abs(price_change_pct) < 8:
+                consol_score = 15  # Good consolidation
+            elif price_range_pct < 20 and abs(price_change_pct) < 12:
+                consol_score = 10  # Moderate
+            elif price_range_pct < 30:
+                consol_score = 5   # Weak
+            else:
+                consol_score = 0   # No consolidation
+
+            result['components']['consolidation'] = {
+                'range_pct': round(price_range_pct, 1),
+                'change_pct': round(price_change_pct, 1),
+                'score': consol_score,
+                'max': 20
+            }
+            result['details'].append(f"Price Range: {price_range_pct:.1f}%, Change: {price_change_pct:+.1f}% = {consol_score}/20 pts")
+        else:
+            consol_score = 0
+            result['components']['consolidation'] = {'range_pct': 0, 'change_pct': 0, 'score': 0, 'max': 20}
+
+        # 3. PRICE DISTANCE FROM 52-WEEK LOW (20 points)
+        # Near bottom = better entry for accumulation
+        low52_query = """
+            SELECT
+                MIN(low_price) as low_52w,
+                MAX(high_price) as high_52w,
+                (SELECT close_price FROM stock_daily
+                 WHERE stock_code = %s ORDER BY date DESC LIMIT 1) as current_price
+            FROM stock_daily
+            WHERE stock_code = %s
+            AND date >= CURRENT_DATE - INTERVAL '365 days'
+        """
+        low52_results = execute_query(low52_query, (stock_code, stock_code))
+
+        if low52_results and low52_results[0]['low_52w']:
+            r = low52_results[0]
+            current_price = float(r['current_price'])
+            low_52w = float(r['low_52w'])
+            high_52w = float(r['high_52w'])
+            distance_from_low = ((current_price - low_52w) / low_52w * 100) if low_52w > 0 else 100
+
+            # Score: <10% from low = 20pts, <20% = 15pts, <30% = 10pts, <50% = 5pts
+            if distance_from_low < 10:
+                low_score = 20
+            elif distance_from_low < 20:
+                low_score = 15
+            elif distance_from_low < 30:
+                low_score = 10
+            elif distance_from_low < 50:
+                low_score = 5
+            else:
+                low_score = 0
+
+            result['components']['price_position'] = {
+                'current': current_price,
+                'low_52w': low_52w,
+                'high_52w': high_52w,
+                'distance_from_low_pct': round(distance_from_low, 1),
+                'score': low_score,
+                'max': 20
+            }
+            result['details'].append(f"Distance from 52w Low: {distance_from_low:.1f}% = {low_score}/20 pts")
+        else:
+            low_score = 0
+            result['components']['price_position'] = {'distance_from_low_pct': 100, 'score': 0, 'max': 20}
+
+        # 4. VOLUME CONTRACTION (15 points)
+        # Low volume during consolidation = stealth accumulation
+        vol_query = """
+            WITH recent_vol AS (
+                SELECT AVG(volume) as recent_avg
+                FROM stock_daily
+                WHERE stock_code = %s
+                AND date >= CURRENT_DATE - INTERVAL '%s days'
+            ),
+            historical_vol AS (
+                SELECT AVG(volume) as hist_avg
+                FROM stock_daily
+                WHERE stock_code = %s
+                AND date >= CURRENT_DATE - INTERVAL '90 days'
+                AND date < CURRENT_DATE - INTERVAL '%s days'
+            )
+            SELECT
+                r.recent_avg,
+                h.hist_avg,
+                CASE WHEN h.hist_avg > 0
+                     THEN r.recent_avg / h.hist_avg
+                     ELSE 1 END as volume_ratio
+            FROM recent_vol r, historical_vol h
+        """
+        vol_results = execute_query(vol_query, (stock_code, lookback_days, stock_code, lookback_days))
+
+        if vol_results and vol_results[0]['volume_ratio']:
+            vol_ratio = float(vol_results[0]['volume_ratio'])
+
+            # Volume contraction (ratio < 1) is bullish for accumulation
+            # ratio 0.5 = 15pts (50% lower volume), ratio 0.7 = 10pts, ratio 1.0 = 5pts
+            if vol_ratio < 0.5:
+                vol_score = 15
+            elif vol_ratio < 0.7:
+                vol_score = 12
+            elif vol_ratio < 0.9:
+                vol_score = 8
+            elif vol_ratio < 1.1:
+                vol_score = 5
+            else:
+                vol_score = 0  # Volume expansion - not accumulation pattern
+
+            result['components']['volume'] = {
+                'ratio': round(vol_ratio, 2),
+                'score': vol_score,
+                'max': 15,
+                'pattern': 'CONTRACTION' if vol_ratio < 0.9 else 'EXPANSION'
+            }
+            result['details'].append(f"Volume Ratio: {vol_ratio:.2f}x vs 90d avg = {vol_score}/15 pts")
+        else:
+            vol_score = 0
+            result['components']['volume'] = {'ratio': 1, 'score': 0, 'max': 15, 'pattern': 'UNKNOWN'}
+
+        # 5. DOMESTIC BROKER NET POSITIVE (15 points)
+        # Domestic brokers accumulating = local smart money
+        # Use correct FOREIGN_BROKER_CODES list
+        foreign_codes_list = list(FOREIGN_BROKER_CODES)
+        foreign_placeholders = ','.join(['%s'] * len(foreign_codes_list))
+        domestic_query = f"""
+            SELECT
+                SUM(CASE WHEN broker_code NOT IN ({foreign_placeholders})
+                         THEN net_lot ELSE 0 END) as domestic_net,
+                COUNT(DISTINCT CASE WHEN broker_code NOT IN ({foreign_placeholders})
+                                    AND net_lot > 0 THEN broker_code END) as domestic_buyers,
+                COUNT(DISTINCT CASE WHEN broker_code NOT IN ({foreign_placeholders})
+                                    AND net_lot < 0 THEN broker_code END) as domestic_sellers
+            FROM broker_summary
+            WHERE stock_code = %s
+            AND date >= CURRENT_DATE - INTERVAL '{lookback_days} days'
+        """
+        # Parameters: foreign_codes (3x for each CASE) + stock_code
+        domestic_params = tuple(foreign_codes_list * 3 + [stock_code])
+        domestic_results = execute_query(domestic_query, domestic_params)
+
+        if domestic_results:
+            r = domestic_results[0]
+            domestic_net = r['domestic_net'] or 0
+            buyers = r['domestic_buyers'] or 0
+            sellers = r['domestic_sellers'] or 0
+
+            # Score based on net position and buyer/seller ratio
+            if domestic_net > 0 and buyers > sellers * 1.5:
+                domestic_score = 15
+            elif domestic_net > 0 and buyers > sellers:
+                domestic_score = 12
+            elif domestic_net > 0:
+                domestic_score = 8
+            elif domestic_net == 0:
+                domestic_score = 5
+            else:
+                domestic_score = 0
+
+            result['components']['domestic_flow'] = {
+                'net_lot': domestic_net,
+                'buyers': buyers,
+                'sellers': sellers,
+                'score': domestic_score,
+                'max': 15
+            }
+            result['details'].append(f"Domestic Net: {domestic_net:+,.0f} lot ({buyers}B/{sellers}S) = {domestic_score}/15 pts")
+        else:
+            domestic_score = 0
+            result['components']['domestic_flow'] = {'net_lot': 0, 'score': 0, 'max': 15}
+
+        # 6. FOREIGN FLOW STARTING (15 points)
+        # Foreign starting to enter after domestic accumulation
+        # Use correct FOREIGN_BROKER_CODES list
+        foreign_query = f"""
+            WITH weekly_foreign AS (
+                SELECT
+                    DATE_TRUNC('week', date) as week,
+                    SUM(CASE WHEN broker_code IN ({foreign_placeholders})
+                             THEN net_lot ELSE 0 END) as foreign_net
+                FROM broker_summary
+                WHERE stock_code = %s
+                AND date >= CURRENT_DATE - INTERVAL '{lookback_days} days'
+                GROUP BY DATE_TRUNC('week', date)
+                ORDER BY week
+            )
+            SELECT
+                COUNT(*) as weeks,
+                SUM(CASE WHEN foreign_net > 0 THEN 1 ELSE 0 END) as positive_weeks,
+                (array_agg(foreign_net ORDER BY week DESC))[1] as last_week_net,
+                (array_agg(foreign_net ORDER BY week DESC))[2] as prev_week_net,
+                SUM(foreign_net) as total_foreign
+            FROM weekly_foreign
+        """
+        foreign_params = tuple(foreign_codes_list + [stock_code])
+        foreign_results = execute_query(foreign_query, foreign_params)
+
+        if foreign_results and foreign_results[0]['weeks']:
+            r = foreign_results[0]
+            total_foreign = r['total_foreign'] or 0
+            positive_weeks = r['positive_weeks'] or 0
+            last_week = r['last_week_net'] or 0
+            prev_week = r['prev_week_net'] or 0
+
+            # Score based on foreign flow trend
+            # Best: recent inflow starting (last week positive, improving)
+            if last_week > 0 and last_week > prev_week:
+                foreign_score = 15  # Foreign accelerating in
+            elif last_week > 0:
+                foreign_score = 12  # Foreign buying
+            elif total_foreign > 0:
+                foreign_score = 8   # Net positive overall
+            elif last_week > prev_week:
+                foreign_score = 5   # Improving (less selling)
+            else:
+                foreign_score = 0   # Foreign selling
+
+            result['components']['foreign_flow'] = {
+                'total': total_foreign,
+                'positive_weeks': positive_weeks,
+                'last_week': last_week,
+                'trend': 'ACCELERATING' if last_week > 0 and last_week > prev_week else
+                         'INFLOW' if last_week > 0 else
+                         'IMPROVING' if last_week > prev_week else 'OUTFLOW',
+                'score': foreign_score,
+                'max': 15
+            }
+            result['details'].append(f"Foreign Flow: {total_foreign:+,.0f} lot, Last week: {last_week:+,.0f} = {foreign_score}/15 pts")
+        else:
+            foreign_score = 0
+            result['components']['foreign_flow'] = {'total': 0, 'score': 0, 'max': 15, 'trend': 'UNKNOWN'}
+
+        # CALCULATE TOTAL SCORE
+        total_score = ratio_score + consol_score + low_score + vol_score + domestic_score + foreign_score
+        result['score'] = round(total_score, 1)
+
+        # INTERPRETATION
+        if total_score >= 70:
+            result['interpretation'] = 'STRONG ACCUMULATION'
+            result['signal'] = 'CONSIDER ENTRY'
+            result['color'] = '#28a745'  # Green
+        elif total_score >= 55:
+            result['interpretation'] = 'MODERATE ACCUMULATION'
+            result['signal'] = 'WATCH CLOSELY'
+            result['color'] = '#17a2b8'  # Cyan
+        elif total_score >= 40:
+            result['interpretation'] = 'WEAK ACCUMULATION'
+            result['signal'] = 'EARLY STAGE'
+            result['color'] = '#ffc107'  # Yellow
+        else:
+            result['interpretation'] = 'NO ACCUMULATION'
+            result['signal'] = 'AVOID'
+            result['color'] = '#dc3545'  # Red
+
+    except Exception as e:
+        result['error'] = str(e)
+        result['interpretation'] = 'ERROR'
+        result['signal'] = 'N/A'
+        result['color'] = '#6c757d'
+
+    return result
+
+
+def create_accumulation_score_card(stock_code: str):
+    """Create UI card for Accumulation Score display"""
+    acc_data = calculate_accumulation_score(stock_code, lookback_days=30)
+
+    # Component progress bars
+    component_bars = []
+    component_order = ['broker_ratio', 'consolidation', 'price_position', 'volume', 'domestic_flow', 'foreign_flow']
+    component_labels = {
+        'broker_ratio': 'Top Broker Buy/Sell Ratio',
+        'consolidation': 'Consolidation Pattern',
+        'price_position': 'Price vs 52w Low',
+        'volume': 'Volume Contraction',
+        'domestic_flow': 'Domestic Broker Flow',
+        'foreign_flow': 'Foreign Flow Trend'
+    }
+
+    for comp_key in component_order:
+        if comp_key in acc_data['components']:
+            comp = acc_data['components'][comp_key]
+            pct = (comp['score'] / comp['max'] * 100) if comp['max'] > 0 else 0
+
+            # Color based on score percentage
+            if pct >= 70:
+                bar_color = 'success'
+            elif pct >= 50:
+                bar_color = 'info'
+            elif pct >= 30:
+                bar_color = 'warning'
+            else:
+                bar_color = 'danger'
+
+            component_bars.append(
+                html.Div([
+                    html.Div([
+                        html.Small(component_labels.get(comp_key, comp_key), className="text-muted"),
+                        html.Small(f"{comp['score']:.0f}/{comp['max']}", className="float-end")
+                    ], className="d-flex justify-content-between"),
+                    dbc.Progress(value=pct, color=bar_color, className="mb-2", style={"height": "8px"})
+                ], className="mb-1")
+            )
+
+    # Detail items
+    detail_items = [html.Li(d, className="small") for d in acc_data.get('details', [])]
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="fas fa-layer-group me-2"),
+                "Accumulation Score (Backtest Formula)"
+            ], className="mb-0")
+        ]),
+        dbc.CardBody([
+            # Main Score Display
+            html.Div([
+                html.Div([
+                    html.H1(f"{acc_data['score']:.0f}",
+                            className="mb-0 display-4",
+                            style={"color": acc_data.get('color', '#6c757d')}),
+                    html.Span("/100", className="text-muted h4")
+                ]),
+                html.Div([
+                    html.Span(acc_data['interpretation'],
+                              className="badge fs-6",
+                              style={"backgroundColor": acc_data.get('color', '#6c757d')})
+                ], className="mt-2"),
+                html.Div([
+                    html.Strong(f"Signal: {acc_data['signal']}",
+                               style={"color": acc_data.get('color', '#6c757d')})
+                ], className="mt-1")
+            ], className="text-center p-3 mb-3", style={
+                "backgroundColor": "#2a2a2a",
+                "borderRadius": "10px",
+                "border": f"2px solid {acc_data.get('color', '#6c757d')}"
+            }),
+
+            # Component Breakdown
+            html.H6("Component Breakdown:", className="mb-3"),
+            html.Div(component_bars),
+
+            # Details
+            html.Hr(),
+            html.H6("Calculation Details:", className="mb-2"),
+            html.Ul(detail_items if detail_items else [
+                html.Li("No data available", className="text-muted small")
+            ], className="small mb-3", style={"paddingLeft": "20px"}),
+
+            # Score Guide
+            html.Hr(),
+            html.Div([
+                html.H6("Score Guide:", className="text-info mb-2"),
+                html.Ul([
+                    html.Li([html.Strong("≥70: ", style={"color": "#28a745"}), "STRONG ACCUMULATION - Consider Entry"]),
+                    html.Li([html.Strong("55-69: ", style={"color": "#17a2b8"}), "MODERATE - Watch Closely"]),
+                    html.Li([html.Strong("40-54: ", style={"color": "#ffc107"}), "WEAK/EARLY - Still Building"]),
+                    html.Li([html.Strong("<40: ", style={"color": "#dc3545"}), "NO ACCUMULATION - Avoid"]),
+                ], className="small")
+            ])
+        ])
+    ])
+
+
+# ============================================================
+# DISTRIBUTION SCORE CALCULATION (Dynamic for all stocks)
+# ============================================================
+
+def calculate_distribution_score(stock_code: str, lookback_days: int = 30) -> dict:
+    """
+    Calculate Distribution Score - Early warning for selling.
+
+    Berdasarkan backtest CDIA dan PANI, sinyal distribusi meliputi:
+    1. Top Broker Sell Ratio (20 pts) - Broker besar net seller?
+    2. Buyer Reversal (20 pts) - Pembeli kemarin jadi penjual?
+    3. Volume Climax (15 pts) - Volume spike dengan reversal?
+    4. Foreign Outflow (15 pts) - Asing keluar saat harga naik?
+    5. Price Near High (15 pts) - Harga dekat 52-week high?
+    6. Consecutive Down Days (15 pts) - Berturut-turut turun?
+
+    Score tinggi = WARNING to SELL
+    """
+    from analyzer import get_price_data, get_broker_data
+
+    result = {
+        'score': 0,
+        'max_score': 100,
+        'components': {},
+        'details': [],
+        'interpretation': '',
+        'signal': '',
+        'color': '',
+        'phase': 'UNKNOWN'
+    }
+
+    try:
+        price_df = get_price_data(stock_code)
+        broker_df = get_broker_data(stock_code)
+
+        if price_df.empty:
+            result['error'] = 'No price data'
+            return result
+
+        # Sort and get recent data
+        price_df = price_df.sort_values('date').tail(lookback_days * 2).reset_index(drop=True)
+
+        # Convert Decimal to float
+        for col in ['close_price', 'open_price', 'high_price', 'low_price', 'volume', 'value']:
+            if col in price_df.columns:
+                price_df[col] = price_df[col].astype(float)
+
+        current_price = float(price_df.iloc[-1]['close_price'])
+        current_date = price_df.iloc[-1]['date']
+
+        # ============================================================
+        # COMPONENT 1: Top Broker Sell Ratio (20 pts)
+        # Jika top 5 broker adalah net seller = distribusi signal
+        # ============================================================
+        broker_ratio_score = 0
+        broker_ratio_max = 20
+        broker_ratio_detail = ""
+
+        if not broker_df.empty:
+            recent_dates = sorted(broker_df['date'].unique())[-5:]
+            recent_broker = broker_df[broker_df['date'].isin(recent_dates)]
+
+            # Get top 5 brokers by absolute activity
+            broker_totals = recent_broker.groupby('broker_code').agg({
+                'net_value': 'sum',
+                'buy_value': 'sum',
+                'sell_value': 'sum'
+            }).reset_index()
+            broker_totals['abs_activity'] = abs(broker_totals['net_value'])
+            top_brokers = broker_totals.nlargest(5, 'abs_activity')
+
+            if not top_brokers.empty:
+                sellers = (top_brokers['net_value'] < 0).sum()
+                total_net = float(top_brokers['net_value'].sum())
+
+                # Score based on how many top brokers are selling
+                if sellers >= 4:
+                    broker_ratio_score = 20
+                elif sellers >= 3:
+                    broker_ratio_score = 15
+                elif sellers >= 2:
+                    broker_ratio_score = 10
+                elif total_net < 0:
+                    broker_ratio_score = 5
+
+                broker_ratio_detail = f"{sellers}/5 top brokers selling (Net: {total_net/1e9:.1f}B)"
+
+        result['components']['broker_ratio'] = {
+            'score': broker_ratio_score,
+            'max': broker_ratio_max,
+            'detail': broker_ratio_detail
+        }
+        result['details'].append(f"Top Broker Sell: {broker_ratio_detail}")
+
+        # ============================================================
+        # COMPONENT 2: Buyer Reversal Detection (20 pts)
+        # Pembeli besar kemarin menjadi penjual hari ini = strong signal
+        # ============================================================
+        reversal_score = 0
+        reversal_max = 20
+        reversal_detail = ""
+
+        if not broker_df.empty and len(broker_df['date'].unique()) >= 3:
+            dates = sorted(broker_df['date'].unique())
+
+            # Get last 3 days
+            if len(dates) >= 3:
+                prev_dates = dates[-4:-1]  # T-3 to T-1
+                current_day = dates[-1]    # T
+
+                prev_broker = broker_df[broker_df['date'].isin(prev_dates)]
+                curr_broker = broker_df[broker_df['date'] == current_day]
+
+                # Find big buyers in previous days
+                prev_totals = prev_broker.groupby('broker_code')['net_value'].sum()
+                big_buyers = prev_totals[prev_totals > 1e9].index.tolist()  # Bought > 1B
+
+                # Check if they're selling today
+                reversals = []
+                for buyer in big_buyers:
+                    today_net = curr_broker[curr_broker['broker_code'] == buyer]['net_value'].sum()
+                    if today_net < -500e6:  # Selling > 500M
+                        reversals.append(buyer)
+
+                if len(reversals) >= 3:
+                    reversal_score = 20
+                elif len(reversals) >= 2:
+                    reversal_score = 15
+                elif len(reversals) >= 1:
+                    reversal_score = 10
+
+                reversal_detail = f"{len(reversals)} buyer(s) reversed to seller: {', '.join(reversals[:3])}" if reversals else "No buyer reversal"
+
+        result['components']['buyer_reversal'] = {
+            'score': reversal_score,
+            'max': reversal_max,
+            'detail': reversal_detail
+        }
+        result['details'].append(f"Buyer Reversal: {reversal_detail}")
+
+        # ============================================================
+        # COMPONENT 3: Volume Climax Detection (15 pts)
+        # Volume spike dengan price reversal = distribution climax
+        # ============================================================
+        volume_climax_score = 0
+        volume_climax_max = 15
+        volume_climax_detail = ""
+
+        if len(price_df) >= 10:
+            avg_volume = price_df['volume'].tail(20).mean()
+            recent_5 = price_df.tail(5)
+
+            # Check for volume climax (volume > 2x average with reversal)
+            climax_found = False
+            for i in range(len(recent_5) - 1):
+                row = recent_5.iloc[i]
+                next_row = recent_5.iloc[i + 1]
+
+                vol_ratio = float(row['volume']) / avg_volume if avg_volume > 0 else 0
+                price_change = (float(next_row['close_price']) - float(row['close_price'])) / float(row['close_price']) * 100
+
+                if vol_ratio > 2.0 and price_change < -2:  # Volume spike + down > 2%
+                    climax_found = True
+                    volume_climax_score = 15
+                    volume_climax_detail = f"Volume climax {vol_ratio:.1f}x dengan reversal {price_change:.1f}%"
+                    break
+                elif vol_ratio > 1.5 and price_change < -1:
+                    if volume_climax_score < 10:
+                        volume_climax_score = 10
+                        volume_climax_detail = f"Volume spike {vol_ratio:.1f}x dengan pullback {price_change:.1f}%"
+
+            if not volume_climax_detail:
+                volume_climax_detail = "No volume climax detected"
+
+        result['components']['volume_climax'] = {
+            'score': volume_climax_score,
+            'max': volume_climax_max,
+            'detail': volume_climax_detail
+        }
+        result['details'].append(f"Volume Climax: {volume_climax_detail}")
+
+        # ============================================================
+        # COMPONENT 4: Foreign Outflow (15 pts)
+        # Asing keluar sementara harga naik = smart money distribusi
+        # ============================================================
+        foreign_score = 0
+        foreign_max = 15
+        foreign_detail = ""
+
+        if not broker_df.empty:
+            recent_dates = sorted(broker_df['date'].unique())[-5:]
+            recent_broker = broker_df[broker_df['date'].isin(recent_dates)].copy()
+
+            # Calculate foreign flow using correct FOREIGN_BROKER_CODES
+            recent_broker['is_foreign'] = recent_broker['broker_code'].isin(FOREIGN_BROKER_CODES)
+            foreign_flow = recent_broker[recent_broker['is_foreign']]['net_value'].sum()
+            domestic_flow = recent_broker[~recent_broker['is_foreign']]['net_value'].sum()
+
+            # Check price trend (is it going up while foreign selling?)
+            price_change_5d = 0
+            if len(price_df) >= 5:
+                price_change_5d = (current_price - float(price_df.iloc[-5]['close_price'])) / float(price_df.iloc[-5]['close_price']) * 100
+
+            # Scoring: Foreign outflow while price up = distribution
+            if foreign_flow < -10e9:  # Foreign sell > 10B
+                if price_change_5d >= 0:  # Price stable/up = distribution!
+                    foreign_score = 15
+                else:
+                    foreign_score = 10
+            elif foreign_flow < -5e9:  # Foreign sell > 5B
+                if price_change_5d >= 0:
+                    foreign_score = 12
+                else:
+                    foreign_score = 7
+            elif foreign_flow < 0:  # Any foreign outflow
+                foreign_score = 5
+
+            foreign_detail = f"Foreign: {foreign_flow/1e9:.1f}B, Price 5D: {price_change_5d:+.1f}%"
+
+        result['components']['foreign_outflow'] = {
+            'score': foreign_score,
+            'max': foreign_max,
+            'detail': foreign_detail
+        }
+        result['details'].append(f"Foreign Flow: {foreign_detail}")
+
+        # ============================================================
+        # COMPONENT 5: Price Near 52-week High (15 pts)
+        # Harga dekat high = zona distribusi
+        # ============================================================
+        price_high_score = 0
+        price_high_max = 15
+        price_high_detail = ""
+
+        if len(price_df) >= 20:
+            high_52w = price_df['high_price'].max()
+            low_52w = price_df['low_price'].min()
+
+            # Calculate position (0-100%)
+            price_range = high_52w - low_52w
+            if price_range > 0:
+                position_pct = (current_price - low_52w) / price_range * 100
+                distance_from_high = (high_52w - current_price) / high_52w * 100
+
+                # Score based on proximity to high
+                if distance_from_high < 5:  # Within 5% of high
+                    price_high_score = 15
+                elif distance_from_high < 10:
+                    price_high_score = 12
+                elif distance_from_high < 15:
+                    price_high_score = 8
+                elif position_pct > 70:  # In upper 30%
+                    price_high_score = 5
+
+                price_high_detail = f"Posisi {position_pct:.0f}% (High: {high_52w:,.0f}, {distance_from_high:.1f}% from high)"
+
+        result['components']['price_near_high'] = {
+            'score': price_high_score,
+            'max': price_high_max,
+            'detail': price_high_detail
+        }
+        result['details'].append(f"Price Position: {price_high_detail}")
+
+        # ============================================================
+        # COMPONENT 6: Consecutive Down Days (15 pts)
+        # Berturut-turut turun = momentum distribution
+        # ============================================================
+        down_days_score = 0
+        down_days_max = 15
+        down_days_detail = ""
+
+        if len(price_df) >= 5:
+            recent_5 = price_df.tail(5)
+            consecutive_down = 0
+            max_consecutive = 0
+
+            for i in range(1, len(recent_5)):
+                if float(recent_5.iloc[i]['close_price']) < float(recent_5.iloc[i-1]['close_price']):
+                    consecutive_down += 1
+                    max_consecutive = max(max_consecutive, consecutive_down)
+                else:
+                    consecutive_down = 0
+
+            if max_consecutive >= 4:
+                down_days_score = 15
+            elif max_consecutive >= 3:
+                down_days_score = 12
+            elif max_consecutive >= 2:
+                down_days_score = 8
+            elif max_consecutive >= 1:
+                down_days_score = 4
+
+            down_days_detail = f"{max_consecutive} hari turun berturut-turut (dari 5 hari)"
+
+        result['components']['down_days'] = {
+            'score': down_days_score,
+            'max': down_days_max,
+            'detail': down_days_detail
+        }
+        result['details'].append(f"Down Days: {down_days_detail}")
+
+        # ============================================================
+        # CALCULATE TOTAL SCORE
+        # ============================================================
+        total_score = sum(comp['score'] for comp in result['components'].values())
+        result['score'] = total_score
+
+        # ============================================================
+        # INTERPRETATION
+        # ============================================================
+        if total_score >= 70:
+            result['interpretation'] = 'STRONG SELL SIGNAL'
+            result['signal'] = 'SELL NOW'
+            result['color'] = '#dc3545'  # Red
+            result['phase'] = 'DISTRIBUTION'
+        elif total_score >= 55:
+            result['interpretation'] = 'SELL WARNING'
+            result['signal'] = 'CONSIDER SELLING'
+            result['color'] = '#fd7e14'  # Orange
+            result['phase'] = 'EARLY DISTRIBUTION'
+        elif total_score >= 40:
+            result['interpretation'] = 'WATCH CAREFULLY'
+            result['signal'] = 'REDUCE POSITION'
+            result['color'] = '#ffc107'  # Yellow
+            result['phase'] = 'MARKUP ENDING'
+        elif total_score >= 25:
+            result['interpretation'] = 'MINOR WARNING'
+            result['signal'] = 'HOLD/TRAIL STOP'
+            result['color'] = '#17a2b8'  # Info blue
+            result['phase'] = 'MARKUP'
+        else:
+            result['interpretation'] = 'NO DISTRIBUTION'
+            result['signal'] = 'HOLD'
+            result['color'] = '#28a745'  # Green
+            result['phase'] = 'ACCUMULATION/MARKUP'
+
+    except Exception as e:
+        result['error'] = str(e)
+        result['interpretation'] = 'ERROR'
+        result['signal'] = 'N/A'
+        result['color'] = '#6c757d'
+
+    return result
+
+
+def create_distribution_score_card(stock_code: str):
+    """Create UI card for Distribution Score display"""
+    dist_data = calculate_distribution_score(stock_code, lookback_days=30)
+
+    # Component progress bars
+    component_bars = []
+    component_order = ['broker_ratio', 'buyer_reversal', 'volume_climax', 'foreign_outflow', 'price_near_high', 'down_days']
+    component_labels = {
+        'broker_ratio': 'Top Broker Sell Ratio',
+        'buyer_reversal': 'Buyer Reversal',
+        'volume_climax': 'Volume Climax',
+        'foreign_outflow': 'Foreign Outflow',
+        'price_near_high': 'Price Near High',
+        'down_days': 'Consecutive Down Days'
+    }
+
+    for comp_key in component_order:
+        if comp_key in dist_data['components']:
+            comp = dist_data['components'][comp_key]
+            pct = (comp['score'] / comp['max'] * 100) if comp['max'] > 0 else 0
+
+            # Color - untuk distribution, score tinggi = danger (red)
+            if pct >= 70:
+                bar_color = 'danger'  # High distribution = red
+            elif pct >= 50:
+                bar_color = 'warning'
+            elif pct >= 30:
+                bar_color = 'info'
+            else:
+                bar_color = 'success'  # Low distribution = green
+
+            component_bars.append(
+                html.Div([
+                    html.Div([
+                        html.Small(component_labels.get(comp_key, comp_key), className="text-muted"),
+                        html.Small(f"{comp['score']:.0f}/{comp['max']}", className="float-end")
+                    ], className="d-flex justify-content-between"),
+                    dbc.Progress(
+                        value=pct,
+                        color=bar_color,
+                        className="mb-2",
+                        style={"height": "8px"}
+                    )
+                ], className="mb-1")
+            )
+
+    # Detail items
+    detail_items = [html.Li(detail, className="small") for detail in dist_data.get('details', [])]
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                "Distribution Score ",
+                dbc.Badge(
+                    f"{dist_data['score']:.0f}",
+                    color="danger" if dist_data['score'] >= 55 else "warning" if dist_data['score'] >= 40 else "success",
+                    className="ms-2"
+                ),
+                html.I(className="fas fa-info-circle ms-2 text-muted", id="dist-score-info", style={"cursor": "pointer"})
+            ], className="mb-0 d-flex align-items-center"),
+            dbc.Tooltip(
+                "Distribution Score mengukur sinyal distribusi/jual. Score tinggi = pertimbangkan jual.",
+                target="dist-score-info"
+            )
+        ]),
+        dbc.CardBody([
+            # Score Display
+            html.Div([
+                html.H1(f"{dist_data['score']:.0f}", className="display-4 mb-0 fw-bold"),
+                html.Small("/100", className="text-muted")
+            ], className="text-center mb-3", style={
+                "backgroundColor": dist_data.get('color', '#6c757d') + "20",
+                "padding": "20px",
+                "borderRadius": "10px",
+                "border": f"2px solid {dist_data.get('color', '#6c757d')}"
+            }),
+
+            # Signal Badge
+            html.Div([
+                dbc.Badge(
+                    dist_data.get('signal', 'N/A'),
+                    color="danger" if 'SELL' in dist_data.get('signal', '') else "warning" if 'REDUCE' in dist_data.get('signal', '') else "success",
+                    className="fs-6 mb-2"
+                ),
+                html.P(dist_data.get('interpretation', ''), className="text-muted small mb-0")
+            ], className="text-center mb-3"),
+
+            # Phase indicator
+            html.Div([
+                html.Strong("Phase: "),
+                dbc.Badge(
+                    dist_data.get('phase', 'UNKNOWN'),
+                    color={
+                        'DISTRIBUTION': 'danger',
+                        'EARLY DISTRIBUTION': 'warning',
+                        'MARKUP ENDING': 'info',
+                        'MARKUP': 'success',
+                        'ACCUMULATION/MARKUP': 'success'
+                    }.get(dist_data.get('phase', ''), 'secondary')
+                )
+            ], className="text-center mb-3"),
+
+            # Component Breakdown
+            html.H6("Component Breakdown:", className="mb-3"),
+            html.Div(component_bars),
+
+            # Details
+            html.Hr(),
+            html.H6("Calculation Details:", className="mb-2"),
+            html.Ul(detail_items if detail_items else [
+                html.Li("No data available", className="text-muted small")
+            ], className="small mb-3", style={"paddingLeft": "20px"}),
+
+            # Score Guide
+            html.Hr(),
+            html.Div([
+                html.H6("Score Guide:", className="text-danger mb-2"),
+                html.Ul([
+                    html.Li([html.Strong(">=70: ", style={"color": "#dc3545"}), "STRONG SELL - Exit Position"]),
+                    html.Li([html.Strong("55-69: ", style={"color": "#fd7e14"}), "SELL WARNING - Consider Selling"]),
+                    html.Li([html.Strong("40-54: ", style={"color": "#ffc107"}), "WATCH - Reduce Position"]),
+                    html.Li([html.Strong("25-39: ", style={"color": "#17a2b8"}), "MINOR - Use Trail Stop"]),
+                    html.Li([html.Strong("<25: ", style={"color": "#28a745"}), "SAFE - Hold Position"]),
+                ], className="small")
+            ])
+        ])
+    ])
+
+
+# ============================================================
 # METRIC EXPLANATIONS (untuk user minimal knowledge)
 # ============================================================
 METRIC_EXPLANATIONS = {
@@ -934,15 +2055,17 @@ def create_navbar():
                 dbc.NavItem(dbc.NavLink("Position", href="/position", id="nav-position")),
                 dbc.NavItem(dbc.NavLink("Upload Data", href="/upload", id="nav-upload")),
             ], className="me-auto", navbar=True),
-            # Stock Selector
+            # Stock Selector - with persistence to maintain selection across pages
             html.Div([
                 html.Span("Emiten: ", className="text-light me-2"),
                 dcc.Dropdown(
                     id='stock-selector',
                     options=[{'label': s, 'value': s} for s in stocks],
-                    value=stocks[0] if stocks else 'CDIA',
+                    value=stocks[0] if stocks else 'PANI',
                     style={'width': '120px', 'color': 'black'},
-                    clearable=False
+                    clearable=False,
+                    persistence=True,
+                    persistence_type='session'
                 )
             ], className="d-flex align-items-center")
         ], fluid=True),
@@ -1383,10 +2506,22 @@ def create_buy_signal_card(buy_signal):
                                 className=f"text-{zone_color}"
                             )
                         ], className="mb-1"),
+                        # Phase Tracking Info
+                        html.P([
+                            html.Strong("Harga Tertinggi: "),
+                            html.Span(
+                                f"Rp {buy_signal.get('phase_tracking', {}).get('highest_price', 0):,.0f}",
+                                className="text-warning"
+                            ),
+                            html.Span(
+                                f" (+{buy_signal.get('phase_tracking', {}).get('max_gain_pct', 0):.1f}%)",
+                                className="text-warning"
+                            )
+                        ], className="mb-1") if buy_signal.get('phase_tracking') else None,
                     ])
                 ], width=4),
 
-                # Safe Entry Zone
+                # Safe Entry Zone + Phase Status
                 dbc.Col([
                     html.Div([
                         html.H6("Safe Entry Zone", className="text-info"),
@@ -1404,7 +2539,27 @@ def create_buy_signal_card(buy_signal):
                                 "AMAN" if buy_signal['safe_entry']['is_safe'] else "MAHAL",
                                 className=f"text-{'success' if buy_signal['safe_entry']['is_safe'] else 'danger'} fw-bold"
                             )
-                        ], className="mb-0 small"),
+                        ], className="mb-1 small"),
+                        # Phase Status
+                        html.P([
+                            html.Strong("Fase: "),
+                            dbc.Badge(
+                                buy_signal.get('phase_tracking', {}).get('status', 'UNKNOWN'),
+                                color={
+                                    'ACCUMULATING': 'info',
+                                    'MARKUP': 'success',
+                                    'DISTRIBUTION': 'danger',
+                                    'SIDEWAYS': 'warning',
+                                    'ENDED': 'secondary'
+                                }.get(buy_signal.get('phase_tracking', {}).get('status', ''), 'secondary'),
+                                className="ms-1"
+                            ),
+                            # Show phase message as tooltip/small text
+                            html.Small(
+                                f" ({buy_signal.get('phase_tracking', {}).get('foreign_flow_10d', 0):+.1f}B)",
+                                className="text-muted"
+                            ) if buy_signal.get('phase_tracking', {}).get('foreign_flow_10d') else None
+                        ], className="mb-0 small") if buy_signal.get('phase_tracking') else None,
                     ])
                 ], width=4),
 
@@ -1438,7 +2593,9 @@ def create_buy_signal_card(buy_signal):
                 html.Br(),
                 "• SAFE/MODERATE: Harga naik <7% dari sinyal → masih aman",
                 html.Br(),
-                "• CAUTION/FOMO: Harga naik >7% dari sinyal → risiko tinggi, tunggu pullback"
+                "• CAUTION/FOMO: Harga naik >7% dari sinyal → risiko tinggi, tunggu pullback",
+                html.Br(),
+                "• PHASE ENDED: Harga pernah naik >10% lalu turun ke <5% → fase akumulasi selesai, tunggu sinyal baru"
             ], className="text-muted d-block mt-1")
         ])
     ], className="mb-4", color="dark", outline=True)
@@ -4692,29 +5849,40 @@ def create_broker_history_chart(broker_code, stock_code='CDIA'):
 def create_position_page(stock_code='CDIA'):
     """Create broker position analysis page"""
 
-    # Get position data
+    # Try to get IPO position data first
     position_df = calculate_broker_current_position(stock_code)
+    data_source = 'IPO'
 
+    # If no IPO data, fallback to daily broker summary data
+    if position_df.empty:
+        position_df = calculate_broker_position_from_daily(stock_code, days=90)
+        data_source = 'DAILY'
+
+    # If still empty, show no data message
     if position_df.empty:
         return html.Div([
             dbc.Alert([
-                html.H5("Data IPO Position Belum Tersedia", className="alert-heading"),
-                html.P(f"Tidak ada data posisi broker dari IPO untuk {stock_code}."),
+                html.H5("Data Position Belum Tersedia", className="alert-heading"),
+                html.P(f"Tidak ada data posisi broker untuk {stock_code}."),
                 html.Hr(),
                 html.P([
-                    "Untuk menggunakan fitur ini, upload file Excel dengan data IPO di kolom Z-AH.",
-                    html.Br(),
-                    "Format: buy, buy_val, buy_lot, buy_avg, sell, sell_val, sell_lot, sell_avg"
+                    "Untuk menggunakan fitur ini, upload file Excel dengan data broker.",
                 ], className="mb-0")
             ], color="warning"),
             dbc.Button("Upload Data", href="/upload", color="primary")
         ])
 
-    # Get IPO period info
-    ipo_df = get_ipo_position(stock_code)
-    period_start = ipo_df['period_start'].iloc[0] if not ipo_df.empty and 'period_start' in ipo_df.columns else None
-    period_end = ipo_df['period_end'].iloc[0] if not ipo_df.empty and 'period_end' in ipo_df.columns else None
-    period_str = f"{period_start.strftime('%d %b %Y') if period_start else 'N/A'} - {period_end.strftime('%d %b %Y') if period_end else 'N/A'}"
+    # Get period info based on data source
+    if data_source == 'IPO':
+        ipo_df = get_ipo_position(stock_code)
+        period_start = ipo_df['period_start'].iloc[0] if not ipo_df.empty and 'period_start' in ipo_df.columns else None
+        period_end = ipo_df['period_end'].iloc[0] if not ipo_df.empty and 'period_end' in ipo_df.columns else None
+        period_str = f"IPO: {period_start.strftime('%d %b %Y') if period_start else 'N/A'} - {period_end.strftime('%d %b %Y') if period_end else 'N/A'}"
+    else:
+        # Daily data - show date range from the data
+        first_date = position_df['first_date'].min() if 'first_date' in position_df.columns else None
+        last_date = position_df['last_date'].max() if 'last_date' in position_df.columns else None
+        period_str = f"Daily Data (90 hari): {first_date.strftime('%d %b %Y') if first_date else 'N/A'} - {last_date.strftime('%d %b %Y') if last_date else 'N/A'}"
 
     # Current price
     current_price = position_df['current_price'].iloc[0] if 'current_price' in position_df.columns else 0
@@ -4744,7 +5912,7 @@ def create_position_page(stock_code='CDIA'):
             f"Broker Position Analysis - {stock_code}"
         ], className="mb-2"),
         html.P([
-            f"Data IPO: {period_str} | ",
+            f"{period_str} | ",
             f"Current Price: Rp {current_price:,.0f}"
         ], className="text-muted mb-4"),
 
@@ -4805,14 +5973,14 @@ def create_position_page(stock_code='CDIA'):
                     dbc.CardBody([
                         dash_table.DataTable(
                             data=top_holders[[
-                                'broker_code', 'broker_type', 'net_lot', 'ipo_avg_buy', 'floating_pnl_pct'
+                                'broker_code', 'broker_type', 'net_lot', 'weighted_avg_buy', 'floating_pnl_pct'
                             ]].to_dict('records') if not top_holders.empty else [],
                             columns=[
                                 {'name': 'Broker', 'id': 'broker_code'},
                                 {'name': 'Type', 'id': 'broker_type'},
                                 {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
                                  'format': {'specifier': ',.0f'}},
-                                {'name': 'Avg Buy', 'id': 'ipo_avg_buy', 'type': 'numeric',
+                                {'name': 'Avg Buy', 'id': 'weighted_avg_buy', 'type': 'numeric',
                                  'format': {'specifier': ',.0f'}},
                                 {'name': 'Float P/L', 'id': 'floating_pnl_pct', 'type': 'numeric',
                                  'format': {'specifier': '+.1f'}},
@@ -4860,7 +6028,15 @@ def create_position_page(stock_code='CDIA'):
                 ], className="mb-4"),
 
                 # Phase Analysis
-                create_phase_analysis_card(stock_code, current_price)
+                create_phase_analysis_card(stock_code, current_price),
+
+                # Accumulation Score (Backtest Formula)
+                html.Div(className="mt-4"),
+                create_accumulation_score_card(stock_code),
+
+                # Distribution Score (Backtest Formula)
+                html.Div(className="mt-4"),
+                create_distribution_score_card(stock_code)
             ], md=7),
 
             # Right column - Support/Resistance & Ownership
@@ -5103,73 +6279,52 @@ def create_selling_pressure_chart(position_df, current_price):
 # ============================================================
 
 # Render navbar sekali di layout (tidak re-render setiap URL change)
-app.layout = html.Div([
-    dcc.Store(id='selected-stock', data='CDIA', storage_type='session'),  # Persist across page navigation
-    dcc.Location(id='url', refresh=False),
-    create_navbar(),  # Navbar statis, tidak re-render
-    dbc.Container(id='page-content', fluid=True)
-])
+def create_app_layout():
+    """Create app layout - dropdown uses persistence for session storage"""
+    return html.Div([
+        dcc.Location(id='url', refresh=False),
+        create_navbar(),
+        dbc.Container(id='page-content', fluid=True)
+    ])
+
+app.layout = create_app_layout()
 
 # ============================================================
 # CALLBACKS
 # ============================================================
 
-# Sync dropdown value dengan store (untuk saat page reload/initial load)
 @app.callback(
-    Output('stock-selector', 'value'),
-    Input('selected-stock', 'data'),
-    prevent_initial_call=True
+    Output('page-content', 'children'),
+    [Input('url', 'pathname'), Input('stock-selector', 'value')]
 )
-def sync_dropdown_with_store(stored_value):
-    """Sync dropdown dengan store untuk maintain selection"""
-    return stored_value if stored_value else 'CDIA'
-
-@app.callback(Output('selected-stock', 'data'), Input('stock-selector', 'value'))
-def update_selected_stock(value):
-    return value if value else 'CDIA'
-
-@app.callback(
-    [Output('page-content', 'children'), Output('selected-stock', 'data', allow_duplicate=True)],
-    [Input('url', 'pathname'), Input('url', 'search')],
-    [State('selected-stock', 'data')],
-    prevent_initial_call='initial_duplicate'
-)
-def display_page(pathname, search, stored_stock):
-    from urllib.parse import parse_qs
-
-    # Parse query parameter ?stock=XXX
-    stock_from_url = None
-    if search:
-        params = parse_qs(search.lstrip('?'))
-        stock_from_url = params.get('stock', [None])[0]
-
-    # Use URL param if provided, otherwise use stored value
-    stock_code = stock_from_url or stored_stock or 'CDIA'
+def display_page(pathname, selected_stock):
+    """Main routing callback - triggers on URL change OR stock selection change"""
+    # Get default stock if none selected
+    if not selected_stock:
+        stocks = get_available_stocks()
+        selected_stock = stocks[0] if stocks else 'PANI'
 
     # Route to appropriate page
     if pathname == '/':
-        content = create_landing_page()
+        return create_landing_page()
     elif pathname == '/dashboard':
-        content = create_dashboard_page(stock_code)
+        return create_dashboard_page(selected_stock)
     elif pathname == '/analysis':
-        content = create_analysis_page(stock_code)
+        return create_analysis_page(selected_stock)
     elif pathname == '/bandarmology':
-        content = create_bandarmology_page(stock_code)  # Legacy
+        return create_bandarmology_page(selected_stock)
     elif pathname == '/summary':
-        content = create_summary_page(stock_code)  # Legacy
+        return create_summary_page(selected_stock)
     elif pathname == '/ranking':
-        content = create_ranking_page(stock_code)
+        return create_ranking_page(selected_stock)
     elif pathname == '/alerts':
-        content = create_alerts_page(stock_code)
+        return create_alerts_page(selected_stock)
     elif pathname == '/position':
-        content = create_position_page(stock_code)
+        return create_position_page(selected_stock)
     elif pathname == '/upload':
-        content = create_upload_page()
+        return create_upload_page()
     else:
-        content = create_landing_page()
-
-    # Return content and update store if stock from URL
-    return content, stock_code
+        return create_landing_page()
 
 # Password validation callback for upload page
 @app.callback(
@@ -5195,9 +6350,12 @@ def validate_upload_password(n_clicks, password):
             dbc.Alert("Password salah! Silakan coba lagi.", color="danger", className="mt-2")
         )
 
-@app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('selected-stock', 'data')])
+@app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('stock-selector', 'value')])
 def update_broker_options(pathname, stock_code):
-    broker_df = get_broker_data(stock_code or 'CDIA')
+    if not stock_code:
+        stocks = get_available_stocks()
+        stock_code = stocks[0] if stocks else 'PANI'
+    broker_df = get_broker_data(stock_code)
     if broker_df.empty:
         return []
     top_brokers = broker_df.groupby('broker_code')['net_value'].sum().abs().nlargest(20).index.tolist()
@@ -5210,11 +6368,13 @@ def update_broker_options(pathname, stock_code):
      Output("movement-container", "children"), Output("sensitivity-container", "children"),
      Output("watchlist-container", "children"),
      Output("last-refresh", "children")],
-    [Input("refresh-btn", "n_clicks"), Input('selected-stock', 'data')],
+    [Input("refresh-btn", "n_clicks"), Input('stock-selector', 'value')],
     prevent_initial_call=False
 )
 def refresh_dashboard(n_clicks, stock_code):
-    stock_code = stock_code or 'CDIA'
+    if not stock_code:
+        stocks = get_available_stocks()
+        stock_code = stocks[0] if stocks else 'PANI'
     return (
         create_summary_cards(stock_code),
         create_price_chart(stock_code),
@@ -5228,11 +6388,14 @@ def refresh_dashboard(n_clicks, stock_code):
         f"Refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
 
-@app.callback(Output("broker-detail-container", "children"), [Input("broker-select", "value"), Input('selected-stock', 'data')])
+@app.callback(Output("broker-detail-container", "children"), [Input("broker-select", "value"), Input('stock-selector', 'value')])
 def update_broker_detail(broker_code, stock_code):
     if not broker_code:
         return html.Div("Select a broker")
-    return create_broker_history_chart(broker_code, stock_code or 'CDIA')
+    if not stock_code:
+        stocks = get_available_stocks()
+        stock_code = stocks[0] if stocks else 'PANI'
+    return create_broker_history_chart(broker_code, stock_code)
 
 # Upload callbacks
 @app.callback(

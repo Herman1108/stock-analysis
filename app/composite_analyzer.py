@@ -1042,11 +1042,130 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
     # Hitung perubahan harga dari sinyal
     price_change_pct = float((current_price - signal_price) / signal_price * 100)
 
-    # Tentukan zone berdasarkan arah pergerakan harga
+    # ============================================================
+    # ACCUMULATION/DISTRIBUTION PHASE DETECTION (Dynamic for all stocks)
+    # ============================================================
+    # Reset conditions:
+    # 1. Harga naik >10% lalu turun ke <5% → fase akumulasi berakhir
+    # 2. Saat akumulasi tapi foreign OUTFLOW kuat → beralih ke distribusi
+    # 3. Saat distribusi tapi foreign INFLOW kuat → beralih ke akumulasi
+
+    # Get highest price since signal date
+    price_since_signal = price_df[price_df['date'] >= signal_date]
+    highest_price = float(price_since_signal['high_price'].max()) if not price_since_signal.empty else signal_price
+    max_gain_pct = float((highest_price - signal_price) / signal_price * 100)
+
+    # ============================================================
+    # Detect current market phase from Foreign Flow & Broker Activity
+    # ============================================================
+    # Calculate 10-day foreign flow from broker_summary
+    last_10_dates = price_df.tail(10)['date'].tolist()
+    broker_df_copy = broker_df.copy()
+    broker_df_copy['is_foreign'] = broker_df_copy['broker_code'].isin(FOREIGN_BROKER_CODES)
+
+    foreign_10d = broker_df_copy[
+        (broker_df_copy['is_foreign']) &
+        (broker_df_copy['date'].isin(last_10_dates))
+    ]
+    foreign_flow_10d = float(foreign_10d['net_value'].sum()) if not foreign_10d.empty else 0
+    foreign_lot_10d = float(foreign_10d['net_lot'].sum()) if not foreign_10d.empty else 0
+
+    # Calculate broker activity (top brokers buy vs sell)
+    recent_broker = broker_df_copy[broker_df_copy['date'].isin(last_10_dates)]
+    if not recent_broker.empty:
+        broker_net = recent_broker.groupby('broker_code')['net_value'].sum()
+        top_buyers = broker_net[broker_net > 0].nlargest(5).sum() if len(broker_net[broker_net > 0]) > 0 else 0
+        top_sellers = abs(broker_net[broker_net < 0].nsmallest(5).sum()) if len(broker_net[broker_net < 0]) > 0 else 0
+        broker_ratio = top_buyers / top_sellers if top_sellers > 0 else (2.0 if top_buyers > 0 else 1.0)
+    else:
+        broker_ratio = 1.0
+        top_buyers = 0
+        top_sellers = 0
+
+    # Determine current market phase based on foreign flow
+    # Strong OUTFLOW = Distribution, Strong INFLOW = Accumulation
+    foreign_flow_billion = foreign_flow_10d / 1e9
+
+    if foreign_flow_billion < -20:  # Strong outflow > 20B
+        current_market_phase = 'STRONG_DISTRIBUTION'
+    elif foreign_flow_billion < -5:  # Moderate outflow > 5B
+        current_market_phase = 'DISTRIBUTION'
+    elif foreign_flow_billion > 20:  # Strong inflow > 20B
+        current_market_phase = 'STRONG_ACCUMULATION'
+    elif foreign_flow_billion > 5:  # Moderate inflow > 5B
+        current_market_phase = 'ACCUMULATION'
+    else:
+        current_market_phase = 'NEUTRAL'
+
+    # ============================================================
+    # Phase Status Determination with Reset Logic
+    # ============================================================
+    accumulation_phase_ended = False
+    distribution_phase_ended = False
+    phase_status = 'ACTIVE'
+    phase_message = ''
+    phase_reason = ''
+
+    # CONDITION 1: Price-based reset (existing logic)
+    if max_gain_pct >= 10:
+        if price_change_pct < 5:
+            accumulation_phase_ended = True
+            phase_status = 'ENDED'
+            phase_reason = 'PRICE_REVERSAL'
+            phase_message = f'Fase berakhir (harga). Pernah naik {max_gain_pct:.1f}%, sekarang {price_change_pct:+.1f}%.'
+        else:
+            phase_status = 'MARKUP'
+            phase_message = f'Fase markup. Harga +{max_gain_pct:.1f}% dari sinyal.'
+
+    # CONDITION 2: Distribution detected while expecting accumulation
+    elif current_market_phase in ['DISTRIBUTION', 'STRONG_DISTRIBUTION']:
+        accumulation_phase_ended = True
+        phase_status = 'DISTRIBUTION'
+        phase_reason = 'FOREIGN_OUTFLOW'
+        phase_message = f'Fase DISTRIBUSI terdeteksi! Foreign outflow {foreign_flow_billion:.1f}B ({foreign_lot_10d:,.0f} lot).'
+
+    # CONDITION 3: Strong accumulation detected
+    elif current_market_phase in ['ACCUMULATION', 'STRONG_ACCUMULATION']:
+        phase_status = 'ACCUMULATING'
+        phase_message = f'Fase akumulasi aktif. Foreign inflow +{foreign_flow_billion:.1f}B.'
+
+    # CONDITION 4: Neutral - use broker ratio as tiebreaker
+    else:
+        if broker_ratio >= 1.3:
+            phase_status = 'ACCUMULATING'
+            phase_message = f'Fase akumulasi (broker ratio {broker_ratio:.2f}). Foreign: {foreign_flow_billion:+.1f}B.'
+        elif broker_ratio <= 0.7:
+            phase_status = 'DISTRIBUTION'
+            phase_reason = 'BROKER_SELLING'
+            phase_message = f'Fase distribusi (broker ratio {broker_ratio:.2f}). Foreign: {foreign_flow_billion:+.1f}B.'
+        else:
+            phase_status = 'SIDEWAYS'
+            phase_message = f'Fase sideways/netral. Foreign: {foreign_flow_billion:+.1f}B, ratio: {broker_ratio:.2f}.'
+
+    # Tentukan zone berdasarkan arah pergerakan harga DAN fase market
+    # CASE 0: Phase ENDED (price reversal atau distribution detected)
     # CASE 1: Harga TURUN dari sinyal (price_change_pct < 0)
     # CASE 2: Harga NAIK dari sinyal (price_change_pct >= 0)
 
-    if price_change_pct < -10:
+    # CASE 0a: Phase ended due to PRICE REVERSAL (rose >10%, fell back)
+    if phase_reason == 'PRICE_REVERSAL':
+        zone = 'PHASE ENDED'
+        zone_color = 'secondary'
+        zone_desc = f'Fase BERAKHIR (harga). Pernah naik {max_gain_pct:.1f}% lalu turun. Tunggu sinyal baru!'
+        recommendation = 'WAIT NEW SIGNAL'
+    # CASE 0b: Distribution detected due to FOREIGN OUTFLOW
+    elif phase_reason == 'FOREIGN_OUTFLOW':
+        zone = 'DISTRIBUTION'
+        zone_color = 'danger'
+        zone_desc = f'DISTRIBUSI terdeteksi! Foreign outflow {foreign_flow_billion:.1f}B. Sinyal tidak valid!'
+        recommendation = 'SELL/AVOID'
+    # CASE 0c: Distribution detected due to BROKER SELLING
+    elif phase_reason == 'BROKER_SELLING':
+        zone = 'DISTRIBUTION'
+        zone_color = 'warning'
+        zone_desc = f'Distribusi (broker selling). Ratio {broker_ratio:.2f}. Hati-hati!'
+        recommendation = 'REVIEW'
+    elif price_change_pct < -10:
         # Harga turun banyak dari sinyal = SIGNAL FAILED atau DEEP DISCOUNT
         zone = 'SIGNAL FAILED'
         zone_color = 'danger'
@@ -1109,6 +1228,19 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
             'ideal_price': ideal_entry_price,
             'max_price': safe_entry_price,
             'is_safe': is_entry_safe
+        },
+        # Accumulation/Distribution phase tracking (dynamic for all stocks)
+        'phase_tracking': {
+            'status': phase_status,  # ACCUMULATING, MARKUP, DISTRIBUTION, SIDEWAYS, or ENDED
+            'highest_price': highest_price,
+            'max_gain_pct': max_gain_pct,
+            'phase_ended': accumulation_phase_ended,
+            'message': phase_message,
+            'reason': phase_reason,
+            'foreign_flow_10d': foreign_flow_billion,
+            'foreign_lot_10d': foreign_lot_10d,
+            'broker_ratio': broker_ratio,
+            'market_phase': current_market_phase
         },
         'all_signals': signals,
         'interpretation': {
@@ -1253,24 +1385,46 @@ def calculate_foreign_flow_momentum(stock_code: str = 'CDIA', lookback: int = 20
     - Flow vs Price: Korelasi N Foreign dengan perubahan harga
 
     Scoring: Foreign Score = (Direction × 1) + (Momentum × 2) + (Consistency × 3)
+
+    NOTE: Menggunakan broker_summary dengan FOREIGN_BROKER_CODES yang benar
+    (bukan net_foreign dari stock_daily yang mungkin salah)
     """
+    # Get price data for correlation calculation
     price_df = get_price_data(stock_code)
+    broker_df = get_broker_data(stock_code)
 
-    if price_df.empty or 'net_foreign' not in price_df.columns:
-        return {'score': 0, 'signal': 'NO_DATA'}
+    if price_df.empty or broker_df.empty:
+        return {'score': 0, 'signal': 'NO_DATA', 'total_5d': 0, 'total_10d': 0}
 
-    df = price_df.sort_values('date').tail(lookback + 5).copy()
+    price_df = price_df.sort_values('date').tail(lookback + 5).copy()
+    broker_df = broker_df.sort_values('date')
+
+    if len(price_df) < 5:
+        return {'score': 0, 'signal': 'INSUFFICIENT_DATA', 'total_5d': 0, 'total_10d': 0}
+
+    # Drop existing net_foreign column if exists (from stock_daily which may be incorrect)
+    if 'net_foreign' in price_df.columns:
+        price_df = price_df.drop(columns=['net_foreign'])
+
+    # Calculate daily foreign flow from broker_summary using correct FOREIGN_BROKER_CODES
+    broker_df['is_foreign'] = broker_df['broker_code'].isin(FOREIGN_BROKER_CODES)
+    daily_foreign = broker_df[broker_df['is_foreign']].groupby('date')['net_value'].sum().reset_index()
+    daily_foreign.columns = ['date', 'net_foreign']
+
+    # Merge with price data
+    df = price_df.merge(daily_foreign, on='date', how='left')
+    df['net_foreign'] = df['net_foreign'].fillna(0)
 
     if len(df) < 5:
-        return {'score': 0, 'signal': 'INSUFFICIENT_DATA'}
+        return {'score': 0, 'signal': 'INSUFFICIENT_DATA', 'total_5d': 0, 'total_10d': 0}
 
     # Flow Direction (latest)
-    latest_foreign = df['net_foreign'].iloc[-1]
+    latest_foreign = float(df['net_foreign'].iloc[-1])
     direction = 1 if latest_foreign > 0 else (-1 if latest_foreign < 0 else 0)
 
     # Flow Momentum (acceleration)
     if len(df) >= 2:
-        prev_foreign = df['net_foreign'].iloc[-2]
+        prev_foreign = float(df['net_foreign'].iloc[-2])
         momentum = latest_foreign - prev_foreign
         momentum_score = 1 if momentum > 0 else (-1 if momentum < 0 else 0)
     else:
@@ -1280,12 +1434,13 @@ def calculate_foreign_flow_momentum(stock_code: str = 'CDIA', lookback: int = 20
     # Flow Consistency (consecutive days)
     consistency = 0
     for i in range(len(df) - 1, -1, -1):
-        if df['net_foreign'].iloc[i] > 0:
+        val = float(df['net_foreign'].iloc[i])
+        if val > 0:
             if consistency >= 0:
                 consistency += 1
             else:
                 break
-        elif df['net_foreign'].iloc[i] < 0:
+        elif val < 0:
             if consistency <= 0:
                 consistency -= 1
             else:
@@ -1294,8 +1449,8 @@ def calculate_foreign_flow_momentum(stock_code: str = 'CDIA', lookback: int = 20
     consistency_score = min(abs(consistency), 10) * (1 if consistency > 0 else -1)
 
     # Flow vs Price Correlation
-    df['price_change'] = df['close_price'].pct_change()
-    correlation = df['net_foreign'].corr(df['price_change'])
+    df['price_change'] = df['close_price'].astype(float).pct_change()
+    correlation = df['net_foreign'].astype(float).corr(df['price_change'])
     correlation = 0 if pd.isna(correlation) else correlation
 
     # Calculate Foreign Score
@@ -1309,9 +1464,9 @@ def calculate_foreign_flow_momentum(stock_code: str = 'CDIA', lookback: int = 20
     recent_5 = df.tail(5)
     recent_10 = df.tail(10)
 
-    total_5d = recent_5['net_foreign'].sum()
-    total_10d = recent_10['net_foreign'].sum()
-    avg_daily = df.tail(lookback)['net_foreign'].mean()
+    total_5d = float(recent_5['net_foreign'].sum())
+    total_10d = float(recent_10['net_foreign'].sum())
+    avg_daily = float(df.tail(lookback)['net_foreign'].mean())
 
     # Signal determination
     if foreign_score >= 75:
@@ -1628,14 +1783,26 @@ def detect_accumulation_phase(stock_code: str = 'CDIA', sensitivity_data: Dict =
     vol_increasing = vol_increase > 10
     vol_score = min(100, max(0, 50 + vol_increase))
 
-    # 3. Net Foreign Tendency
-    if 'net_foreign' in df.columns:
-        recent_foreign = df.tail(10)['net_foreign'].sum()
-        foreign_positive = recent_foreign > 0
-        foreign_score = min(100, max(0, 50 + (recent_foreign / 1e9) * 5))
-    else:
-        foreign_positive = None
-        foreign_score = 50
+    # 3. Net Foreign Tendency - Calculate from broker_summary using correct FOREIGN_BROKER_CODES
+    # (NOT from stock_daily.net_foreign which may have incorrect data)
+    recent_foreign = 0
+    if not broker_df.empty:
+        # Get last 10 trading days from price data
+        last_10_dates = df.tail(10)['date'].tolist()
+
+        # Filter broker data for these dates and foreign brokers
+        broker_df_copy = broker_df.copy()
+        broker_df_copy['is_foreign'] = broker_df_copy['broker_code'].isin(FOREIGN_BROKER_CODES)
+        foreign_recent = broker_df_copy[
+            (broker_df_copy['is_foreign']) &
+            (broker_df_copy['date'].isin(last_10_dates))
+        ]
+
+        if not foreign_recent.empty:
+            recent_foreign = float(foreign_recent['net_value'].sum())
+
+    foreign_positive = recent_foreign > 0
+    foreign_score = min(100, max(0, 50 + (recent_foreign / 1e9) * 5))
 
     # 4. Sensitive Brokers Check (use pre-computed if available)
     sensitivity = sensitivity_data if sensitivity_data else calculate_broker_sensitivity_advanced(stock_code)
@@ -1712,7 +1879,7 @@ def detect_accumulation_phase(stock_code: str = 'CDIA', sensitivity_data: Dict =
             },
             'foreign_positive': {
                 'met': foreign_positive,
-                'total_10d': round(recent_foreign / 1e9, 2) if 'net_foreign' in df.columns else 0,
+                'total_10d': round(recent_foreign / 1e9, 2),  # Now correctly calculated from broker_summary
                 'score': round(foreign_score, 1)
             },
             'sensitive_brokers_active': {

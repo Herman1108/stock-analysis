@@ -1,0 +1,374 @@
+/* ============================================
+   RESPONSIVE PWA STYLES
+   Stock Broker Analysis Dashboard
+
+   IMPORTANT: Desktop styles are PRESERVED
+   Mobile styles only apply for screens < 768px
+   ============================================ */
+
+/* CSS Variables (does not affect existing styles) */
+:root {
+  --primary-bg: #1a1a2e;
+  --secondary-bg: #16213e;
+  --accent-color: #0f3460;
+  --text-color: #e8e8e8;
+  --success-color: #28a745;
+  --danger-color: #dc3545;
+  --warning-color: #ffc107;
+  --info-color: #17a2b8;
+}
+
+/* ============================================
+   DESKTOP STYLES (>= 1025px) - NO CHANGES
+   Keep original dashboard appearance
+   ============================================ */
+@media screen and (min-width: 1025px) {
+  /* Desktop: No modifications - use original styles */
+  body {
+    /* Original styles preserved */
+  }
+}
+
+/* PWA specific - only when running as installed app */
+@media all and (display-mode: standalone) {
+  body {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+
+/* ============================================
+   MOBILE STYLES (< 768px)
+   ============================================ */
+@media screen and (max-width: 767px) {
+  /* Font size adjustments */
+  html {
+    font-size: 12px;
+  }
+
+  h1, .h1 { font-size: 1.5rem; }
+  h2, .h2 { font-size: 1.3rem; }
+  h3, .h3 { font-size: 1.15rem; }
+  h4, .h4 { font-size: 1rem; }
+  h5, .h5 { font-size: 0.9rem; }
+  h6, .h6 { font-size: 0.85rem; }
+
+  /* Navigation/Header */
+  .navbar {
+    padding: 0.5rem;
+  }
+
+  .navbar-brand {
+    font-size: 1rem !important;
+  }
+
+  /* Cards - full width on mobile */
+  .card {
+    margin-bottom: 0.75rem;
+    border-radius: 8px;
+  }
+
+  .card-header {
+    padding: 0.5rem 0.75rem;
+  }
+
+  .card-body {
+    padding: 0.75rem;
+  }
+
+  /* Tables - horizontal scroll */
+  .table-responsive {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  table {
+    font-size: 0.75rem;
+  }
+
+  table th, table td {
+    padding: 0.35rem 0.5rem;
+    white-space: nowrap;
+  }
+
+  /* Badges */
+  .badge {
+    font-size: 0.7rem;
+    padding: 0.25rem 0.4rem;
+  }
+
+  /* Buttons */
+  .btn {
+    padding: 0.375rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  .btn-sm {
+    padding: 0.25rem 0.5rem;
+    font-size: 0.75rem;
+  }
+
+  /* Dropdown */
+  .dropdown-menu {
+    font-size: 0.85rem;
+  }
+
+  /* Select/Input */
+  select, input, .Select-control {
+    font-size: 16px !important; /* Prevent iOS zoom */
+  }
+
+  /* Stock selector dropdown */
+  .Select-menu-outer {
+    max-height: 300px !important;
+  }
+
+  /* Grid adjustments - stack columns */
+  .row > [class*='col-'] {
+    padding-left: 5px;
+    padding-right: 5px;
+  }
+
+  /* Charts - make them scrollable if needed */
+  .js-plotly-plot {
+    width: 100% !important;
+  }
+
+  .js-plotly-plot .plotly {
+    width: 100% !important;
+  }
+
+  /* Progress bars */
+  .progress {
+    height: 0.75rem;
+    font-size: 0.65rem;
+  }
+
+  /* Buy Signal Tracker mobile layout */
+  .buy-signal-tracker .row > .col-4,
+  .buy-signal-tracker .row > .col-md-4 {
+    flex: 0 0 100%;
+    max-width: 100%;
+    margin-bottom: 0.5rem;
+  }
+
+  /* Phase Analysis card */
+  .phase-analysis .row > .col-6 {
+    flex: 0 0 100%;
+    max-width: 100%;
+  }
+
+  /* Accumulation criteria - 2 columns on mobile */
+  .accumulation-criteria .col-md-2 {
+    flex: 0 0 50%;
+    max-width: 50%;
+    padding: 3px;
+  }
+
+  /* Tabs - scrollable */
+  .nav-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .nav-tabs::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-tabs .nav-link {
+    white-space: nowrap;
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+  }
+
+  /* Alerts */
+  .alert {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.85rem;
+  }
+
+  /* Modal */
+  .modal-dialog {
+    margin: 0.5rem;
+    max-width: calc(100% - 1rem);
+  }
+
+  /* Spacing utilities override */
+  .mb-4 { margin-bottom: 1rem !important; }
+  .mb-3 { margin-bottom: 0.75rem !important; }
+  .mt-4 { margin-top: 1rem !important; }
+  .py-4 { padding-top: 1rem !important; padding-bottom: 1rem !important; }
+
+  /* Hide less important elements on mobile */
+  .d-none-mobile {
+    display: none !important;
+  }
+
+  /* Fullscreen charts button */
+  .modebar {
+    transform: scale(0.8);
+    transform-origin: top right;
+  }
+}
+
+/* ============================================
+   TABLET STYLES (768px - 1024px)
+   ============================================ */
+@media screen and (min-width: 768px) and (max-width: 1024px) {
+  html {
+    font-size: 13px;
+  }
+
+  .container-fluid {
+    padding-left: 15px;
+    padding-right: 15px;
+  }
+
+  /* 2-column layout for some cards */
+  .accumulation-criteria .col-md-2 {
+    flex: 0 0 33.33%;
+    max-width: 33.33%;
+  }
+}
+
+/* ============================================
+   LANDSCAPE MOBILE
+   ============================================ */
+@media screen and (max-width: 896px) and (orientation: landscape) {
+  .card {
+    margin-bottom: 0.5rem;
+  }
+
+  .card-body {
+    padding: 0.5rem;
+  }
+
+  /* Charts smaller in landscape */
+  .js-plotly-plot {
+    max-height: 250px;
+  }
+}
+
+/* ============================================
+   TOUCH-FRIENDLY ENHANCEMENTS
+   ============================================ */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  .btn, .nav-link, .dropdown-item {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Remove hover effects */
+  .btn:hover, .card:hover {
+    transform: none;
+  }
+
+  /* Better tap highlighting */
+  button, a, select {
+    -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* ============================================
+   DARK THEME OPTIMIZATION
+   ============================================ */
+@media (prefers-color-scheme: dark) {
+  body {
+    background-color: var(--primary-bg);
+    color: var(--text-color);
+  }
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+@media print {
+  .no-print, .nav-tabs, .btn, .dropdown {
+    display: none !important;
+  }
+
+  .card {
+    break-inside: avoid;
+    border: 1px solid #ddd !important;
+  }
+}
+
+/* ============================================
+   NOTCH/SAFE AREA SUPPORT (iPhone X+)
+   ============================================ */
+@supports (padding: max(0px)) {
+  .container-fluid {
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+  }
+
+  .fixed-bottom {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* ============================================
+   CUSTOM SCROLLBAR (Desktop)
+   ============================================ */
+@media (hover: hover) {
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: var(--secondary-bg);
+  }
+
+  ::-webkit-scrollbar-thumb {
+    background: var(--accent-color);
+    border-radius: 4px;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    background: #1a5490;
+  }
+}
+
+/* ============================================
+   LOADING SPINNER (Full screen)
+   ============================================ */
+.loading-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(26, 26, 46, 0.9);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+}
+
+/* ============================================
+   PULL-TO-REFRESH INDICATOR (future use)
+   ============================================ */
+.pull-indicator {
+  position: fixed;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 10px 20px;
+  background: var(--accent-color);
+  color: white;
+  border-radius: 0 0 8px 8px;
+  font-size: 0.85rem;
+  z-index: 1000;
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.pull-indicator.visible {
+  opacity: 1;
+}
