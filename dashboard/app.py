@@ -180,7 +180,9 @@ app = dash.Dash(
     meta_tags=PWA_META_TAGS,
     index_string=PWA_INDEX_STRING,
     # Assets folder for manifest, icons, css
-    assets_folder='assets'
+    assets_folder='assets',
+    # Exclude service-worker.js from being loaded as regular script
+    assets_ignore='service-worker.*'
 )
 app.title = "Stock Broker Analysis"
 server = app.server
