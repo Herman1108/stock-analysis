@@ -561,10 +561,393 @@ def analyze_avg_buy_position(stock_code: str = 'CDIA', current_price: float = No
 
 
 # ============================================================
+# VOLUME PROFILE - Area Transaksi Terbesar
+# ============================================================
+
+def calculate_volume_profile(stock_code: str, lookback_days: int = 60, num_levels: int = 10) -> Dict:
+    """
+    Hitung Volume Profile untuk identifikasi area transaksi terbesar.
+
+    Volume Profile menunjukkan distribusi volume di berbagai level harga.
+    Level dengan volume tinggi = area dimana banyak transaksi terjadi = potential support/resistance.
+
+    Args:
+        stock_code: Kode saham
+        lookback_days: Periode analisis (default 60 hari)
+        num_levels: Jumlah level harga untuk analisis
+
+    Returns:
+        Dict dengan volume profile dan level-level penting
+    """
+    price_df = get_price_data(stock_code)
+
+    if price_df.empty or len(price_df) < 10:
+        return {
+            'levels': [],
+            'poc': None,  # Point of Control
+            'high_volume_nodes': [],
+            'low_volume_nodes': []
+        }
+
+    df = price_df.sort_values('date').tail(lookback_days).copy()
+
+    # Convert to float
+    for col in ['close_price', 'high_price', 'low_price', 'volume', 'value']:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+
+    # Tentukan range harga
+    price_min = df['low_price'].min()
+    price_max = df['high_price'].max()
+    price_range = price_max - price_min
+
+    if price_range <= 0:
+        return {'levels': [], 'poc': None, 'high_volume_nodes': [], 'low_volume_nodes': []}
+
+    # Buat bins untuk level harga
+    bin_size = price_range / num_levels
+    levels = []
+
+    for i in range(num_levels):
+        level_low = price_min + (i * bin_size)
+        level_high = level_low + bin_size
+        level_mid = (level_low + level_high) / 2
+
+        # Hitung volume di level ini
+        # Transaksi dianggap terjadi di level jika high >= level_low dan low <= level_high
+        mask = (df['high_price'] >= level_low) & (df['low_price'] <= level_high)
+        volume_at_level = df.loc[mask, 'volume'].sum()
+        value_at_level = df.loc[mask, 'value'].sum()
+        days_at_level = mask.sum()
+
+        levels.append({
+            'price_low': round(level_low, 0),
+            'price_high': round(level_high, 0),
+            'price_mid': round(level_mid, 0),
+            'volume': volume_at_level,
+            'value': value_at_level,
+            'days': days_at_level
+        })
+
+    # Hitung total volume
+    total_volume = sum(l['volume'] for l in levels)
+
+    # Tambah persentase ke setiap level
+    for level in levels:
+        level['volume_pct'] = (level['volume'] / total_volume * 100) if total_volume > 0 else 0
+
+    # Point of Control (POC) = level dengan volume tertinggi
+    poc_level = max(levels, key=lambda x: x['volume']) if levels else None
+
+    # High Volume Nodes (HVN) = level dengan volume > rata-rata
+    avg_volume = total_volume / num_levels if num_levels > 0 else 0
+    high_volume_nodes = [l for l in levels if l['volume'] > avg_volume * 1.2]
+    low_volume_nodes = [l for l in levels if l['volume'] < avg_volume * 0.5]
+
+    # Sort by volume descending
+    high_volume_nodes = sorted(high_volume_nodes, key=lambda x: x['volume'], reverse=True)
+
+    # Current price
+    current_price = float(df.iloc[-1]['close_price'])
+
+    # Identify support and resistance from volume profile
+    support_levels = [l for l in high_volume_nodes if l['price_mid'] < current_price]
+    resistance_levels = [l for l in high_volume_nodes if l['price_mid'] > current_price]
+
+    return {
+        'levels': levels,
+        'poc': poc_level,  # Point of Control - highest volume
+        'high_volume_nodes': high_volume_nodes[:5],  # Top 5 HVN
+        'low_volume_nodes': low_volume_nodes[:3],  # Top 3 LVN (gap areas)
+        'support_from_volume': sorted(support_levels, key=lambda x: x['price_mid'], reverse=True)[:3],
+        'resistance_from_volume': sorted(resistance_levels, key=lambda x: x['price_mid'])[:3],
+        'current_price': current_price,
+        'total_volume': total_volume,
+        'lookback_days': lookback_days
+    }
+
+
+# ============================================================
+# PRICE BOUNCE DETECTION - Level Support/Resistance Historis
+# ============================================================
+
+def detect_price_bounces(stock_code: str, lookback_days: int = 90, min_bounce_pct: float = 2.0) -> Dict:
+    """
+    Deteksi level harga dimana harga sering memantul (bounce).
+
+    Support = level dimana harga sering bounce UP (memantul naik)
+    Resistance = level dimana harga sering bounce DOWN (tertolak turun)
+
+    Args:
+        stock_code: Kode saham
+        lookback_days: Periode analisis
+        min_bounce_pct: Minimum persentase bounce untuk dianggap signifikan
+
+    Returns:
+        Dict dengan support dan resistance levels berdasarkan price bounce
+    """
+    price_df = get_price_data(stock_code)
+
+    if price_df.empty or len(price_df) < 20:
+        return {
+            'support_bounces': [],
+            'resistance_bounces': [],
+            'strongest_support': None,
+            'strongest_resistance': None
+        }
+
+    df = price_df.sort_values('date').tail(lookback_days).copy().reset_index(drop=True)
+
+    # Convert to float
+    for col in ['close_price', 'high_price', 'low_price', 'open_price']:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+
+    # Detect local minima (potential support) and maxima (potential resistance)
+    support_points = []
+    resistance_points = []
+
+    for i in range(2, len(df) - 2):
+        low_i = df.iloc[i]['low_price']
+        high_i = df.iloc[i]['high_price']
+
+        # Check if this is a local minimum (support bounce)
+        # Low is lower than neighbors and price bounced up after
+        is_local_min = (
+            low_i < df.iloc[i-1]['low_price'] and
+            low_i < df.iloc[i-2]['low_price'] and
+            low_i < df.iloc[i+1]['low_price'] and
+            low_i < df.iloc[i+2]['low_price']
+        )
+
+        if is_local_min:
+            # Calculate bounce strength (how much price rose after)
+            future_high = df.iloc[i+1:i+6]['high_price'].max() if i+6 <= len(df) else df.iloc[i+1:]['high_price'].max()
+            bounce_pct = (future_high - low_i) / low_i * 100
+
+            if bounce_pct >= min_bounce_pct:
+                support_points.append({
+                    'date': df.iloc[i]['date'],
+                    'price': low_i,
+                    'bounce_pct': round(bounce_pct, 2),
+                    'bounce_type': 'UP'
+                })
+
+        # Check if this is a local maximum (resistance bounce)
+        is_local_max = (
+            high_i > df.iloc[i-1]['high_price'] and
+            high_i > df.iloc[i-2]['high_price'] and
+            high_i > df.iloc[i+1]['high_price'] and
+            high_i > df.iloc[i+2]['high_price']
+        )
+
+        if is_local_max:
+            # Calculate drop strength (how much price fell after)
+            future_low = df.iloc[i+1:i+6]['low_price'].min() if i+6 <= len(df) else df.iloc[i+1:]['low_price'].min()
+            drop_pct = (high_i - future_low) / high_i * 100
+
+            if drop_pct >= min_bounce_pct:
+                resistance_points.append({
+                    'date': df.iloc[i]['date'],
+                    'price': high_i,
+                    'bounce_pct': round(drop_pct, 2),
+                    'bounce_type': 'DOWN'
+                })
+
+    # Cluster nearby support levels (within 2% of each other)
+    support_clusters = cluster_price_levels([s['price'] for s in support_points], tolerance_pct=2.0)
+    resistance_clusters = cluster_price_levels([r['price'] for r in resistance_points], tolerance_pct=2.0)
+
+    # Current price
+    current_price = float(df.iloc[-1]['close_price'])
+
+    # Filter support below current price, resistance above
+    valid_supports = [s for s in support_clusters if s['level'] < current_price]
+    valid_resistances = [r for r in resistance_clusters if r['level'] > current_price]
+
+    # Sort by strength (count of bounces)
+    valid_supports = sorted(valid_supports, key=lambda x: x['count'], reverse=True)
+    valid_resistances = sorted(valid_resistances, key=lambda x: x['count'], reverse=True)
+
+    return {
+        'support_bounces': valid_supports[:5],  # Top 5 support levels
+        'resistance_bounces': valid_resistances[:5],  # Top 5 resistance levels
+        'strongest_support': valid_supports[0] if valid_supports else None,
+        'strongest_resistance': valid_resistances[0] if valid_resistances else None,
+        'all_support_points': support_points,
+        'all_resistance_points': resistance_points,
+        'current_price': current_price,
+        'lookback_days': lookback_days
+    }
+
+
+def cluster_price_levels(prices: List[float], tolerance_pct: float = 2.0) -> List[Dict]:
+    """
+    Cluster harga-harga yang berdekatan menjadi satu level.
+
+    Args:
+        prices: List harga
+        tolerance_pct: Toleransi persentase untuk dianggap level yang sama
+
+    Returns:
+        List of clustered levels dengan count
+    """
+    if not prices:
+        return []
+
+    sorted_prices = sorted(prices)
+    clusters = []
+    current_cluster = [sorted_prices[0]]
+
+    for price in sorted_prices[1:]:
+        cluster_avg = sum(current_cluster) / len(current_cluster)
+        diff_pct = abs(price - cluster_avg) / cluster_avg * 100
+
+        if diff_pct <= tolerance_pct:
+            current_cluster.append(price)
+        else:
+            # Save current cluster
+            clusters.append({
+                'level': round(sum(current_cluster) / len(current_cluster), 0),
+                'count': len(current_cluster),
+                'min': min(current_cluster),
+                'max': max(current_cluster)
+            })
+            current_cluster = [price]
+
+    # Don't forget last cluster
+    if current_cluster:
+        clusters.append({
+            'level': round(sum(current_cluster) / len(current_cluster), 0),
+            'count': len(current_cluster),
+            'min': min(current_cluster),
+            'max': max(current_cluster)
+        })
+
+    return clusters
+
+
+# ============================================================
+# COMBINED SUPPORT/RESISTANCE ANALYSIS
+# ============================================================
+
+def analyze_support_resistance(stock_code: str) -> Dict:
+    """
+    Analisis komprehensif Support dan Resistance levels.
+
+    Menggabungkan 3 metode:
+    1. Volume Profile - area transaksi terbesar
+    2. Price Bounce - level yang sering memantul
+    3. Broker Avg Buy - posisi broker besar
+
+    Returns:
+        Dict dengan combined support/resistance levels
+    """
+    # Get data from all methods
+    volume_profile = calculate_volume_profile(stock_code)
+    price_bounces = detect_price_bounces(stock_code)
+    broker_pl = analyze_broker_floating_pl(stock_code)
+
+    current_price = volume_profile.get('current_price') or price_bounces.get('current_price') or 0
+
+    # Collect all support levels
+    all_supports = []
+
+    # From Volume Profile
+    for vp in volume_profile.get('support_from_volume', []):
+        all_supports.append({
+            'level': vp['price_mid'],
+            'source': 'Volume Profile',
+            'strength': vp['volume_pct'],
+            'description': f"High volume area ({vp['volume_pct']:.1f}% of total volume)"
+        })
+
+    # From Price Bounce
+    for pb in price_bounces.get('support_bounces', [])[:3]:
+        all_supports.append({
+            'level': pb['level'],
+            'source': 'Price Bounce',
+            'strength': pb['count'] * 10,  # More bounces = stronger
+            'description': f"Price bounced {pb['count']}x from this level"
+        })
+
+    # From Broker Avg Buy (profit brokers = support)
+    for sup in broker_pl.get('support_levels', [])[:3]:
+        all_supports.append({
+            'level': sup,
+            'source': 'Broker Position',
+            'strength': 30,  # Base strength
+            'description': f"Big broker Avg Buy (will defend this level)"
+        })
+
+    # Collect all resistance levels
+    all_resistances = []
+
+    # From Volume Profile
+    for vp in volume_profile.get('resistance_from_volume', []):
+        all_resistances.append({
+            'level': vp['price_mid'],
+            'source': 'Volume Profile',
+            'strength': vp['volume_pct'],
+            'description': f"High volume area ({vp['volume_pct']:.1f}% of total volume)"
+        })
+
+    # From Price Bounce
+    for pb in price_bounces.get('resistance_bounces', [])[:3]:
+        all_resistances.append({
+            'level': pb['level'],
+            'source': 'Price Bounce',
+            'strength': pb['count'] * 10,
+            'description': f"Price rejected {pb['count']}x from this level"
+        })
+
+    # From Broker Avg Buy (loss brokers = potential selling pressure)
+    for res in broker_pl.get('resistance_levels', [])[:3]:
+        all_resistances.append({
+            'level': res,
+            'source': 'Broker Position',
+            'strength': 25,
+            'description': f"Broker Avg Buy in loss (potential sell pressure)"
+        })
+
+    # Sort supports (closest to current price first)
+    all_supports = sorted(all_supports, key=lambda x: abs(x['level'] - current_price))
+
+    # Sort resistances (closest to current price first)
+    all_resistances = sorted(all_resistances, key=lambda x: abs(x['level'] - current_price))
+
+    # Find strongest support and resistance
+    strongest_support = max(all_supports, key=lambda x: x['strength']) if all_supports else None
+    strongest_resistance = max(all_resistances, key=lambda x: x['strength']) if all_resistances else None
+
+    # Calculate key levels
+    key_support = all_supports[0]['level'] if all_supports else current_price * 0.95
+    key_resistance = all_resistances[0]['level'] if all_resistances else current_price * 1.05
+
+    return {
+        'current_price': current_price,
+        'supports': all_supports[:5],  # Top 5 nearest supports
+        'resistances': all_resistances[:5],  # Top 5 nearest resistances
+        'strongest_support': strongest_support,
+        'strongest_resistance': strongest_resistance,
+        'key_support': key_support,
+        'key_resistance': key_resistance,
+        'volume_profile': volume_profile,
+        'price_bounces': price_bounces,
+        'broker_positions': broker_pl,
+        'interpretation': {
+            'support_distance_pct': round((current_price - key_support) / current_price * 100, 2) if key_support else 0,
+            'resistance_distance_pct': round((key_resistance - current_price) / current_price * 100, 2) if key_resistance else 0,
+            'risk_reward': round((key_resistance - current_price) / (current_price - key_support), 2) if key_support and key_resistance and current_price > key_support else 0
+        }
+    }
+
+
+# ============================================================
 # BUY SIGNAL TRACKER (Deteksi kapan sinyal BUY dimulai)
 # ============================================================
 
-def track_buy_signal(stock_code: str = 'CDIA', lookback_days: int = 30) -> Dict:
+def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
     """
     Track kapan sinyal BUY dimulai dan harga saat itu.
 

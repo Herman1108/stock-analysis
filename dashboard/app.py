@@ -45,7 +45,8 @@ from composite_analyzer import (
     get_multi_period_summary,
     calculate_price_movements,
     calculate_foreign_flow_by_period,
-    calculate_sensitive_broker_flow_by_period
+    calculate_sensitive_broker_flow_by_period,
+    analyze_support_resistance
 )
 from broker_config import (
     get_broker_type, get_broker_color, get_broker_info,
@@ -943,6 +944,167 @@ def create_avg_buy_card(avg_buy_analysis, stock_code):
     ], className="mb-4", color="dark", outline=True)
 
 
+def create_sr_levels_card(sr_analysis, stock_code):
+    """
+    Create Support/Resistance Levels card dengan 3 metode:
+    1. Volume Profile - area transaksi terbesar
+    2. Price Bounce - harga sering memantul
+    3. Broker Position - posisi broker besar
+    """
+    if not sr_analysis or 'error' in sr_analysis:
+        return dbc.Card([
+            dbc.CardHeader(html.H5("Support & Resistance Levels", className="mb-0")),
+            dbc.CardBody([html.P("Data tidak tersedia", className="text-muted")])
+        ], className="mb-4", color="dark")
+
+    current_price = sr_analysis.get('current_price', 0)
+    supports = sr_analysis.get('supports', [])
+    resistances = sr_analysis.get('resistances', [])
+    strongest_support = sr_analysis.get('strongest_support')
+    strongest_resistance = sr_analysis.get('strongest_resistance')
+    key_support = sr_analysis.get('key_support', 0)
+    key_resistance = sr_analysis.get('key_resistance', 0)
+    interpretation = sr_analysis.get('interpretation', {})
+
+    # Source color mapping
+    source_colors = {
+        'Volume Profile': '#17a2b8',  # info/cyan
+        'Price Bounce': '#ffc107',    # warning/yellow
+        'Broker Position': '#6f42c1'  # purple
+    }
+
+    def create_level_badge(level_data):
+        """Create badge for a support/resistance level"""
+        source = level_data.get('source', '')
+        color = source_colors.get(source, '#6c757d')
+        return html.Div([
+            html.Span(
+                f"Rp {level_data['level']:,.0f}",
+                className="fw-bold me-2"
+            ),
+            dbc.Badge(
+                source,
+                style={"backgroundColor": color, "fontSize": "10px"},
+                className="me-2"
+            ),
+            html.Small(
+                level_data.get('description', ''),
+                className="text-muted"
+            )
+        ], className="mb-2 p-2 rounded", style={"backgroundColor": "#383838"})
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="fas fa-layer-group me-2"),
+                "Support & Resistance Levels ",
+                html.Small("(Multi-Method Analysis)", className="text-muted")
+            ], className="mb-0 d-inline"),
+        ]),
+        dbc.CardBody([
+            # Key Levels Summary
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H6("Harga Sekarang", className="text-muted small"),
+                        html.H3(f"Rp {current_price:,.0f}", className="text-info mb-0")
+                    ], className="text-center")
+                ], width=4),
+                dbc.Col([
+                    html.Div([
+                        html.H6([
+                            html.I(className="fas fa-arrow-down text-success me-1"),
+                            "Key Support"
+                        ], className="text-muted small"),
+                        html.H3(f"Rp {key_support:,.0f}", className="text-success mb-0"),
+                        html.Small(f"-{interpretation.get('support_distance_pct', 0):.1f}%", className="text-muted")
+                    ], className="text-center")
+                ], width=4),
+                dbc.Col([
+                    html.Div([
+                        html.H6([
+                            html.I(className="fas fa-arrow-up text-danger me-1"),
+                            "Key Resistance"
+                        ], className="text-muted small"),
+                        html.H3(f"Rp {key_resistance:,.0f}", className="text-danger mb-0"),
+                        html.Small(f"+{interpretation.get('resistance_distance_pct', 0):.1f}%", className="text-muted")
+                    ], className="text-center")
+                ], width=4),
+            ], className="mb-3"),
+
+            # Risk/Reward Ratio
+            dbc.Alert([
+                html.Strong("Risk/Reward Ratio: "),
+                html.Span(
+                    f"{interpretation.get('risk_reward', 0):.2f}x",
+                    className="fw-bold text-warning"
+                ),
+                html.Small(
+                    " (Potential gain vs potential loss dari level saat ini)",
+                    className="text-muted ms-2"
+                )
+            ], color="dark", className="mb-3"),
+
+            html.Hr(),
+
+            # Support & Resistance Lists
+            dbc.Row([
+                dbc.Col([
+                    html.H6([
+                        html.I(className="fas fa-shield-alt text-success me-2"),
+                        "Support Levels (Nearest First)"
+                    ], className="mb-3"),
+                    html.Div([
+                        create_level_badge(s) for s in supports[:5]
+                    ]) if supports else html.P("Tidak ada support terdeteksi", className="text-muted")
+                ], width=6),
+                dbc.Col([
+                    html.H6([
+                        html.I(className="fas fa-hand-paper text-danger me-2"),
+                        "Resistance Levels (Nearest First)"
+                    ], className="mb-3"),
+                    html.Div([
+                        create_level_badge(r) for r in resistances[:5]
+                    ]) if resistances else html.P("Tidak ada resistance terdeteksi", className="text-muted")
+                ], width=6),
+            ]),
+
+            html.Hr(),
+
+            # Legend
+            html.Div([
+                html.Small("Sumber Analisis: ", className="text-muted me-2"),
+                html.Span([
+                    html.I(className="fas fa-square me-1", style={"color": source_colors['Volume Profile']}),
+                    "Volume Profile "
+                ], className="me-3", style={"fontSize": "11px"}),
+                html.Span([
+                    html.I(className="fas fa-square me-1", style={"color": source_colors['Price Bounce']}),
+                    "Price Bounce "
+                ], className="me-3", style={"fontSize": "11px"}),
+                html.Span([
+                    html.I(className="fas fa-square me-1", style={"color": source_colors['Broker Position']}),
+                    "Broker Position "
+                ], style={"fontSize": "11px"}),
+            ], className="mb-2"),
+
+            # Interpretation
+            html.Small([
+                html.Strong("Cara Baca: "),
+                html.Br(),
+                html.Span("• Volume Profile", style={"color": source_colors['Volume Profile']}),
+                " = Area dengan transaksi terbesar (banyak buyer/seller tertarik)",
+                html.Br(),
+                html.Span("• Price Bounce", style={"color": source_colors['Price Bounce']}),
+                " = Level harga yang sering memantul (historically proven)",
+                html.Br(),
+                html.Span("• Broker Position", style={"color": source_colors['Broker Position']}),
+                " = Avg Buy broker besar (akan defend/sell di area ini)",
+            ], className="text-muted")
+        ])
+    ], className="mb-4", color="dark", outline=True)
+
+
 # ============================================================
 # PAGE: COMPREHENSIVE ANALYSIS (Merged Bandarmology + Summary)
 # ============================================================
@@ -967,6 +1129,9 @@ def create_analysis_page(stock_code='CDIA'):
 
         # Get Avg Buy Analysis
         avg_buy_analysis = analyze_avg_buy_position(stock_code)
+
+        # Get Support/Resistance Analysis (Multi-Method)
+        sr_analysis = analyze_support_resistance(stock_code)
 
     except Exception as e:
         return html.Div([
@@ -1032,6 +1197,9 @@ def create_analysis_page(stock_code='CDIA'):
 
         # ========== AVG BUY ANALYSIS ==========
         create_avg_buy_card(avg_buy_analysis, stock_code),
+
+        # ========== SUPPORT/RESISTANCE LEVELS (Multi-Method) ==========
+        create_sr_levels_card(sr_analysis, stock_code),
 
         # ========== COMPONENT SCORES ROW (with tooltips) ==========
         # ========== LAYER 1 BASIC FILTER ==========
