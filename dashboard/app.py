@@ -6306,15 +6306,28 @@ app.layout = create_app_layout()
 # CALLBACKS
 # ============================================================
 
-# Navbar toggle callback for mobile
+# Navbar toggle callback for mobile - auto-close on navigation
 @app.callback(
     Output("navbar-collapse", "is_open"),
-    [Input("navbar-toggler", "n_clicks")],
+    [Input("navbar-toggler", "n_clicks"),
+     Input("url", "pathname")],
     [State("navbar-collapse", "is_open")],
 )
-def toggle_navbar_collapse(n_clicks, is_open):
-    if n_clicks:
+def toggle_navbar_collapse(n_clicks, pathname, is_open):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return False
+
+    trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+
+    # If URL changed (nav link clicked), close the menu
+    if trigger_id == 'url':
+        return False
+
+    # If hamburger toggler clicked, toggle the menu
+    if trigger_id == 'navbar-toggler' and n_clicks:
         return not is_open
+
     return is_open
 
 @app.callback(
