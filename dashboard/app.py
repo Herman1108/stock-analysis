@@ -2045,33 +2045,44 @@ def create_navbar():
     stocks = get_available_stocks()
     return dbc.Navbar(
         dbc.Container([
-            dbc.NavbarBrand("Stock Broker Analysis", href="/", className="ms-2"),
-            dbc.Nav([
-                dbc.NavItem(dbc.NavLink("Home", href="/", id="nav-home")),
-                dbc.NavItem(dbc.NavLink("Dashboard", href="/dashboard", id="nav-dashboard")),
-                dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
-                dbc.NavItem(dbc.NavLink("Broker Ranking", href="/ranking", id="nav-ranking")),
-                dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
-                dbc.NavItem(dbc.NavLink("Position", href="/position", id="nav-position")),
-                dbc.NavItem(dbc.NavLink("Upload Data", href="/upload", id="nav-upload")),
-            ], className="me-auto", navbar=True),
-            # Stock Selector - with persistence to maintain selection across pages
+            # Brand + Stock Selector (always visible)
             html.Div([
-                html.Span("Emiten: ", className="text-light me-2"),
+                dbc.NavbarBrand("HermanStock", href="/", className="me-2", style={"fontSize": "1rem"}),
+                # Stock Selector - always visible, compact on mobile
                 dcc.Dropdown(
                     id='stock-selector',
                     options=[{'label': s, 'value': s} for s in stocks],
                     value=stocks[0] if stocks else 'PANI',
-                    style={'width': '120px', 'color': 'black'},
+                    style={'width': '100px', 'minWidth': '100px'},
                     clearable=False,
                     persistence=True,
-                    persistence_type='session'
+                    persistence_type='session',
+                    className="stock-dropdown"
                 )
-            ], className="d-flex align-items-center")
+            ], className="d-flex align-items-center"),
+
+            # Hamburger toggle button for mobile
+            dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
+
+            # Collapsible nav items
+            dbc.Collapse(
+                dbc.Nav([
+                    dbc.NavItem(dbc.NavLink("Home", href="/", id="nav-home")),
+                    dbc.NavItem(dbc.NavLink("Dashboard", href="/dashboard", id="nav-dashboard")),
+                    dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
+                    dbc.NavItem(dbc.NavLink("Ranking", href="/ranking", id="nav-ranking")),
+                    dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
+                    dbc.NavItem(dbc.NavLink("Position", href="/position", id="nav-position")),
+                    dbc.NavItem(dbc.NavLink("Upload", href="/upload", id="nav-upload")),
+                ], className="ms-auto", navbar=True),
+                id="navbar-collapse",
+                is_open=False,
+                navbar=True
+            ),
         ], fluid=True),
         color="dark",
         dark=True,
-        className="mb-4"
+        className="mb-2 py-1"
     )
 
 
@@ -6292,6 +6303,17 @@ app.layout = create_app_layout()
 # ============================================================
 # CALLBACKS
 # ============================================================
+
+# Navbar toggle callback for mobile
+@app.callback(
+    Output("navbar-collapse", "is_open"),
+    [Input("navbar-toggler", "n_clicks")],
+    [State("navbar-collapse", "is_open")],
+)
+def toggle_navbar_collapse(n_clicks, is_open):
+    if n_clicks:
+        return not is_open
+    return is_open
 
 @app.callback(
     Output('page-content', 'children'),

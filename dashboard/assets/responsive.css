@@ -454,3 +454,123 @@
 ._dash-loading-callback {
   background: rgba(26, 26, 46, 0.8) !important;
 }
+
+/* ============================================
+   STOCK DROPDOWN - Mobile Friendly
+   ============================================ */
+.stock-dropdown {
+  min-width: 100px !important;
+}
+
+.stock-dropdown .Select-control {
+  background-color: #16213e !important;
+  border-color: #0f3460 !important;
+  min-height: 36px !important;
+}
+
+.stock-dropdown .Select-value-label,
+.stock-dropdown .Select-placeholder {
+  color: #fff !important;
+  line-height: 34px !important;
+}
+
+.stock-dropdown .Select-input input {
+  color: #fff !important;
+}
+
+.stock-dropdown .Select-menu-outer {
+  background-color: #16213e !important;
+  border-color: #0f3460 !important;
+  z-index: 9999 !important;
+}
+
+.stock-dropdown .Select-option {
+  background-color: #16213e !important;
+  color: #fff !important;
+  padding: 10px 12px !important;
+}
+
+.stock-dropdown .Select-option:hover,
+.stock-dropdown .Select-option.is-focused {
+  background-color: #0f3460 !important;
+}
+
+.stock-dropdown .Select-option.is-selected {
+  background-color: #17a2b8 !important;
+}
+
+/* Make dropdown touch-friendly */
+@media (hover: none) and (pointer: coarse) {
+  .stock-dropdown .Select-option {
+    padding: 14px 12px !important;
+    min-height: 44px !important;
+  }
+
+  .stock-dropdown .Select-control {
+    min-height: 40px !important;
+  }
+}
+
+/* ============================================
+   NAVBAR MOBILE FIXES
+   ============================================ */
+@media screen and (max-width: 991px) {
+  .navbar {
+    padding: 0.3rem 0.5rem !important;
+  }
+
+  .navbar-brand {
+    font-size: 0.9rem !important;
+    margin-right: 0.5rem !important;
+  }
+
+  .navbar-toggler {
+    padding: 0.2rem 0.4rem !important;
+    font-size: 0.9rem !important;
+    border: 1px solid rgba(255,255,255,0.3) !important;
+  }
+
+  .navbar-toggler-icon {
+    width: 1.2em !important;
+    height: 1.2em !important;
+  }
+
+  .navbar-collapse {
+    background: #16213e;
+    padding: 0.5rem;
+    border-radius: 8px;
+    margin-top: 0.5rem;
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    z-index: 1000;
+  }
+
+  .navbar-nav {
+    flex-direction: column !important;
+  }
+
+  .navbar-nav .nav-link {
+    padding: 0.6rem 1rem !important;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+  }
+
+  .navbar-nav .nav-link:last-child {
+    border-bottom: none;
+  }
+
+  /* Stock dropdown in navbar */
+  .stock-dropdown {
+    width: 90px !important;
+    min-width: 90px !important;
+  }
+
+  .stock-dropdown .Select-control {
+    min-height: 32px !important;
+  }
+
+  .stock-dropdown .Select-value-label {
+    font-size: 0.85rem !important;
+  }
+}
