@@ -278,6 +278,47 @@
   }
 
   /* ============================================
+     SCORING REFERENCE - Full width on mobile
+     ============================================ */
+  .col-md-4,
+  .col-lg-4 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    margin-bottom: 1rem !important;
+  }
+
+  /* Reference tables - smaller text, better spacing */
+  .card-body table {
+    font-size: 0.65rem !important;
+    width: 100% !important;
+  }
+
+  .card-body table td,
+  .card-body table th {
+    padding: 0.2rem 0.3rem !important;
+    white-space: normal !important;
+    word-break: break-word !important;
+  }
+
+  /* Lists in reference sections */
+  .card-body ul {
+    padding-left: 1rem !important;
+    margin-bottom: 0.5rem !important;
+  }
+
+  .card-body ul li {
+    font-size: 0.7rem !important;
+    margin-bottom: 0.2rem !important;
+  }
+
+  /* Small text sections */
+  .card-body small,
+  .card-body .small {
+    font-size: 0.65rem !important;
+    display: block !important;
+  }
+
+  /* ============================================
      PROGRESS BARS
      ============================================ */
   .progress {
