@@ -100,55 +100,45 @@
   .row > [class*='col-xl-3'] {
     flex: 0 0 50% !important;
     max-width: 50% !important;
-    padding: 4px !important;
+    padding: 2px !important;
   }
 
   /* Inner cards in summary */
   .card .card {
-    margin-bottom: 4px !important;
+    margin-bottom: 3px !important;
     height: 100% !important;
   }
 
   .card .card .card-body {
-    padding: 0.4rem !important;
+    padding: 0.3rem !important;
   }
 
-  .card .card h6 {
-    font-size: 0.65rem !important;
-    margin-bottom: 0.2rem !important;
-  }
-
-  .card .card h4 {
-    font-size: 0.85rem !important;
-    margin-bottom: 0.1rem !important;
-  }
-
-  .card .card p,
-  .card .card small {
-    font-size: 0.6rem !important;
-    line-height: 1.2 !important;
-  }
-
+  /* Card titles - smaller font, no word break */
   .card .card h6,
   .card .card .h6 {
-    font-size: 0.75rem !important;
+    font-size: 0.5rem !important;
+    margin-bottom: 0.1rem !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+
+  /* Card values */
+  .card .card h4,
+  .card .card .h4 {
+    font-size: 0.7rem !important;
     margin-bottom: 0 !important;
-    margin-right: 0.5rem !important;
     white-space: nowrap !important;
   }
 
-  .card .card h4,
-  .card .card .h4 {
-    font-size: 1rem !important;
-    margin-bottom: 0 !important;
-    margin-right: 0.5rem !important;
-  }
-
+  /* Card description text - very small */
   .card .card p,
   .card .card small {
-    font-size: 0.7rem !important;
-    line-height: 1.3 !important;
-    margin-bottom: 0 !important;
+    font-size: 0.45rem !important;
+    line-height: 1.1 !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
   }
 
   /* ============================================
@@ -302,17 +292,25 @@
   }
 
   /* ============================================
-     CHARTS - Horizontal scroll wrapper
+     CHARTS - Fixed height with horizontal scroll
      ============================================ */
-  .js-plotly-plot,
-  .plotly-graph-div {
+  .card-body > .js-plotly-plot,
+  .card-body > div > .js-plotly-plot {
+    width: 100% !important;
     overflow-x: auto !important;
+    overflow-y: hidden !important;
     -webkit-overflow-scrolling: touch !important;
   }
 
-  .js-plotly-plot .plot-container,
-  .js-plotly-plot .main-svg {
-    min-width: 600px !important;
+  /* Chart container - fixed dimensions */
+  .js-plotly-plot {
+    max-height: 350px !important;
+    overflow: auto !important;
+  }
+
+  .js-plotly-plot .plotly {
+    min-width: 500px !important;
+    width: max-content !important;
   }
 
   /* ============================================
