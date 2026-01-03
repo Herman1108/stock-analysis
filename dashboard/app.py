@@ -142,7 +142,10 @@ def get_daily_activity_after_ipo(stock_code: str, ipo_end_date) -> pd.DataFrame:
                SUM(buy_value) as daily_buy_value,
                SUM(buy_lot) as daily_buy_lot,
                SUM(sell_value) as daily_sell_value,
-               SUM(sell_lot) as daily_sell_lot
+               SUM(sell_lot) as daily_sell_lot,
+               CASE WHEN SUM(buy_lot) > 0
+                    THEN SUM(buy_lot * buy_avg) / SUM(buy_lot)
+                    ELSE 0 END as daily_buy_avg
         FROM broker_summary
         WHERE stock_code = %s AND date > %s
         GROUP BY broker_code
@@ -246,9 +249,10 @@ def calculate_broker_current_position(stock_code: str) -> pd.DataFrame:
             if broker not in existing_brokers:
                 daily_buy_lot = int(daily_row['daily_buy_lot']) if pd.notna(daily_row['daily_buy_lot']) else 0
                 daily_sell_lot = int(daily_row['daily_sell_lot']) if pd.notna(daily_row['daily_sell_lot']) else 0
-                daily_buy_value = float(daily_row['daily_buy_value']) if pd.notna(daily_row['daily_buy_value']) else 0
+                daily_buy_avg = float(daily_row['daily_buy_avg']) if 'daily_buy_avg' in daily_row and pd.notna(daily_row['daily_buy_avg']) else 0
                 net_lot = daily_buy_lot - daily_sell_lot
-                weighted_avg_buy = daily_buy_value / daily_buy_lot if daily_buy_lot > 0 else 0
+                # Use daily_buy_avg if available, otherwise estimate from current price
+                weighted_avg_buy = daily_buy_avg if daily_buy_avg > 0 else current_price
 
                 if net_lot != 0:
                     if net_lot > 0 and weighted_avg_buy > 0 and current_price > 0:
