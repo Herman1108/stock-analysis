@@ -4647,12 +4647,51 @@ def create_position_page(stock_code='CDIA'):
             dbc.CardBody([
                 create_selling_pressure_chart(position_df, current_price),
                 html.Hr(),
-                html.Small([
-                    html.Strong("Cara Baca: "),
-                    "Chart menunjukkan total lot yang dipegang di setiap range harga avg buy. ",
-                    "Broker dengan avg buy di atas harga saat ini (floating loss) berpotensi menjual ",
-                    "saat harga naik ke level avg buy mereka - ini menciptakan resistance."
-                ], className="text-muted")
+                # Legend for colors
+                html.Div([
+                    html.Span([
+                        html.I(className="fas fa-square me-1", style={"color": "#00aa00"}),
+                        "SUPPORT (Profit) "
+                    ], className="me-4"),
+                    html.Span([
+                        html.I(className="fas fa-square me-1", style={"color": "#ff4444"}),
+                        "RESISTANCE (Loss) "
+                    ], className="me-4"),
+                    html.Span([
+                        html.I(className="fas fa-grip-lines-vertical me-1", style={"color": "yellow"}),
+                        "Harga Sekarang"
+                    ]),
+                ], className="mb-3"),
+                html.Hr(),
+                html.Div([
+                    html.H6("Cara Baca Chart:", className="text-info mb-2"),
+                    html.Ul([
+                        html.Li([
+                            html.Strong("Data: "), "SEMUA broker yang masih memegang saham (net lot > 0)"
+                        ]),
+                        html.Li([
+                            html.Strong("X-axis: "), "Harga rata-rata beli broker (dikelompokkan per range Rp 1.000)"
+                        ]),
+                        html.Li([
+                            html.Strong("Y-axis: "), "Total lot yang dipegang oleh broker di range harga tersebut"
+                        ]),
+                        html.Li([
+                            html.Strong("Bar Hijau: "), "Broker yang sudah PROFIT (avg buy < harga sekarang) → ",
+                            html.Span("SUPPORT", className="text-success fw-bold"),
+                            " - mereka tidak akan jual rugi"
+                        ]),
+                        html.Li([
+                            html.Strong("Bar Merah: "), "Broker yang masih LOSS (avg buy > harga sekarang) → ",
+                            html.Span("RESISTANCE", className="text-danger fw-bold"),
+                            " - mereka akan jual saat harga naik ke level avg buy untuk cut loss/BEP"
+                        ]),
+                    ], className="small mb-2"),
+                    html.Div([
+                        html.Strong("Insight: ", className="text-warning"),
+                        "Semakin banyak bar hijau (profit) → saham punya support kuat. ",
+                        "Semakin banyak bar merah (loss) → ada selling pressure/resistance di atas."
+                    ], className="small text-muted")
+                ])
             ])
         ], className="mt-4")
     ])
@@ -4752,8 +4791,8 @@ def create_selling_pressure_chart(position_df, current_price):
     fig.update_layout(
         template='plotly_dark',
         height=300,
-        xaxis_title="Avg Buy Price",
-        yaxis_title="Total Lot",
+        xaxis_title="Harga Rata-rata Beli Broker (Rupiah)",
+        yaxis_title="Total Lot Dipegang di Range Harga Ini",
         margin=dict(l=50, r=20, t=30, b=50)
     )
 
