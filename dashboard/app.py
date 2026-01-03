@@ -92,6 +92,222 @@ def get_available_stocks():
 
 
 # ============================================================
+# BROKER POSITION ANALYSIS (IPO + Daily)
+# ============================================================
+
+def get_ipo_position(stock_code: str) -> pd.DataFrame:
+    """Get IPO position data from database"""
+    query = """
+        SELECT broker_code, total_buy_value, total_buy_lot, avg_buy_price,
+               total_sell_value, total_sell_lot, avg_sell_price,
+               period_start, period_end
+        FROM broker_ipo_position
+        WHERE stock_code = %s
+        ORDER BY total_buy_lot DESC
+    """
+    results = execute_query(query, (stock_code,))
+    if results:
+        return pd.DataFrame(results)
+    return pd.DataFrame()
+
+
+def get_daily_activity_after_ipo(stock_code: str, ipo_end_date) -> pd.DataFrame:
+    """Get daily broker activity after IPO period end"""
+    if ipo_end_date is None:
+        return pd.DataFrame()
+
+    query = """
+        SELECT broker_code,
+               SUM(buy_value) as daily_buy_value,
+               SUM(buy_lot) as daily_buy_lot,
+               SUM(sell_value) as daily_sell_value,
+               SUM(sell_lot) as daily_sell_lot
+        FROM broker_summary
+        WHERE stock_code = %s AND date > %s
+        GROUP BY broker_code
+    """
+    results = execute_query(query, (stock_code, ipo_end_date))
+    if results:
+        return pd.DataFrame(results)
+    return pd.DataFrame()
+
+
+def calculate_broker_current_position(stock_code: str) -> pd.DataFrame:
+    """
+    Calculate current broker position:
+    Current Position = IPO Position + Daily Activity (after IPO period)
+
+    Returns DataFrame with:
+    - broker_code
+    - ipo_buy_lot, ipo_sell_lot, ipo_avg_buy
+    - daily_buy_lot, daily_sell_lot
+    - current_net_lot (total position)
+    - weighted_avg_buy
+    - floating_pnl (based on current price)
+    """
+    # Get IPO position
+    ipo_df = get_ipo_position(stock_code)
+    if ipo_df.empty:
+        return pd.DataFrame()
+
+    # Get IPO period end date
+    ipo_end_date = ipo_df['period_end'].iloc[0] if 'period_end' in ipo_df.columns else None
+
+    # Get daily activity after IPO
+    daily_df = get_daily_activity_after_ipo(stock_code, ipo_end_date)
+
+    # Get current price
+    price_df = get_price_data(stock_code)
+    current_price = price_df['close'].iloc[-1] if not price_df.empty and 'close' in price_df.columns else 0
+
+    # Merge IPO and daily data
+    position_data = []
+
+    for _, ipo_row in ipo_df.iterrows():
+        broker = ipo_row['broker_code']
+
+        # IPO data
+        ipo_buy_lot = int(ipo_row['total_buy_lot']) if pd.notna(ipo_row['total_buy_lot']) else 0
+        ipo_sell_lot = int(ipo_row['total_sell_lot']) if pd.notna(ipo_row['total_sell_lot']) else 0
+        ipo_avg_buy = float(ipo_row['avg_buy_price']) if pd.notna(ipo_row['avg_buy_price']) else 0
+        ipo_buy_value = float(ipo_row['total_buy_value']) if pd.notna(ipo_row['total_buy_value']) else 0
+
+        # Daily data (after IPO)
+        daily_buy_lot = 0
+        daily_sell_lot = 0
+        daily_buy_value = 0
+
+        if not daily_df.empty:
+            daily_row = daily_df[daily_df['broker_code'] == broker]
+            if not daily_row.empty:
+                daily_buy_lot = int(daily_row['daily_buy_lot'].iloc[0]) if pd.notna(daily_row['daily_buy_lot'].iloc[0]) else 0
+                daily_sell_lot = int(daily_row['daily_sell_lot'].iloc[0]) if pd.notna(daily_row['daily_sell_lot'].iloc[0]) else 0
+                daily_buy_value = float(daily_row['daily_buy_value'].iloc[0]) if pd.notna(daily_row['daily_buy_value'].iloc[0]) else 0
+
+        # Calculate totals
+        total_buy_lot = ipo_buy_lot + daily_buy_lot
+        total_sell_lot = ipo_sell_lot + daily_sell_lot
+        net_lot = total_buy_lot - total_sell_lot
+
+        # Weighted average buy price
+        total_buy_value = ipo_buy_value + daily_buy_value
+        weighted_avg_buy = total_buy_value / total_buy_lot if total_buy_lot > 0 else ipo_avg_buy
+
+        # Use IPO avg if weighted is unreasonable
+        if weighted_avg_buy > ipo_avg_buy * 100 or weighted_avg_buy < 1:
+            weighted_avg_buy = ipo_avg_buy
+
+        # Floating P&L
+        if net_lot > 0 and weighted_avg_buy > 0 and current_price > 0:
+            floating_pnl_pct = ((current_price - weighted_avg_buy) / weighted_avg_buy) * 100
+            floating_pnl_value = (current_price - weighted_avg_buy) * net_lot
+        else:
+            floating_pnl_pct = 0
+            floating_pnl_value = 0
+
+        position_data.append({
+            'broker_code': broker,
+            'ipo_buy_lot': ipo_buy_lot,
+            'ipo_sell_lot': ipo_sell_lot,
+            'ipo_avg_buy': ipo_avg_buy,
+            'daily_buy_lot': daily_buy_lot,
+            'daily_sell_lot': daily_sell_lot,
+            'total_buy_lot': total_buy_lot,
+            'total_sell_lot': total_sell_lot,
+            'net_lot': net_lot,
+            'weighted_avg_buy': weighted_avg_buy,
+            'current_price': current_price,
+            'floating_pnl_pct': floating_pnl_pct,
+            'floating_pnl_value': floating_pnl_value
+        })
+
+    # Add brokers that only appear in daily (not in IPO)
+    if not daily_df.empty:
+        existing_brokers = set(ipo_df['broker_code'].tolist())
+        for _, daily_row in daily_df.iterrows():
+            broker = daily_row['broker_code']
+            if broker not in existing_brokers:
+                daily_buy_lot = int(daily_row['daily_buy_lot']) if pd.notna(daily_row['daily_buy_lot']) else 0
+                daily_sell_lot = int(daily_row['daily_sell_lot']) if pd.notna(daily_row['daily_sell_lot']) else 0
+                daily_buy_value = float(daily_row['daily_buy_value']) if pd.notna(daily_row['daily_buy_value']) else 0
+                net_lot = daily_buy_lot - daily_sell_lot
+                weighted_avg_buy = daily_buy_value / daily_buy_lot if daily_buy_lot > 0 else 0
+
+                if net_lot != 0:
+                    if net_lot > 0 and weighted_avg_buy > 0 and current_price > 0:
+                        floating_pnl_pct = ((current_price - weighted_avg_buy) / weighted_avg_buy) * 100
+                        floating_pnl_value = (current_price - weighted_avg_buy) * net_lot
+                    else:
+                        floating_pnl_pct = 0
+                        floating_pnl_value = 0
+
+                    position_data.append({
+                        'broker_code': broker,
+                        'ipo_buy_lot': 0,
+                        'ipo_sell_lot': 0,
+                        'ipo_avg_buy': 0,
+                        'daily_buy_lot': daily_buy_lot,
+                        'daily_sell_lot': daily_sell_lot,
+                        'total_buy_lot': daily_buy_lot,
+                        'total_sell_lot': daily_sell_lot,
+                        'net_lot': net_lot,
+                        'weighted_avg_buy': weighted_avg_buy,
+                        'current_price': current_price,
+                        'floating_pnl_pct': floating_pnl_pct,
+                        'floating_pnl_value': floating_pnl_value
+                    })
+
+    return pd.DataFrame(position_data)
+
+
+def get_support_resistance_from_positions(position_df: pd.DataFrame) -> dict:
+    """
+    Calculate support/resistance levels from broker cost basis
+
+    Support: Price levels where many brokers have positions (they will defend)
+    Resistance: Price levels where brokers are floating loss (they may sell)
+    """
+    if position_df.empty:
+        return {'supports': [], 'resistances': []}
+
+    current_price = position_df['current_price'].iloc[0] if 'current_price' in position_df.columns else 0
+
+    # Get brokers with positive positions and their avg buy
+    holders = position_df[position_df['net_lot'] > 0].copy()
+
+    if holders.empty:
+        return {'supports': [], 'resistances': []}
+
+    # Support levels: avg buy below current price (holders are in profit, will defend)
+    support_df = holders[holders['weighted_avg_buy'] < current_price].copy()
+    support_df = support_df.sort_values('weighted_avg_buy', ascending=False)
+
+    # Resistance levels: avg buy above current price (holders are in loss, may sell)
+    resistance_df = holders[holders['weighted_avg_buy'] > current_price].copy()
+    resistance_df = resistance_df.sort_values('weighted_avg_buy', ascending=True)
+
+    supports = []
+    for _, row in support_df.head(5).iterrows():
+        supports.append({
+            'price': row['weighted_avg_buy'],
+            'broker': row['broker_code'],
+            'lot': row['net_lot'],
+            'pnl': row['floating_pnl_pct']
+        })
+
+    resistances = []
+    for _, row in resistance_df.head(5).iterrows():
+        resistances.append({
+            'price': row['weighted_avg_buy'],
+            'broker': row['broker_code'],
+            'lot': row['net_lot'],
+            'pnl': row['floating_pnl_pct']
+        })
+
+    return {'supports': supports, 'resistances': resistances, 'current_price': current_price}
+
+
+# ============================================================
 # METRIC EXPLANATIONS (untuk user minimal knowledge)
 # ============================================================
 METRIC_EXPLANATIONS = {
@@ -338,6 +554,7 @@ def create_navbar():
                 dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
                 dbc.NavItem(dbc.NavLink("Broker Ranking", href="/ranking", id="nav-ranking")),
                 dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
+                dbc.NavItem(dbc.NavLink("Position", href="/position", id="nav-position")),
                 dbc.NavItem(dbc.NavLink("Upload Data", href="/upload", id="nav-upload")),
             ], className="me-auto", navbar=True),
             # Stock Selector
@@ -4090,6 +4307,393 @@ def create_broker_history_chart(broker_code, stock_code='CDIA'):
     fig.update_yaxes(title_text="Cumulative (B)", secondary_y=True)
     return dcc.Graph(figure=fig)
 
+
+# ============================================================
+# PAGE: BROKER POSITION ANALYSIS
+# ============================================================
+
+def create_position_page(stock_code='CDIA'):
+    """Create broker position analysis page"""
+
+    # Get position data
+    position_df = calculate_broker_current_position(stock_code)
+
+    if position_df.empty:
+        return html.Div([
+            dbc.Alert([
+                html.H5("Data IPO Position Belum Tersedia", className="alert-heading"),
+                html.P(f"Tidak ada data posisi broker dari IPO untuk {stock_code}."),
+                html.Hr(),
+                html.P([
+                    "Untuk menggunakan fitur ini, upload file Excel dengan data IPO di kolom Z-AH.",
+                    html.Br(),
+                    "Format: buy, buy_val, buy_lot, buy_avg, sell, sell_val, sell_lot, sell_avg"
+                ], className="mb-0")
+            ], color="warning"),
+            dbc.Button("Upload Data", href="/upload", color="primary")
+        ])
+
+    # Get IPO period info
+    ipo_df = get_ipo_position(stock_code)
+    period_start = ipo_df['period_start'].iloc[0] if not ipo_df.empty and 'period_start' in ipo_df.columns else None
+    period_end = ipo_df['period_end'].iloc[0] if not ipo_df.empty and 'period_end' in ipo_df.columns else None
+    period_str = f"{period_start.strftime('%d %b %Y') if period_start else 'N/A'} - {period_end.strftime('%d %b %Y') if period_end else 'N/A'}"
+
+    # Current price
+    current_price = position_df['current_price'].iloc[0] if 'current_price' in position_df.columns else 0
+
+    # Get support/resistance
+    sr_levels = get_support_resistance_from_positions(position_df)
+
+    # Summary stats
+    total_holders = len(position_df[position_df['net_lot'] > 0])
+    total_net_lot = position_df[position_df['net_lot'] > 0]['net_lot'].sum()
+    avg_floating_pnl = position_df[position_df['net_lot'] > 0]['floating_pnl_pct'].mean()
+
+    # Top holders and sellers
+    top_holders = position_df[position_df['net_lot'] > 0].nlargest(10, 'net_lot')
+    top_sellers = position_df[position_df['net_lot'] < 0].nsmallest(10, 'net_lot')
+
+    # Floating profit vs loss breakdown
+    in_profit = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] > 0)]
+    in_loss = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] < 0)]
+
+    return html.Div([
+        html.H4([
+            html.I(className="fas fa-warehouse me-2"),
+            f"Broker Position Analysis - {stock_code}"
+        ], className="mb-2"),
+        html.P([
+            f"Data IPO: {period_str} | ",
+            f"Current Price: Rp {current_price:,.0f}"
+        ], className="text-muted mb-4"),
+
+        # Summary Cards
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("Total Holders", className="text-muted mb-1"),
+                        html.H3(f"{total_holders}", className="mb-0 text-info")
+                    ])
+                ], color="dark", outline=True)
+            ], md=3),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("Total Net Position", className="text-muted mb-1"),
+                        html.H3(f"{total_net_lot:,.0f} lot", className="mb-0 text-primary")
+                    ])
+                ], color="dark", outline=True)
+            ], md=3),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("Avg Floating P/L", className="text-muted mb-1"),
+                        html.H3(
+                            f"{avg_floating_pnl:+.1f}%",
+                            className=f"mb-0 text-{'success' if avg_floating_pnl > 0 else 'danger'}"
+                        )
+                    ])
+                ], color="dark", outline=True)
+            ], md=3),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6("Profit/Loss Ratio", className="text-muted mb-1"),
+                        html.H3([
+                            html.Span(f"{len(in_profit)}", className="text-success"),
+                            " / ",
+                            html.Span(f"{len(in_loss)}", className="text-danger")
+                        ], className="mb-0")
+                    ])
+                ], color="dark", outline=True)
+            ], md=3),
+        ], className="mb-4"),
+
+        # Main content - two columns
+        dbc.Row([
+            # Left column - Position Table
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-users me-2"),
+                            "Top 10 Holders (Net Long)"
+                        ], className="mb-0")
+                    ]),
+                    dbc.CardBody([
+                        dash_table.DataTable(
+                            data=top_holders[[
+                                'broker_code', 'net_lot', 'ipo_avg_buy', 'floating_pnl_pct'
+                            ]].to_dict('records') if not top_holders.empty else [],
+                            columns=[
+                                {'name': 'Broker', 'id': 'broker_code'},
+                                {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
+                                 'format': {'specifier': ',.0f'}},
+                                {'name': 'Avg Buy', 'id': 'ipo_avg_buy', 'type': 'numeric',
+                                 'format': {'specifier': ',.0f'}},
+                                {'name': 'Float P/L', 'id': 'floating_pnl_pct', 'type': 'numeric',
+                                 'format': {'specifier': '+.1f'}},
+                            ],
+                            style_table={'overflowX': 'auto'},
+                            style_cell={'textAlign': 'center', 'padding': '8px',
+                                       'backgroundColor': '#303030', 'color': 'white'},
+                            style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
+                            style_data_conditional=[
+                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
+                                {'if': {'filter_query': '{floating_pnl_pct} > 0', 'column_id': 'floating_pnl_pct'},
+                                 'color': '#00ff00'},
+                                {'if': {'filter_query': '{floating_pnl_pct} < 0', 'column_id': 'floating_pnl_pct'},
+                                 'color': '#ff4444'},
+                            ],
+                            page_size=10,
+                        ),
+                        html.Hr(),
+                        html.Small([
+                            html.Strong("Cara Baca: "),
+                            "Broker dengan Net Lot positif = masih memegang saham. ",
+                            "Float P/L menunjukkan profit/loss berdasarkan harga saat ini vs avg buy."
+                        ], className="text-muted")
+                    ])
+                ], className="mb-4"),
+
+                # Net Sellers
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-sign-out-alt me-2"),
+                            "Top 10 Net Sellers"
+                        ], className="mb-0 text-danger")
+                    ]),
+                    dbc.CardBody([
+                        dash_table.DataTable(
+                            data=top_sellers[[
+                                'broker_code', 'net_lot', 'total_sell_lot'
+                            ]].to_dict('records') if not top_sellers.empty else [],
+                            columns=[
+                                {'name': 'Broker', 'id': 'broker_code'},
+                                {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
+                                 'format': {'specifier': ',.0f'}},
+                                {'name': 'Total Sell', 'id': 'total_sell_lot', 'type': 'numeric',
+                                 'format': {'specifier': ',.0f'}},
+                            ],
+                            style_table={'overflowX': 'auto'},
+                            style_cell={'textAlign': 'center', 'padding': '8px',
+                                       'backgroundColor': '#303030', 'color': 'white'},
+                            style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
+                            style_data_conditional=[
+                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
+                                {'if': {'column_id': 'net_lot'}, 'color': '#ff4444'},
+                            ],
+                            page_size=10,
+                        ),
+                        html.Hr(),
+                        html.Small([
+                            html.Strong("Cara Baca: "),
+                            "Broker dengan Net Lot negatif = sudah menjual lebih banyak dari yang dibeli. ",
+                            "Ini menunjukkan broker yang sudah keluar dari saham."
+                        ], className="text-muted")
+                    ])
+                ])
+            ], md=7),
+
+            # Right column - Support/Resistance & Ownership
+            dbc.Col([
+                # Support/Resistance from Cost Basis
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-layer-group me-2"),
+                            "Support/Resistance dari Cost Basis"
+                        ], className="mb-0")
+                    ]),
+                    dbc.CardBody([
+                        html.Div([
+                            html.H6("Resistance Levels", className="text-danger mb-2"),
+                            html.Small("(Broker floating loss - potential sellers)", className="text-muted d-block mb-2"),
+                            *([html.Div([
+                                html.Span(f"Rp {r['price']:,.0f}", className="fw-bold"),
+                                html.Span(f" - {r['broker']}", className="text-muted"),
+                                html.Span(f" ({r['lot']:,.0f} lot)", className="small"),
+                                html.Span(f" {r['pnl']:+.1f}%", className="text-danger small ms-2"),
+                            ], className="mb-1") for r in sr_levels.get('resistances', [])] if sr_levels.get('resistances') else [
+                                html.Small("Tidak ada resistance dari cost basis", className="text-muted")
+                            ]),
+                        ], className="mb-4"),
+
+                        html.Hr(),
+
+                        html.Div([
+                            html.Div([
+                                html.I(className="fas fa-arrow-right me-2 text-warning"),
+                                html.Strong(f"Current: Rp {current_price:,.0f}", className="text-warning")
+                            ], className="mb-3 text-center py-2", style={'backgroundColor': '#404040', 'borderRadius': '5px'}),
+                        ]),
+
+                        html.Hr(),
+
+                        html.Div([
+                            html.H6("Support Levels", className="text-success mb-2"),
+                            html.Small("(Broker floating profit - will defend)", className="text-muted d-block mb-2"),
+                            *([html.Div([
+                                html.Span(f"Rp {s['price']:,.0f}", className="fw-bold"),
+                                html.Span(f" - {s['broker']}", className="text-muted"),
+                                html.Span(f" ({s['lot']:,.0f} lot)", className="small"),
+                                html.Span(f" {s['pnl']:+.1f}%", className="text-success small ms-2"),
+                            ], className="mb-1") for s in sr_levels.get('supports', [])] if sr_levels.get('supports') else [
+                                html.Small("Tidak ada support dari cost basis", className="text-muted")
+                            ]),
+                        ]),
+
+                        html.Hr(),
+                        html.Small([
+                            html.Strong("Cara Baca: "),
+                            "Support = level harga di mana broker profit (akan defend). ",
+                            "Resistance = level di mana broker loss (mungkin jual saat harga naik)."
+                        ], className="text-muted")
+                    ])
+                ], className="mb-4"),
+
+                # Ownership Distribution
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-chart-pie me-2"),
+                            "Ownership Distribution"
+                        ], className="mb-0")
+                    ]),
+                    dbc.CardBody([
+                        create_ownership_chart(position_df)
+                    ])
+                ])
+            ], md=5),
+        ]),
+
+        # Selling Pressure Map
+        dbc.Card([
+            dbc.CardHeader([
+                html.H5([
+                    html.I(className="fas fa-exclamation-triangle me-2"),
+                    "Selling Pressure Map"
+                ], className="mb-0 text-warning")
+            ]),
+            dbc.CardBody([
+                create_selling_pressure_chart(position_df, current_price),
+                html.Hr(),
+                html.Small([
+                    html.Strong("Cara Baca: "),
+                    "Chart menunjukkan total lot yang dipegang di setiap range harga avg buy. ",
+                    "Broker dengan avg buy di atas harga saat ini (floating loss) berpotensi menjual ",
+                    "saat harga naik ke level avg buy mereka - ini menciptakan resistance."
+                ], className="text-muted")
+            ])
+        ], className="mt-4")
+    ])
+
+
+def create_ownership_chart(position_df):
+    """Create pie chart for ownership distribution by broker type"""
+    if position_df.empty:
+        return html.Div("No data", className="text-muted")
+
+    # Filter only holders (positive net lot)
+    holders = position_df[position_df['net_lot'] > 0].copy()
+
+    if holders.empty:
+        return html.Div("No holders data", className="text-muted")
+
+    # Classify by broker type
+    holders['broker_type'] = holders['broker_code'].apply(lambda x: get_broker_type(x))
+
+    # Aggregate by type
+    type_totals = holders.groupby('broker_type')['net_lot'].sum().reset_index()
+    type_totals.columns = ['type', 'lot']
+
+    # Map names
+    type_names = {'FOREIGN': 'Asing', 'BUMN': 'BUMN/Pemerintah', 'LOCAL': 'Lokal'}
+    type_colors = {'FOREIGN': '#dc3545', 'BUMN': '#28a745', 'LOCAL': '#6f42c1'}
+
+    type_totals['name'] = type_totals['type'].map(type_names)
+    type_totals['color'] = type_totals['type'].map(type_colors)
+
+    fig = go.Figure(data=[go.Pie(
+        labels=type_totals['name'],
+        values=type_totals['lot'],
+        hole=0.4,
+        marker_colors=type_totals['color'].tolist(),
+        textinfo='label+percent',
+        textposition='outside'
+    )])
+
+    fig.update_layout(
+        template='plotly_dark',
+        height=250,
+        margin=dict(l=20, r=20, t=20, b=20),
+        showlegend=False
+    )
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
+def create_selling_pressure_chart(position_df, current_price):
+    """Create bar chart showing selling pressure at different price levels"""
+    if position_df.empty or current_price == 0:
+        return html.Div("No data", className="text-muted")
+
+    # Filter holders only
+    holders = position_df[position_df['net_lot'] > 0].copy()
+
+    if holders.empty:
+        return html.Div("No holders data", className="text-muted")
+
+    # Create price bins
+    min_price = holders['weighted_avg_buy'].min()
+    max_price = holders['weighted_avg_buy'].max()
+
+    # Create bins
+    price_range = max_price - min_price
+    if price_range < 1000:
+        bin_size = 100
+    elif price_range < 5000:
+        bin_size = 500
+    else:
+        bin_size = 1000
+
+    bins = list(range(int(min_price // bin_size * bin_size), int(max_price + bin_size), bin_size))
+
+    # Aggregate lots by price bin
+    holders['price_bin'] = pd.cut(holders['weighted_avg_buy'], bins=bins, labels=bins[:-1])
+    bin_totals = holders.groupby('price_bin')['net_lot'].sum().reset_index()
+    bin_totals['price_bin'] = bin_totals['price_bin'].astype(float)
+
+    # Color based on above/below current price
+    colors = ['#ff4444' if p > current_price else '#00aa00' for p in bin_totals['price_bin']]
+
+    fig = go.Figure(data=[go.Bar(
+        x=bin_totals['price_bin'],
+        y=bin_totals['net_lot'],
+        marker_color=colors,
+        text=[f"{v:,.0f}" for v in bin_totals['net_lot']],
+        textposition='outside'
+    )])
+
+    # Add current price line
+    fig.add_vline(x=current_price, line_dash="dash", line_color="yellow",
+                  annotation_text=f"Current: {current_price:,.0f}",
+                  annotation_position="top")
+
+    fig.update_layout(
+        template='plotly_dark',
+        height=300,
+        xaxis_title="Avg Buy Price",
+        yaxis_title="Total Lot",
+        margin=dict(l=50, r=20, t=30, b=50)
+    )
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+
 # ============================================================
 # MAIN LAYOUT
 # ============================================================
@@ -4153,6 +4757,8 @@ def display_page(pathname, search, stored_stock):
         content = create_ranking_page(stock_code)
     elif pathname == '/alerts':
         content = create_alerts_page(stock_code)
+    elif pathname == '/position':
+        content = create_position_page(stock_code)
     elif pathname == '/upload':
         content = create_upload_page()
     else:

@@ -314,6 +314,169 @@ def import_broker_data(broker_df: pd.DataFrame, stock_code: str = 'CDIA'):
     print(f"Imported {records_imported} broker records")
     return records_imported
 
+def read_ipo_position_data(file_path: str) -> Tuple[pd.DataFrame, str]:
+    """
+    Baca data IPO position dari kolom Z-AH (index 25-32)
+    Return: (DataFrame dengan posisi IPO per broker, period string)
+    """
+    print(f"Reading IPO position data from: {file_path}")
+
+    df = pd.read_excel(file_path, sheet_name='Sheet1', header=None)
+
+    # Check if IPO columns exist (column 25+)
+    if len(df.columns) < 33:
+        print("No IPO position data found (columns Z-AH not present)")
+        return pd.DataFrame(), ""
+
+    # Get period from row 0, column 25
+    period_str = str(df.iloc[0, 25]) if pd.notna(df.iloc[0, 25]) else ""
+    print(f"IPO Period: {period_str}")
+
+    # Parse IPO data (starting from row 2, columns 25-32)
+    ipo_data = []
+
+    for idx in range(2, len(df)):
+        row = df.iloc[idx]
+
+        # Buy side (columns 25-28)
+        buy_broker = row[25] if pd.notna(row[25]) else None
+        buy_val = parse_value_string(row[26]) if pd.notna(row[26]) else 0
+        buy_lot = parse_value_string(row[27]) if pd.notna(row[27]) else 0
+        buy_avg = float(row[28]) if pd.notna(row[28]) else 0
+
+        # Sell side (columns 29-32)
+        sell_broker = row[29] if pd.notna(row[29]) else None
+        sell_val = parse_value_string(row[30]) if pd.notna(row[30]) else 0
+        sell_lot = parse_value_string(row[31]) if pd.notna(row[31]) else 0
+        sell_avg = float(row[32]) if pd.notna(row[32]) else 0
+
+        # Skip if both sides are empty
+        if not buy_broker and not sell_broker:
+            continue
+
+        # Add buy record
+        if buy_broker and str(buy_broker).strip().upper() not in ['BUY', '-', '', 'NAN']:
+            ipo_data.append({
+                'broker_code': str(buy_broker).strip().upper(),
+                'buy_value': buy_val,
+                'buy_lot': int(buy_lot),
+                'buy_avg': buy_avg,
+                'sell_value': 0,
+                'sell_lot': 0,
+                'sell_avg': 0
+            })
+
+        # Add sell record (will be merged with buy if same broker)
+        if sell_broker and str(sell_broker).strip().upper() not in ['SELL', 'SL', '-', '', 'NAN']:
+            sell_broker_code = str(sell_broker).strip().upper()
+            # Check if broker already exists in buy side
+            found = False
+            for item in ipo_data:
+                if item['broker_code'] == sell_broker_code:
+                    item['sell_value'] = sell_val
+                    item['sell_lot'] = int(sell_lot)
+                    item['sell_avg'] = sell_avg
+                    found = True
+                    break
+
+            if not found:
+                ipo_data.append({
+                    'broker_code': sell_broker_code,
+                    'buy_value': 0,
+                    'buy_lot': 0,
+                    'buy_avg': 0,
+                    'sell_value': sell_val,
+                    'sell_lot': int(sell_lot),
+                    'sell_avg': sell_avg
+                })
+
+    ipo_df = pd.DataFrame(ipo_data)
+
+    # Aggregate by broker (in case same broker appears multiple times)
+    # Note: For IPO data, each broker should only appear once, but we handle duplicates just in case
+    if not ipo_df.empty:
+        # For weighted average: (sum of value) / (sum of lot)
+        # But we'll use the avg from Excel directly since it's already calculated
+        ipo_df = ipo_df.groupby('broker_code').agg({
+            'buy_value': 'sum',
+            'buy_lot': 'sum',
+            'buy_avg': 'first',  # Use first value (from Excel directly)
+            'sell_value': 'sum',
+            'sell_lot': 'sum',
+            'sell_avg': 'first'   # Use first value (from Excel directly)
+        }).reset_index()
+
+    print(f"Found {len(ipo_df)} broker IPO positions")
+    return ipo_df, period_str
+
+
+def import_ipo_position(ipo_df: pd.DataFrame, stock_code: str, period_str: str = ''):
+    """Import data IPO position ke database (REPLACE mode)"""
+    from psycopg2.extras import execute_batch
+
+    if ipo_df.empty:
+        print("No IPO position data to import")
+        return 0
+
+    print(f"Importing {len(ipo_df)} IPO position records for {stock_code}...")
+
+    # Parse period dates
+    period_start = None
+    period_end = None
+    if period_str:
+        try:
+            # Format: "1/01/2018 - 02/01/2025"
+            parts = period_str.split(' - ')
+            if len(parts) == 2:
+                period_start = datetime.strptime(parts[0].strip(), '%d/%m/%Y').date()
+                period_end = datetime.strptime(parts[1].strip(), '%d/%m/%Y').date()
+        except:
+            pass
+
+    insert_query = """
+        INSERT INTO broker_ipo_position
+        (stock_code, broker_code, total_buy_value, total_buy_lot, avg_buy_price,
+         total_sell_value, total_sell_lot, avg_sell_price, period_start, period_end)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (stock_code, broker_code) DO UPDATE SET
+            total_buy_value = EXCLUDED.total_buy_value,
+            total_buy_lot = EXCLUDED.total_buy_lot,
+            avg_buy_price = EXCLUDED.avg_buy_price,
+            total_sell_value = EXCLUDED.total_sell_value,
+            total_sell_lot = EXCLUDED.total_sell_lot,
+            avg_sell_price = EXCLUDED.avg_sell_price,
+            period_start = EXCLUDED.period_start,
+            period_end = EXCLUDED.period_end,
+            updated_at = NOW()
+    """
+
+    batch_data = []
+    for _, row in ipo_df.iterrows():
+        batch_data.append((
+            stock_code,
+            row['broker_code'],
+            row['buy_value'],
+            row['buy_lot'],
+            row['buy_avg'],
+            row['sell_value'],
+            row['sell_lot'],
+            row['sell_avg'],
+            period_start,
+            period_end
+        ))
+
+    records_imported = 0
+    try:
+        with get_cursor() as cursor:
+            execute_batch(cursor, insert_query, batch_data, page_size=100)
+            records_imported = len(batch_data)
+            print(f"IPO position import successful: {records_imported} records")
+    except Exception as e:
+        print(f"IPO position import error: {e}")
+
+    return records_imported
+
+
 def import_excel(file_path: str, stock_code: str = 'CDIA'):
     """Main function untuk import semua data dari Excel"""
     print("=" * 60)
@@ -330,13 +493,20 @@ def import_excel(file_path: str, stock_code: str = 'CDIA'):
     # Import broker data
     broker_count = import_broker_data(broker_df, stock_code)
 
+    # Read and import IPO position data (if exists)
+    ipo_df, period_str = read_ipo_position_data(file_path)
+    ipo_count = 0
+    if not ipo_df.empty:
+        ipo_count = import_ipo_position(ipo_df, stock_code, period_str)
+
     print("=" * 60)
     print(f"Import completed!")
     print(f"Price records: {price_count}")
     print(f"Broker records: {broker_count}")
+    print(f"IPO position records: {ipo_count}")
     print("=" * 60)
 
-    return price_count, broker_count
+    return price_count, broker_count, ipo_count
 
 if __name__ == "__main__":
     import sys
