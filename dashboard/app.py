@@ -4012,13 +4012,26 @@ def create_broker_movement_page(stock_code='CDIA'):
     current_price = price_df['close_price'].iloc[-1] if not price_df.empty and 'close_price' in price_df.columns else 0
 
     return html.Div([
-        # Page Header
-        html.Div([
-            html.H4([
-                html.I(className="fas fa-exchange-alt me-2"),
-                f"Broker Movement - {stock_code}"
-            ], className="mb-1"),
-            html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
+        # Page Header with back button
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4([
+                        html.I(className="fas fa-exchange-alt me-2"),
+                        f"Broker Movement - {stock_code}"
+                    ], className="mb-0 d-inline-block me-3"),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-arrow-left me-2"),
+                            "Dashboard"
+                        ], color="secondary", size="sm", outline=True),
+                        href="/dashboard"
+                    )
+                ], className="d-flex align-items-center")
+            ], width=8),
+            dbc.Col([
+                html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
+            ], width=4, className="text-end d-flex align-items-center justify-content-end")
         ], className="mb-4"),
 
         # Broker Movement Alert Container
@@ -5176,12 +5189,21 @@ def create_dashboard_page(stock_code='CDIA'):
         # Header with stock info
         dbc.Row([
             dbc.Col([
-                html.H4(f"Dashboard - {stock_code}", className="mb-0"),
-            ], width=6),
+                html.Div([
+                    html.H4(f"Dashboard - {stock_code}", className="mb-0 d-inline-block me-3"),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-exchange-alt me-2"),
+                            "Broker Movement"
+                        ], color="warning", size="sm", className="fw-bold"),
+                        href="/movement"
+                    )
+                ], className="d-flex align-items-center")
+            ], width=8),
             dbc.Col([
                 dbc.Button("Refresh Data", id="refresh-btn", color="primary", size="sm"),
                 html.Span(id="last-refresh", className="ms-3 text-muted small")
-            ], width=6, className="text-end")
+            ], width=4, className="text-end")
         ], className="mb-3"),
 
         # Summary Cards
