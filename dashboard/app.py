@@ -2116,7 +2116,6 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
                     dbc.NavItem(dcc.Link(dbc.Button("Ranking", color="warning", size="sm", className="fw-bold text-white me-1"), href="/ranking")),
                     dbc.NavItem(dcc.Link(dbc.Button("Alerts", color="warning", size="sm", className="fw-bold text-white me-1"), href="/alerts")),
-                    dbc.NavItem(dcc.Link(dbc.Button("Position", color="warning", size="sm", className="fw-bold text-white me-1"), href="/position")),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
                 ], className="ms-auto", navbar=True),
                 id="navbar-collapse",
@@ -5529,8 +5528,15 @@ def create_dashboard_page(stock_code='CDIA'):
                         dbc.Button([
                             html.I(className="fas fa-crosshairs me-2"),
                             "Sensitive Broker"
-                        ], color="info", size="sm", className="fw-bold"),
+                        ], color="info", size="sm", className="fw-bold me-2"),
                         href="/sensitive"
+                    ),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-chart-pie me-2"),
+                            "Position"
+                        ], color="info", size="sm", className="fw-bold"),
+                        href="/position"
                     )
                 ], className="d-flex align-items-center flex-wrap")
             ], width=8),
@@ -6352,14 +6358,28 @@ def create_position_page(stock_code='CDIA'):
     in_loss = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] < 0)]
 
     return html.Div([
-        html.H4([
-            html.I(className="fas fa-warehouse me-2"),
-            f"Broker Position Analysis - {stock_code}"
+        # Page Header with back button
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4([
+                        html.I(className="fas fa-chart-pie me-2"),
+                        f"Position - {stock_code}"
+                    ], className="mb-0 d-inline-block me-3"),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-arrow-left me-2"),
+                            "Dashboard"
+                        ], color="secondary", size="sm", outline=True),
+                        href="/dashboard"
+                    )
+                ], className="d-flex align-items-center")
+            ], width=8),
+            dbc.Col([
+                html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
+            ], width=4, className="text-end d-flex align-items-center justify-content-end")
         ], className="mb-2"),
-        html.P([
-            f"{period_str} | ",
-            f"Current Price: Rp {current_price:,.0f}"
-        ], className="text-muted mb-4"),
+        html.P(period_str, className="text-muted mb-4"),
 
         # Summary Cards
         dbc.Row([
