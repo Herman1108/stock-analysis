@@ -934,14 +934,22 @@ body.light-mode .dash-cell {
 }
 
 /* Light mode */
-body.light-mode .metric-box {
+body.light-mode .metric-box,
+body.light-mode div.metric-box,
+body.light-mode .card .metric-box,
+body.light-mode .card-body .metric-box {
   background-color: #e8e8e8 !important;
   color: #1a1a1a !important;
+  border: 1px solid #d0d0d0 !important;
 }
 
-body.light-mode .info-box {
+body.light-mode .info-box,
+body.light-mode div.info-box,
+body.light-mode .card .info-box,
+body.light-mode .card-body .info-box {
   background-color: #eeeeee !important;
   color: #1a1a1a !important;
+  border: 1px solid #d0d0d0 !important;
 }
 
 body.light-mode .metric-box .text-muted,
@@ -952,7 +960,9 @@ body.light-mode .info-box .text-muted {
 body.light-mode .metric-box h4,
 body.light-mode .metric-box h5,
 body.light-mode .metric-box .h4,
-body.light-mode .metric-box .h5 {
+body.light-mode .metric-box .h5,
+body.light-mode .metric-box span,
+body.light-mode .info-box span {
   color: inherit;
 }
 
