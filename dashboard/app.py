@@ -3219,7 +3219,7 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                                 html.Span("🟢" if foreign_today > 0 else "🔴", style={"fontSize": "16px"})
                             ], className="mb-0"),
                             html.Small(f"vs {foreign_yesterday:+.1f}B yesterday", className="text-muted")
-                        ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+                        ], className="text-center p-2 rounded metric-box")
                     ], width=4),
                     dbc.Col([
                         html.Div([
@@ -3228,7 +3228,7 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                                 f"{accum_ratio:.0f}% Buy",
                             ], className=f"mb-0 text-{'success' if accum_ratio > 55 else ('danger' if accum_ratio < 45 else 'warning')}"),
                             html.Small(f"{100-accum_ratio:.0f}% Sell", className="text-muted")
-                        ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+                        ], className="text-center p-2 rounded metric-box")
                     ], width=4),
                     dbc.Col([
                         html.Div([
@@ -3239,7 +3239,7 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                                          className=f"badge bg-{'success' if 'INFLOW' in foreign_signal else ('danger' if 'OUTFLOW' in foreign_signal else 'secondary')}")
                             ], className="mb-0"),
                             html.Small("consecutive", className="text-muted")
-                        ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+                        ], className="text-center p-2 rounded metric-box")
                     ], width=4),
                 ], className="mb-3"),
 
@@ -3296,14 +3296,14 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                         html.Br(),
                         html.Strong("• By Type: "), "Siapa yang mendominasi? Asing biasanya punya riset lebih dalam"
                     ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+                ], className="p-2 rounded info-box")
             ])
-        ], className="mb-3", color="dark", outline=True)
+        ], className="mb-3")
     except Exception as e:
         return dbc.Card([
             dbc.CardHeader("📊 Market Sentiment"),
             dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
-        ], className="mb-3", color="dark")
+        ], className="mb-3")
 
 
 def create_key_metrics_compact(stock_code='CDIA'):
@@ -3325,7 +3325,7 @@ def create_key_metrics_compact(stock_code='CDIA'):
                 html.Small(title, className="text-muted", style={"fontSize": "10px"}),
                 html.H5(value, className=f"text-{color} mb-0"),
                 html.Small(subtitle, className="text-muted", style={"fontSize": "9px"})
-            ], className="text-center p-2 rounded", style={"backgroundColor": "#383838"})
+            ], className="text-center p-2 rounded metric-box")
 
         # Get values
         sens_score = broker_sens.get('avg_win_rate', 0) if broker_sens else 0
@@ -3431,14 +3431,14 @@ def create_key_metrics_compact(stock_code='CDIA'):
                         html.Br(),
                         html.Strong("• S/R Levels: "), "Support (-%) = jarak ke bawah, Resistance (+%) = jarak ke atas"
                     ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+                ], className="p-2 rounded info-box")
             ])
-        ], className="mb-3", color="dark", outline=True)
+        ], className="mb-3")
     except Exception as e:
         return dbc.Card([
             dbc.CardHeader("🎯 Key Metrics"),
             dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
-        ], className="mb-3", color="dark")
+        ], className="mb-3")
 
 
 def create_broker_movement_alert(stock_code='CDIA'):

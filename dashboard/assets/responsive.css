@@ -918,3 +918,40 @@ body.light-mode .dash-cell {
   color: #1a1a1a !important;
   border-color: #e0e0e0 !important;
 }
+
+/* ============================================
+   METRIC BOX & INFO BOX - Theme Responsive
+   ============================================ */
+/* Dark mode (default) */
+.metric-box {
+  background-color: #383838;
+  color: #ffffff;
+}
+
+.info-box {
+  background-color: #2a2a2a;
+  color: #ffffff;
+}
+
+/* Light mode */
+body.light-mode .metric-box {
+  background-color: #e8e8e8 !important;
+  color: #1a1a1a !important;
+}
+
+body.light-mode .info-box {
+  background-color: #eeeeee !important;
+  color: #1a1a1a !important;
+}
+
+body.light-mode .metric-box .text-muted,
+body.light-mode .info-box .text-muted {
+  color: #555555 !important;
+}
+
+body.light-mode .metric-box h4,
+body.light-mode .metric-box h5,
+body.light-mode .metric-box .h4,
+body.light-mode .metric-box .h5 {
+  color: inherit;
+}
