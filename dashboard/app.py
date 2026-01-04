@@ -6347,10 +6347,39 @@ def toggle_navbar_collapse(n_clicks, pathname, is_open):
 app.clientside_callback(
     """
     function(n_clicks, currentTheme) {
+        // Function to fix inline styles for light mode
+        function applyLightModeStyles() {
+            // Remove dark backgrounds from elements with inline styles
+            document.querySelectorAll('[style*="background"]').forEach(function(el) {
+                var bg = el.style.backgroundColor;
+                if (bg && (bg.includes('rgb(56') || bg.includes('rgb(45') || bg.includes('rgb(48') ||
+                    bg.includes('rgb(42') || bg.includes('rgb(58') || bg.includes('rgb(35') ||
+                    bg.includes('#383838') || bg.includes('#2a2a2a') || bg.includes('#2d2d2d') ||
+                    bg.includes('#303030') || bg.includes('#404040') || bg.includes('#2d3a2d') ||
+                    bg.includes('#3a2d2d') || bg.includes('#3a3a2d'))) {
+                    el.style.backgroundColor = '#e8e8e8';
+                    el.style.color = '#1a1a1a';
+                    el.style.borderColor = '#d0d0d0';
+                }
+            });
+            // Fix DataTable cells
+            document.querySelectorAll('.dash-cell, .dash-header').forEach(function(el) {
+                el.style.backgroundColor = '#f7f7f7';
+                el.style.color = '#1a1a1a';
+            });
+        }
+
+        // Function to restore dark mode styles
+        function applyDarkModeStyles() {
+            // Restore will happen on page reload or let original styles take effect
+            location.reload();
+        }
+
         if (!n_clicks) {
             // On initial load, apply saved theme
             if (currentTheme === 'light') {
                 document.body.classList.add('light-mode');
+                setTimeout(applyLightModeStyles, 100);
                 return ['light', 'fas fa-moon'];
             }
             return ['dark', 'fas fa-sun'];
@@ -6359,9 +6388,12 @@ app.clientside_callback(
         // Toggle theme
         if (currentTheme === 'dark') {
             document.body.classList.add('light-mode');
+            setTimeout(applyLightModeStyles, 100);
             return ['light', 'fas fa-moon'];
         } else {
             document.body.classList.remove('light-mode');
+            // Reload to restore dark mode properly
+            setTimeout(function() { location.reload(); }, 50);
             return ['dark', 'fas fa-sun'];
         }
     }
