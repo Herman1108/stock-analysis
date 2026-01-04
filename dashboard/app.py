@@ -4111,75 +4111,96 @@ def create_broker_activity_table(stock_code, broker_codes, days):
 
 
 def create_broker_summary_card(stock_code, broker_codes):
-    """Create summary card showing accumulation/distribution/neutral status for each broker"""
+    """
+    Create summary card showing accumulation/distribution/neutral status for each broker
+    Uses each broker's avg_lead_time from sensitivity analysis as the accumulation window
+    """
     broker_df = get_broker_data(stock_code)
     if broker_df.empty or not broker_codes:
         return html.Div("No data available", className="text-muted")
 
+    # Get sensitivity data with lead_time for each broker
+    broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+    broker_sens_dict = {}
+    if broker_sens and broker_sens.get('brokers'):
+        for b in broker_sens['brokers']:
+            broker_sens_dict[b['broker_code']] = b
+
     end_date = broker_df['date'].max()
-    periods = [7, 14, 21, 30]  # 1 week, 2 weeks, 3 weeks, 1 month
 
     summary_rows = []
     for broker_code in broker_codes:
-        # Calculate net value for each period
-        period_results = []
-        total_net = 0
+        # Get this broker's avg_lead_time (default 5 days if not found)
+        broker_info = broker_sens_dict.get(broker_code, {})
+        avg_lead_time = broker_info.get('avg_lead_time', 5.0)
+        win_rate = broker_info.get('win_rate', 0)
 
-        for days in periods:
-            start_date = end_date - pd.Timedelta(days=days)
-            period_df = broker_df[(broker_df['date'] >= start_date) & (broker_df['broker_code'] == broker_code)]
+        # Use lead_time as the accumulation window (round up to ensure coverage)
+        accum_window = max(int(np.ceil(avg_lead_time)), 3)  # Minimum 3 days
 
-            if not period_df.empty:
-                net_val = period_df['net_value'].sum()
-                total_net += net_val
-                period_results.append(net_val)
+        # Calculate activity for the accumulation window
+        start_date = end_date - pd.Timedelta(days=accum_window)
+        period_df = broker_df[(broker_df['date'] >= start_date) & (broker_df['broker_code'] == broker_code)]
+
+        if period_df.empty:
+            continue
+
+        # Count consecutive accumulation days (streak from most recent)
+        period_df_sorted = period_df.sort_values('date', ascending=False)
+        streak = 0
+        streak_net = 0
+        for _, row in period_df_sorted.iterrows():
+            if row['net_value'] > 0:
+                streak += 1
+                streak_net += row['net_value']
             else:
-                period_results.append(0)
+                break
 
-        # Determine overall status based on consistency
-        positive_periods = sum(1 for v in period_results if v > 0)
-        negative_periods = sum(1 for v in period_results if v < 0)
+        # Total net in the window
+        total_net = period_df['net_value'].sum()
+        total_days = len(period_df)
+        positive_days = len(period_df[period_df['net_value'] > 0])
+        negative_days = len(period_df[period_df['net_value'] < 0])
 
-        if positive_periods >= 3:
+        # Determine status based on activity in accumulation window
+        # AKUMULASI: majority positive days AND positive total
+        # DISTRIBUSI: majority negative days AND negative total
+        if positive_days > negative_days and total_net > 0:
             status = "AKUMULASI"
             status_color = "text-success"
-            status_bg = "bg-success"
             status_icon = "🟢"
-        elif negative_periods >= 3:
+        elif negative_days > positive_days and total_net < 0:
             status = "DISTRIBUSI"
             status_color = "text-danger"
-            status_bg = "bg-danger"
             status_icon = "🔴"
         else:
             status = "NETRAL"
             status_color = "text-warning"
-            status_bg = "bg-warning"
             status_icon = "🟡"
 
-        # Calculate trend (comparing recent vs older)
-        recent_net = period_results[0] + period_results[1]  # 1-2 weeks
-        older_net = period_results[2] + period_results[3]   # 3-4 weeks
-
-        if recent_net > older_net * 1.2:
-            trend = "↗️ Meningkat"
-            trend_color = "text-success"
-        elif recent_net < older_net * 0.8:
-            trend = "↘️ Menurun"
-            trend_color = "text-danger"
+        # Progress indicator - how far into accumulation pattern
+        if streak >= accum_window:
+            progress = "✅ READY"
+            progress_color = "text-success fw-bold"
+        elif streak >= accum_window * 0.5:
+            progress = f"⏳ {streak}/{accum_window}d"
+            progress_color = "text-info"
+        elif streak > 0:
+            progress = f"🔄 {streak}/{accum_window}d"
+            progress_color = "text-muted"
         else:
-            trend = "➡️ Stabil"
-            trend_color = "text-muted"
+            progress = "⏸️ -"
+            progress_color = "text-muted"
 
-        # Period indicators (✓ or ✗)
-        period_indicators = []
-        period_labels = ["1M", "2M", "3M", "1B"]
-        for i, (val, label) in enumerate(zip(period_results, period_labels)):
-            if val > 0:
-                period_indicators.append(html.Span(f"✓{label}", className="text-success me-1", style={"fontSize": "10px"}))
-            elif val < 0:
-                period_indicators.append(html.Span(f"✗{label}", className="text-danger me-1", style={"fontSize": "10px"}))
+        # Day detail (show last N days activity)
+        day_indicators = []
+        recent_days = period_df_sorted.head(min(accum_window, 5))  # Show up to 5 days
+        for i, (_, row) in enumerate(recent_days.iterrows()):
+            day_label = f"D{i+1}"
+            if row['net_value'] > 0:
+                day_indicators.append(html.Span(f"✓", className="text-success me-1", style={"fontSize": "11px"}, title=f"{day_label}: +{row['net_value']/1e9:.1f}B"))
             else:
-                period_indicators.append(html.Span(f"-{label}", className="text-muted me-1", style={"fontSize": "10px"}))
+                day_indicators.append(html.Span(f"✗", className="text-danger me-1", style={"fontSize": "11px"}, title=f"{day_label}: {row['net_value']/1e9:.1f}B"))
 
         summary_rows.append(html.Tr([
             html.Td(colored_broker(broker_code, with_badge=True), className="table-cell"),
@@ -4187,8 +4208,12 @@ def create_broker_summary_card(stock_code, broker_codes):
                 html.Span(f"{status_icon} ", style={"fontSize": "14px"}),
                 html.Span(status, className=f"fw-bold {status_color}")
             ], className="table-cell"),
-            html.Td(period_indicators, className="table-cell"),
-            html.Td(html.Span(trend, className=trend_color), className="table-cell"),
+            html.Td([
+                html.Span(f"{accum_window}d", className="text-info fw-bold me-2"),
+                html.Small(f"(Win:{win_rate:.0f}%)", className="text-muted")
+            ], className="table-cell"),
+            html.Td(day_indicators, className="table-cell"),
+            html.Td(html.Span(progress, className=progress_color), className="table-cell"),
             html.Td(f"{total_net/1e9:+.2f}B", className=f"table-cell {'text-success' if total_net > 0 else 'text-danger' if total_net < 0 else 'text-muted'}"),
         ]))
 
@@ -4196,9 +4221,10 @@ def create_broker_summary_card(stock_code, broker_codes):
         html.Thead(html.Tr([
             html.Th("Broker", className="table-header"),
             html.Th("Status", className="table-header"),
-            html.Th("Per Periode", className="table-header"),
-            html.Th("Trend", className="table-header"),
-            html.Th("Total Net", className="table-header"),
+            html.Th("Window", className="table-header"),
+            html.Th("Hari Terakhir", className="table-header"),
+            html.Th("Progress", className="table-header"),
+            html.Th("Net Value", className="table-header"),
         ])),
         html.Tbody(summary_rows)
     ], className="table table-sm", style={'width': '100%'})
@@ -4257,13 +4283,15 @@ def create_sensitive_broker_page(stock_code='CDIA'):
                     ], className="text-info"),
                     html.Br(),
                     html.Small([
-                        html.Strong("• Status: "), "🟢 AKUMULASI = net buy ≥3 periode, 🔴 DISTRIBUSI = net sell ≥3 periode, 🟡 NETRAL = mixed",
+                        html.Strong("• Window: "), "Jumlah hari akumulasi rata-rata broker sebelum harga naik ≥10% (dari data historis)",
                         html.Br(),
-                        html.Strong("• Per Periode: "), "✓ = net positif (beli), ✗ = net negatif (jual). 1M=1 minggu, 2M=2 minggu, 3M=3 minggu, 1B=1 bulan",
+                        html.Strong("• Win%: "), "Persentase keberhasilan sinyal akumulasi broker ini",
                         html.Br(),
-                        html.Strong("• Trend: "), "Perbandingan aktivitas 2 minggu terakhir vs 2 minggu sebelumnya",
+                        html.Strong("• Hari Terakhir: "), "✓ = net buy, ✗ = net sell (D1=hari ini, D2=kemarin, dst)",
                         html.Br(),
-                        html.Strong("💡 Signal: "), "Broker dengan status AKUMULASI dan trend Meningkat = potensi harga naik!"
+                        html.Strong("• Progress: "), "✅ READY = akumulasi sudah cukup, ⏳ = sedang proses, 🔄 = baru mulai",
+                        html.Br(),
+                        html.Strong("💡 Signal: "), "Broker dengan status AKUMULASI dan Progress READY = potensi harga naik dalam beberapa hari!"
                     ], className="text-muted", style={"fontSize": "10px"})
                 ], className="p-2 rounded info-box mt-2")
             ])
