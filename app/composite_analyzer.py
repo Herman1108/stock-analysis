@@ -1150,7 +1150,13 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
     # CASE 0a: Phase ended due to PRICE REVERSAL (rose >10%, fell back)
     if phase_reason == 'PRICE_REVERSAL':
         zone = 'PHASE ENDED'
-        zone_color = 'secondary'
+        # Color based on max gain achieved - celebrate success!
+        if max_gain_pct >= 15:
+            zone_color = 'success'  # Great gain achieved
+        elif max_gain_pct >= 10:
+            zone_color = 'info'     # Good gain
+        else:
+            zone_color = 'warning'  # Modest gain
         zone_desc = f'Fase BERAKHIR (harga). Pernah naik {max_gain_pct:.1f}% lalu turun. Tunggu sinyal baru!'
         recommendation = 'WAIT NEW SIGNAL'
     # CASE 0b: Distribution detected due to FOREIGN OUTFLOW

@@ -55,6 +55,39 @@ from broker_config import (
 )
 from parser import read_excel_data, import_price_data, import_broker_data
 
+# Helper function to create colored broker code span
+def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool = False) -> html.Span:
+    """Create a colored broker code span based on broker type.
+
+    Args:
+        broker_code: The broker code (e.g., 'AK', 'CC')
+        show_type: If True, add superscript with type initial (F/B/L)
+        with_badge: If True, add background color based on broker role
+    """
+    broker_type = get_broker_type(broker_code)
+    broker_color = BROKER_COLORS.get(broker_type, BROKER_COLORS['LOCAL'])
+
+    if with_badge:
+        # Use CSS classes for badge - ensures proper override in light mode
+        badge_class = f"broker-badge broker-badge-{broker_type.lower()}"
+        if show_type:
+            type_short = {'FOREIGN': 'F', 'BUMN': 'B', 'LOCAL': 'L'}.get(broker_type, 'L')
+            return html.Span([
+                html.Span(broker_code, className=badge_class),
+                html.Sup(type_short, style={"fontSize": "8px", "marginLeft": "2px", "color": broker_color})
+            ])
+        return html.Span(broker_code, className=badge_class)
+    else:
+        # Regular colored text (no badge)
+        broker_class = f"broker-{broker_type.lower()}"
+        if show_type:
+            type_short = {'FOREIGN': 'F', 'BUMN': 'B', 'LOCAL': 'L'}.get(broker_type, 'L')
+            return html.Span([
+                html.Span(broker_code, className=broker_class),
+                html.Sup(type_short, className=broker_class, style={"fontSize": "8px", "marginLeft": "1px"})
+            ])
+        return html.Span(broker_code, className=broker_class)
+
 # Initialize Dash app with Font Awesome for help icons
 FA_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
 
@@ -814,14 +847,13 @@ def create_phase_analysis_card(stock_code: str, current_price: float):
             # Current Phase Indicator
             html.Div([
                 html.Div([
-                    html.I(className=f"fas {style['icon']} me-2", style={"fontSize": "24px"}),
-                    html.Span(style['label'], className="fw-bold", style={"fontSize": "20px"})
-                ], style={"color": style['color']}),
+                    html.I(className=f"fas {style['icon']} me-2 phase-{phase.lower()}", style={"fontSize": "24px"}),
+                    html.Span(style['label'], className=f"fw-bold phase-{phase.lower()}", style={"fontSize": "20px"})
+                ]),
                 html.Div([
                     html.Small(f"Confidence: {phase_data['confidence']}%", className="text-muted")
                 ])
-            ], className="text-center mb-3 p-3", style={
-                "backgroundColor": "#2a2a2a",
+            ], className="text-center mb-3 p-3 rounded info-box", style={
                 "borderRadius": "10px",
                 "border": f"2px solid {style['color']}"
             }),
@@ -840,22 +872,21 @@ def create_phase_analysis_card(stock_code: str, current_price: float):
                             f"Net: {broker_flow['total_net_lot']:+,.0f} lot",
                             className="text-success" if broker_flow['total_net_lot'] > 0 else "text-danger"
                         )
-                    ], className="text-center p-2", style={"backgroundColor": "#353535", "borderRadius": "5px"})
+                    ], className="text-center p-2 rounded metric-box")
                 ], md=6),
                 dbc.Col([
                     html.Div([
                         html.Small("Foreign Flow", className="text-muted d-block"),
                         html.Span(
                             foreign_flow['trend'],
-                            className="fw-bold",
-                            style={"color": "#28a745" if foreign_flow['trend'] == 'INFLOW' else "#dc3545" if foreign_flow['trend'] == 'OUTFLOW' else "#6c757d"}
+                            className=f"fw-bold {'text-success' if foreign_flow['trend'] == 'INFLOW' else 'text-danger' if foreign_flow['trend'] == 'OUTFLOW' else 'text-muted'}"
                         ),
                         html.Br(),
                         html.Small(
                             f"Net: {foreign_flow['total_net_lot']:+,.0f} lot",
                             className="text-success" if foreign_flow['total_net_lot'] > 0 else "text-danger"
                         )
-                    ], className="text-center p-2", style={"backgroundColor": "#353535", "borderRadius": "5px"})
+                    ], className="text-center p-2 rounded metric-box")
                 ], md=6),
             ], className="mb-3"),
 
@@ -1301,8 +1332,7 @@ def create_accumulation_score_card(stock_code: str):
                     html.Strong(f"Signal: {acc_data['signal']}",
                                style={"color": acc_data.get('color', '#6c757d')})
                 ], className="mt-1")
-            ], className="text-center p-3 mb-3", style={
-                "backgroundColor": "#2a2a2a",
+            ], className="text-center p-3 mb-3 rounded info-box", style={
                 "borderRadius": "10px",
                 "border": f"2px solid {acc_data.get('color', '#6c757d')}"
             }),
@@ -2401,6 +2431,7 @@ def create_upload_page():
                                             'Drag and Drop atau ',
                                             html.A('Klik untuk Upload', className="text-primary")
                                         ]),
+                                        className="upload-area",
                                         style={
                                             'width': '100%',
                                             'height': '120px',
@@ -2411,7 +2442,6 @@ def create_upload_page():
                                             'textAlign': 'center',
                                             'padding': '20px',
                                             'margin': '10px 0',
-                                            'backgroundColor': '#2a2a2a',
                                             'cursor': 'pointer'
                                         },
                                         multiple=False,
@@ -2565,25 +2595,31 @@ def create_buy_signal_card(buy_signal):
                                 className=f"text-{'success' if buy_signal['safe_entry']['is_safe'] else 'danger'} fw-bold"
                             )
                         ], className="mb-1 small"),
-                        # Phase Status
+                        # Phase Status - with dynamic color based on gain for ENDED status
                         html.P([
                             html.Strong("Fase: "),
                             dbc.Badge(
                                 buy_signal.get('phase_tracking', {}).get('status', 'UNKNOWN'),
-                                color={
+                                color=(
+                                    # Dynamic color for ENDED based on max gain
+                                    'success' if buy_signal.get('phase_tracking', {}).get('max_gain_pct', 0) >= 15 else
+                                    'info' if buy_signal.get('phase_tracking', {}).get('max_gain_pct', 0) >= 10 else
+                                    'warning'
+                                ) if buy_signal.get('phase_tracking', {}).get('status') == 'ENDED' else {
                                     'ACCUMULATING': 'info',
                                     'MARKUP': 'success',
                                     'DISTRIBUTION': 'danger',
                                     'SIDEWAYS': 'warning',
-                                    'ENDED': 'secondary'
                                 }.get(buy_signal.get('phase_tracking', {}).get('status', ''), 'secondary'),
                                 className="ms-1"
                             ),
-                            # Show phase message as tooltip/small text
+                            # Show phase info (foreign flow OR max gain for ENDED)
                             html.Small(
-                                f" ({buy_signal.get('phase_tracking', {}).get('foreign_flow_10d', 0):+.1f}B)",
-                                className="text-muted"
-                            ) if buy_signal.get('phase_tracking', {}).get('foreign_flow_10d') else None
+                                f" (+{buy_signal.get('phase_tracking', {}).get('max_gain_pct', 0):.1f}%)"
+                                if buy_signal.get('phase_tracking', {}).get('status') == 'ENDED'
+                                else f" ({buy_signal.get('phase_tracking', {}).get('foreign_flow_10d', 0):+.1f}B)",
+                                className="text-success fw-bold" if buy_signal.get('phase_tracking', {}).get('status') == 'ENDED' and buy_signal.get('phase_tracking', {}).get('max_gain_pct', 0) >= 10 else "text-muted"
+                            ) if buy_signal.get('phase_tracking', {}).get('foreign_flow_10d') or buy_signal.get('phase_tracking', {}).get('status') == 'ENDED' else None
                         ], className="mb-0 small") if buy_signal.get('phase_tracking') else None,
                     ])
                 ], width=4),
@@ -2919,49 +2955,33 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
                 ], style={"fontSize": "10px"}),
             ], className="mb-2"),
 
-            # Top 10 Brokers Avg Buy Table
+            # Top 10 Brokers Avg Buy Table - dengan warna broker
             html.H6("Top 10 Broker by Buy Value (60 hari)", className="mb-2"),
-            dash_table.DataTable(
-                data=[{
-                    'Broker': b['broker_code'],
-                    'Tipe': get_broker_info(b['broker_code'])['type_name'],
-                    'Avg Buy': f"Rp {b['avg_buy_price']:,.0f}",
-                    'Buy Value': f"{b['total_buy_value']/1e9:.1f}B",
-                    'Net': f"{b['net_value']/1e9:+.1f}B",
-                    'Floating': f"{b.get('floating_pct', 0):+.1f}%",
-                    'Status': b.get('position', '-')
-                } for b in brokers],
-                columns=[
-                    {'name': 'Broker', 'id': 'Broker'},
-                    {'name': 'Tipe', 'id': 'Tipe'},
-                    {'name': 'Avg Buy', 'id': 'Avg Buy'},
-                    {'name': 'Buy Value', 'id': 'Buy Value'},
-                    {'name': 'Net', 'id': 'Net'},
-                    {'name': 'Floating', 'id': 'Floating'},
-                    {'name': 'Status', 'id': 'Status'}
-                ],
-                style_table={'overflowX': 'auto'},
-                style_cell={
-                    'textAlign': 'left',
-                    'backgroundColor': '#303030',
-                    'color': 'white',
-                    'padding': '5px',
-                    'fontSize': '12px'
-                },
-                style_header={
-                    'backgroundColor': '#404040',
-                    'fontWeight': 'bold'
-                },
-                style_data_conditional=[
-                    {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
-                    {'if': {'filter_query': '{Status} = PROFIT'}, 'color': '#28a745'},
-                    {'if': {'filter_query': '{Status} = LOSS'}, 'color': '#dc3545'},
-                    {'if': {'filter_query': '{Tipe} = Asing'}, 'backgroundColor': 'rgba(220, 53, 69, 0.2)'},
-                    {'if': {'filter_query': '{Tipe} = BUMN/Pemerintah'}, 'backgroundColor': 'rgba(40, 167, 69, 0.2)'},
-                    {'if': {'filter_query': '{Tipe} = Lokal'}, 'backgroundColor': 'rgba(111, 66, 193, 0.2)'},
-                ],
-                page_size=5
-            ),
+            html.Table([
+                html.Thead(html.Tr([
+                    html.Th("Broker", style={"width": "80px"}),
+                    html.Th("Tipe", style={"width": "120px"}),
+                    html.Th("Avg Buy", style={"width": "100px"}),
+                    html.Th("Buy Value", style={"width": "90px"}),
+                    html.Th("Net", style={"width": "80px"}),
+                    html.Th("Floating", style={"width": "80px"}),
+                    html.Th("Status", style={"width": "70px"})
+                ])),
+                html.Tbody([
+                    html.Tr([
+                        html.Td(colored_broker(b['broker_code'], with_badge=True)),
+                        html.Td(html.Span(
+                            get_broker_info(b['broker_code'])['type_name'],
+                            className=f"broker-{get_broker_type(b['broker_code']).lower()}"
+                        )),
+                        html.Td(f"Rp {b['avg_buy_price']:,.0f}"),
+                        html.Td(f"{b['total_buy_value']/1e9:.1f}B"),
+                        html.Td(f"{b['net_value']/1e9:+.1f}B", className="text-success" if b['net_value'] > 0 else "text-danger"),
+                        html.Td(f"{b.get('floating_pct', 0):+.1f}%", className="text-success" if b.get('floating_pct', 0) > 0 else "text-danger"),
+                        html.Td(b.get('position', '-'), className="text-success" if b.get('position') == 'PROFIT' else "text-danger" if b.get('position') == 'LOSS' else "")
+                    ]) for b in brokers[:10]
+                ])
+            ], className="table table-sm table-dark table-hover", style={"fontSize": "12px"}),
 
             html.Hr(),
 
@@ -3361,7 +3381,7 @@ def create_key_metrics_compact(stock_code='CDIA'):
                         metric_card(
                             "Broker Sensitivity",
                             f"{sens_score:.0f}%",
-                            f"Top: {', '.join(top_brokers)}" if top_brokers else "N/A",
+                            html.Span(["Top: ", colored_broker(top_brokers[0], with_badge=True)] + ([", ", colored_broker(top_brokers[1], with_badge=True)] if len(top_brokers) > 1 else [])) if top_brokers else "N/A",
                             "info" if sens_score > 50 else "warning"
                         )
                     ], width=4),
@@ -3499,17 +3519,17 @@ def create_broker_movement_alert(stock_code='CDIA'):
         # Find new distribution (was positive/neutral, now negative)
         new_dist = [m for m in movements if m['yesterday'] >= 0 and m['today'] < -1e9][:3]
 
-        # Build accumulation list
-        accum_items = [html.Div([
-            html.Span(f"{m['broker']} ", className="fw-bold"),
-            html.Small(f"+{m['today']/1e9:.1f}B", className="text-success")
-        ], style={"fontSize": "11px"}) for m in new_accum] if new_accum else [html.Small("None today", className="text-muted")]
+        # Build accumulation items - horizontal with better spacing
+        accum_items = [html.Span([
+            colored_broker(m['broker'], with_badge=True),
+            html.Span(f" +{m['today']/1e9:.1f}B", className="text-success fw-bold", style={"marginLeft": "4px"})
+        ], style={"display": "inline-flex", "alignItems": "center", "marginRight": "20px", "marginBottom": "4px"}) for m in new_accum] if new_accum else [html.Small("None today", className="text-muted")]
 
-        # Build distribution list
-        dist_items = [html.Div([
-            html.Span(f"{m['broker']} ", className="fw-bold"),
-            html.Small(f"{m['today']/1e9:.1f}B", className="text-danger")
-        ], style={"fontSize": "11px"}) for m in new_dist] if new_dist else [html.Small("None today", className="text-muted")]
+        # Build distribution items - horizontal with better spacing
+        dist_items = [html.Span([
+            colored_broker(m['broker'], with_badge=True),
+            html.Span(f" {m['today']/1e9:.1f}B", className="text-danger fw-bold", style={"marginLeft": "4px"})
+        ], style={"display": "inline-flex", "alignItems": "center", "marginRight": "20px", "marginBottom": "4px"}) for m in new_dist] if new_dist else [html.Small("None today", className="text-muted")]
 
         return dbc.Card([
             dbc.CardHeader([
@@ -3521,44 +3541,47 @@ def create_broker_movement_alert(stock_code='CDIA'):
                     # New Accumulation Signal
                     dbc.Col([
                         html.Div([
-                            html.Small("🟢 New Accumulation", className="text-success fw-bold"),
+                            html.Span([
+                                html.I(className="fas fa-arrow-up text-success me-1"),
+                                html.Span("New Accumulation", className="text-success fw-bold")
+                            ]),
+                            html.Span(" : ", className="text-muted mx-2"),
                             *accum_items
-                        ], className="p-2 rounded alert-box-success")
-                    ], width=6),
+                        ], className="p-2 rounded alert-box-success d-flex flex-wrap align-items-center")
+                    ], width=12, lg=6, className="mb-2 mb-lg-0"),
                     # New Distribution Warning
                     dbc.Col([
                         html.Div([
-                            html.Small("🔴 New Distribution", className="text-danger fw-bold"),
+                            html.Span([
+                                html.I(className="fas fa-arrow-down text-danger me-1"),
+                                html.Span("New Distribution", className="text-danger fw-bold")
+                            ]),
+                            html.Span(" : ", className="text-muted mx-2"),
                             *dist_items
-                        ], className="p-2 rounded alert-box-danger")
-                    ], width=6),
+                        ], className="p-2 rounded alert-box-danger d-flex flex-wrap align-items-center")
+                    ], width=12, lg=6),
                 ], className="mb-3"),
 
-                # Biggest Movement Table
+                # Biggest Movement Table - dengan warna broker berdasarkan tipe
                 html.Small("Biggest Movement Today vs Yesterday", className="text-muted fw-bold mb-2 d-block"),
-                dash_table.DataTable(
-                    data=[{
-                        'Broker': m['broker'],
-                        'Type': m['type'][:6],
-                        'Today': f"{m['today']/1e9:+.1f}B",
-                        'Yesterday': f"{m['yesterday']/1e9:+.1f}B",
-                        'Change': f"{m['change']/1e9:+.1f}B"
-                    } for m in top_movements],
-                    columns=[
-                        {'name': 'Broker', 'id': 'Broker'},
-                        {'name': 'Type', 'id': 'Type'},
-                        {'name': 'Today', 'id': 'Today'},
-                        {'name': 'Yest', 'id': 'Yesterday'},
-                        {'name': 'Change', 'id': 'Change'}
-                    ],
-                    style_table={'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '4px', 'fontSize': '11px'},
-                    style_header={'backgroundColor': '#404040', 'fontWeight': 'bold', 'fontSize': '10px'},
-                    style_data_conditional=[
-                        {'if': {'filter_query': '{Change} contains "+"'}, 'color': '#28a745'},
-                        {'if': {'filter_query': '{Change} contains "-"'}, 'color': '#dc3545'},
-                    ]
-                ),
+                html.Table([
+                    html.Thead(html.Tr([
+                        html.Th("Broker", className="table-header"),
+                        html.Th("Tipe", className="table-header"),
+                        html.Th("Today", className="table-header"),
+                        html.Th("Yest", className="table-header"),
+                        html.Th("Change", className="table-header"),
+                    ])),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td(colored_broker(m['broker'], with_badge=True), className="table-cell"),
+                            html.Td(html.Span(m['type'][:6], className=f"broker-{get_broker_type(m['broker']).lower()}"), className="table-cell"),
+                            html.Td(f"{m['today']/1e9:+.1f}B", className="table-cell"),
+                            html.Td(f"{m['yesterday']/1e9:+.1f}B", className="table-cell"),
+                            html.Td(html.Span(f"{m['change']/1e9:+.1f}B", className="text-success" if m['change'] > 0 else "text-danger"), className="table-cell"),
+                        ]) for m in top_movements
+                    ])
+                ], className="table table-sm", style={'width': '100%'}),
 
                 html.Hr(className="my-2"),
 
@@ -3651,6 +3674,7 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
 
             broker_status.append({
                 'broker': broker_code,
+                'type': get_broker_info(broker_code)['type_name'][:6],  # Asing, BUMN/P, Lokal
                 'win_rate': b['win_rate'],
                 'lead_time': b['avg_lead_time'],
                 'signals': b['successful_signals'],
@@ -3671,53 +3695,55 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
                 html.Small(" - Pola akumulasi sampai harga naik ≥10%", className="text-muted ms-2")
             ]),
             dbc.CardBody([
-                # Historical Pattern Table
+                # Historical Pattern Table - dengan warna broker
                 html.Small("Historical Performance", className="text-muted fw-bold mb-2 d-block"),
-                dash_table.DataTable(
-                    data=[{
-                        'Rank': f"{'🥇' if i==0 else '🥈' if i==1 else '🥉' if i==2 else str(i+1)}",
-                        'Broker': b['broker'],
-                        'Win Rate': f"{b['win_rate']:.0f}%",
-                        'Lead Time': f"{b['lead_time']:.0f}d",
-                        'Signals': b['signals'],
-                        'Avg Buy': f"Rp {b['avg_buy']:,.0f}" if b['avg_buy'] > 0 else "-"
-                    } for i, b in enumerate(broker_status)],
-                    columns=[
-                        {'name': '', 'id': 'Rank'},
-                        {'name': 'Broker', 'id': 'Broker'},
-                        {'name': 'Win%', 'id': 'Win Rate'},
-                        {'name': 'Lead', 'id': 'Lead Time'},
-                        {'name': 'Sigs', 'id': 'Signals'},
-                        {'name': 'Avg Buy', 'id': 'Avg Buy'}
-                    ],
-                    style_table={'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '4px', 'fontSize': '11px'},
-                    style_header={'backgroundColor': '#404040', 'fontWeight': 'bold', 'fontSize': '10px'},
-                ),
+                html.Table([
+                    html.Thead(html.Tr([
+                        html.Th("", className="table-header"),
+                        html.Th("Broker", className="table-header"),
+                        html.Th("Tipe", className="table-header"),
+                        html.Th("Win%", className="table-header"),
+                        html.Th("Lead", className="table-header"),
+                        html.Th("Sigs", className="table-header"),
+                        html.Th("Avg Buy", className="table-header"),
+                    ])),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td('🥇' if i==0 else '🥈' if i==1 else '🥉' if i==2 else str(i+1), className="table-cell"),
+                            html.Td(colored_broker(b['broker'], with_badge=True), className="table-cell"),
+                            html.Td(html.Span(b['type'], className=f"broker-{get_broker_type(b['broker']).lower()}"), className="table-cell"),
+                            html.Td(f"{b['win_rate']:.0f}%", className="table-cell"),
+                            html.Td(f"{b['lead_time']:.0f}d", className="table-cell"),
+                            html.Td(str(b['signals']), className="table-cell"),
+                            html.Td(f"Rp {b['avg_buy']:,.0f}" if b['avg_buy'] > 0 else "-", className="table-cell"),
+                        ]) for i, b in enumerate(broker_status)
+                    ])
+                ], className="table table-sm", style={'width': '100%'}),
 
                 html.Hr(className="my-2"),
 
-                # Current Status
+                # Current Status - dengan warna broker
                 html.Small("Current Status - Are they accumulating now?", className="text-muted fw-bold mb-2 d-block"),
-                dash_table.DataTable(
-                    data=[{
-                        'Broker': b['broker'],
-                        'Status': f"{'🟢 ACCUM' if b['status']=='ACCUM' else '🔴 DIST' if b['status']=='DIST' else '⚪ NEUTRAL'}",
-                        'Streak': f"{b['streak']}d" if b['streak'] > 0 else "-",
-                        'Today': f"{b['today_net']/1e9:+.1f}B",
-                        'Lot': f"{b['total_lot']/1e6:.1f}M" if b['total_lot'] > 0 else "-"
-                    } for b in broker_status],
-                    columns=[
-                        {'name': 'Broker', 'id': 'Broker'},
-                        {'name': 'Status', 'id': 'Status'},
-                        {'name': 'Streak', 'id': 'Streak'},
-                        {'name': 'Today', 'id': 'Today'},
-                        {'name': 'Tot Lot', 'id': 'Lot'}
-                    ],
-                    style_table={'overflowX': 'auto'},
-                    style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '4px', 'fontSize': '11px'},
-                    style_header={'backgroundColor': '#404040', 'fontWeight': 'bold', 'fontSize': '10px'},
-                ),
+                html.Table([
+                    html.Thead(html.Tr([
+                        html.Th("Broker", className="table-header"),
+                        html.Th("Tipe", className="table-header"),
+                        html.Th("Status", className="table-header"),
+                        html.Th("Streak", className="table-header"),
+                        html.Th("Today", className="table-header"),
+                        html.Th("Tot Lot", className="table-header"),
+                    ])),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td(colored_broker(b['broker'], with_badge=True), className="table-cell"),
+                            html.Td(html.Span(b['type'], className=f"broker-{get_broker_type(b['broker']).lower()}"), className="table-cell"),
+                            html.Td('🟢 ACCUM' if b['status']=='ACCUM' else '🔴 DIST' if b['status']=='DIST' else '⚪ NEUTRAL', className="table-cell"),
+                            html.Td(f"{b['streak']}d" if b['streak'] > 0 else "-", className="table-cell"),
+                            html.Td(f"{b['today_net']/1e9:+.1f}B", className="table-cell"),
+                            html.Td(f"{b['total_lot']/1e6:.1f}M" if b['total_lot'] > 0 else "-", className="table-cell"),
+                        ]) for b in broker_status
+                    ])
+                ], className="table table-sm", style={'width': '100%'}),
 
                 # Insight box
                 html.Div([
@@ -3855,24 +3881,30 @@ def create_broker_watchlist(stock_code='CDIA'):
         float_loss.sort(key=lambda x: x['floating_pct'])
         float_loss = float_loss[:5]
 
-        # Build list items
+        # Build list items with colored broker codes - better spacing for desktop
         accum_items = [html.Div([
-            html.Span(f"{b['broker']} ", className="fw-bold"),
-            html.Span(f"{b['accum_streak']}d ", className="badge bg-success me-1"),
-            html.Small(f"{b['total_net']/1e9:+.1f}B", className="text-muted")
-        ], style={"fontSize": "11px"}) for b in accum_watch] if accum_watch else [html.Small("No streak", className="text-muted")]
+            html.Span([
+                colored_broker(b['broker'], with_badge=True),
+            ], style={"display": "inline-block", "minWidth": "55px"}),
+            html.Span(f"{b['accum_streak']}d", className="badge bg-success", style={"marginLeft": "8px", "marginRight": "8px"}),
+            html.Span(f"{b['total_net']/1e9:+.1f}B", className="text-muted", style={"fontSize": "13px"})
+        ], className="d-flex align-items-center mb-1", style={"fontSize": "13px"}) for b in accum_watch] if accum_watch else [html.Small("No streak", className="text-muted")]
 
         dist_items = [html.Div([
-            html.Span(f"{b['broker']} ", className="fw-bold"),
-            html.Span(f"{b['dist_streak']}d ", className="badge bg-danger me-1"),
-            html.Small(f"{b['total_net']/1e9:.1f}B", className="text-muted")
-        ], style={"fontSize": "11px"}) for b in dist_watch] if dist_watch else [html.Small("No warning", className="text-muted")]
+            html.Span([
+                colored_broker(b['broker'], with_badge=True),
+            ], style={"display": "inline-block", "minWidth": "55px"}),
+            html.Span(f"{b['dist_streak']}d", className="badge bg-danger", style={"marginLeft": "8px", "marginRight": "8px"}),
+            html.Span(f"{b['total_net']/1e9:.1f}B", className="text-muted", style={"fontSize": "13px"})
+        ], className="d-flex align-items-center mb-1", style={"fontSize": "13px"}) for b in dist_watch] if dist_watch else [html.Small("No warning", className="text-muted")]
 
         float_items = [html.Div([
-            html.Span(f"{b['broker']} ", className="fw-bold"),
-            html.Small(f"{b['floating_pct']:.1f}% ", className="text-danger"),
-            html.Small(f"@{b['avg_buy']:,.0f}", className="text-muted")
-        ], style={"fontSize": "11px"}) for b in float_loss] if float_loss else [html.Small("No significant loss", className="text-muted")]
+            html.Span([
+                colored_broker(b['broker'], with_badge=True),
+            ], style={"display": "inline-block", "minWidth": "55px"}),
+            html.Span(f"{b['floating_pct']:.1f}%", className="text-danger fw-bold", style={"marginLeft": "8px", "marginRight": "5px", "fontSize": "13px"}),
+            html.Span(f"@{b['avg_buy']:,.0f}", className="text-muted", style={"fontSize": "12px"})
+        ], className="d-flex align-items-center mb-1", style={"fontSize": "13px"}) for b in float_loss] if float_loss else [html.Small("No significant loss", className="text-muted")]
 
         return dbc.Card([
             dbc.CardHeader([
@@ -4107,7 +4139,7 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("A. Broker Sensitivity", className="fw-bold"),
                         html.I(className="fas fa-question-circle text-info ms-1", id="help-broker-sens", style={"fontSize": "11px", "cursor": "pointer"}),
                         dbc.Tooltip(METRIC_EXPLANATIONS['broker_sensitivity']['short'], target="help-broker-sens", placement="top"),
-                        dbc.Badge("20%", color="secondary", className="ms-2 float-end")
+                        dbc.Badge("20%", className="ms-2 float-end", style={"backgroundColor": "#ff9800", "color": "white"})
                     ]),
                     dbc.CardBody([
                         html.H2(f"{composite['components']['broker_sensitivity']['score']:.0f}",
@@ -4125,7 +4157,7 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("B. Foreign Flow", className="fw-bold"),
                         html.I(className="fas fa-question-circle text-info ms-1", id="help-foreign-flow", style={"fontSize": "11px", "cursor": "pointer"}),
                         dbc.Tooltip(METRIC_EXPLANATIONS['foreign_flow']['short'], target="help-foreign-flow", placement="top"),
-                        dbc.Badge("20%", color="secondary", className="ms-2 float-end")
+                        dbc.Badge("20%", className="ms-2 float-end", style={"backgroundColor": "#ff9800", "color": "white"})
                     ]),
                     dbc.CardBody([
                         html.H2(f"{foreign_flow['score']:.0f}", className=f"text-{score_color(foreign_flow['score'])}"),
@@ -4142,7 +4174,7 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("C. Smart Money", className="fw-bold"),
                         html.I(className="fas fa-question-circle text-info ms-1", id="help-smart-money", style={"fontSize": "11px", "cursor": "pointer"}),
                         dbc.Tooltip(METRIC_EXPLANATIONS['smart_money']['short'], target="help-smart-money", placement="top"),
-                        dbc.Badge("15%", color="secondary", className="ms-2 float-end")
+                        dbc.Badge("15%", className="ms-2 float-end", style={"backgroundColor": "#ff9800", "color": "white"})
                     ]),
                     dbc.CardBody([
                         html.H2(f"{smart_money['score']:.0f}", className=f"text-{score_color(smart_money['score'])}"),
@@ -4162,7 +4194,7 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("D. Price Position", className="fw-bold"),
                         html.I(className="fas fa-question-circle text-info ms-1", id="help-price-pos", style={"fontSize": "11px", "cursor": "pointer"}),
                         dbc.Tooltip(METRIC_EXPLANATIONS['price_position']['short'], target="help-price-pos", placement="top"),
-                        dbc.Badge("15%", color="secondary", className="ms-2 float-end")
+                        dbc.Badge("15%", className="ms-2 float-end", style={"backgroundColor": "#ff9800", "color": "white"})
                     ]),
                     dbc.CardBody([
                         html.H2(f"{price_pos['score']:.0f}", className=f"text-{score_color(price_pos['score'])}"),
@@ -4179,7 +4211,7 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("E. Accumulation", className="fw-bold"),
                         html.I(className="fas fa-question-circle text-info ms-1", id="help-accum", style={"fontSize": "11px", "cursor": "pointer"}),
                         dbc.Tooltip(METRIC_EXPLANATIONS['accumulation_phase']['short'], target="help-accum", placement="top"),
-                        dbc.Badge("15%", color="secondary", className="ms-2 float-end")
+                        dbc.Badge("15%", className="ms-2 float-end", style={"backgroundColor": "#ff9800", "color": "white"})
                     ]),
                     dbc.CardBody([
                         html.H2(f"{accum_phase['score']:.0f}", className=f"text-{score_color(accum_phase['score'])}"),
@@ -4197,7 +4229,7 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("F. Volume Analysis", className="fw-bold"),
                         html.I(className="fas fa-question-circle text-info ms-1", id="help-volume", style={"fontSize": "11px", "cursor": "pointer"}),
                         dbc.Tooltip("Analisis volume relatif (RVOL) dan tren volume-harga", target="help-volume", placement="top"),
-                        dbc.Badge("15%", color="secondary", className="ms-2 float-end")
+                        dbc.Badge("15%", className="ms-2 float-end", style={"backgroundColor": "#ff9800", "color": "white"})
                     ]),
                     dbc.CardBody([
                         html.H2(f"{volume_analysis['score']:.0f}" if 'volume_analysis' in dir() and volume_analysis else "N/A",
@@ -4482,7 +4514,8 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Strong("Overall Score"),
                         html.H3(f"{volume_analysis.get('score', 50):.0f}" if volume_analysis else "N/A",
                                className=f"text-{score_color(volume_analysis.get('score', 50))}" if volume_analysis else "text-muted"),
-                        html.Small(volume_analysis.get('signal', 'N/A').replace('_', ' ') if volume_analysis else "N/A", className="text-muted")
+                        html.Small(volume_analysis.get('signal', 'N/A').replace('_', ' ') if volume_analysis else "N/A",
+                                  className=f"text-{score_color(volume_analysis.get('score', 50))}" if volume_analysis else "text-muted")
                     ], width=3),
                 ]),
                 html.Hr(),
@@ -4498,7 +4531,16 @@ def create_analysis_page(stock_code='CDIA'):
                     dbc.Col([
                         html.Strong("Signal: "),
                         dbc.Badge(volume_analysis.get('signal', 'N/A').replace('_', ' ') if volume_analysis else "N/A",
-                                 color="success" if volume_analysis.get('signal', '') in ['HIGH_ACTIVITY', 'ABOVE_NORMAL'] else "secondary")
+                                 color={
+                                     'HIGH_ACTIVITY': 'success',
+                                     'ABOVE_NORMAL': 'success',
+                                     'VERY_HIGH': 'success',
+                                     'NORMAL': 'info',
+                                     'NEUTRAL': 'info',
+                                     'LOW_ACTIVITY': 'warning',
+                                     'BELOW_NORMAL': 'warning',
+                                     'VERY_LOW': 'danger'
+                                 }.get(volume_analysis.get('signal', ''), 'secondary') if volume_analysis else "secondary")
                     ], width=4),
                 ]),
                 html.Hr(),
@@ -4606,25 +4648,24 @@ def create_enhanced_alerts_list(alerts):
             broker_type = get_broker_type(broker_code)
             broker_color = get_broker_color(broker_code)
 
-            # Map broker type to label
+            # Map broker type to label and color
             type_labels = {
-                'FOREIGN': ('ASING', 'danger'),
-                'BUMN': ('BUMN', 'success'),
-                'LOCAL': ('LOKAL', 'secondary')
+                'FOREIGN': ('ASING', '#dc3545'),
+                'BUMN': ('BUMN', '#28a745'),
+                'LOCAL': ('LOKAL', '#6f42c1')
             }
-            type_label, type_badge_color = type_labels.get(broker_type, ('LOKAL', 'secondary'))
+            type_label, type_bg_color = type_labels.get(broker_type, ('LOKAL', '#6f42c1'))
 
             broker_badge = html.Span([
                 html.Span(
                     broker_code,
-                    className="badge me-1",
-                    style={
-                        'backgroundColor': broker_color,
-                        'color': 'white',
-                        'fontSize': '0.8rem'
-                    }
+                    className=f"broker-badge broker-badge-{broker_type.lower()} me-1"
                 ),
-                dbc.Badge(type_label, color=type_badge_color, className="me-2", style={'fontSize': '0.65rem'})
+                html.Span(
+                    type_label,
+                    className=f"broker-badge broker-badge-{broker_type.lower()} me-2",
+                    style={'opacity': '0.85', 'fontSize': '0.7rem'}
+                )
             ])
 
         alert_items.append(
@@ -4655,61 +4696,36 @@ def create_broker_sensitivity_table(data):
     brokers = data['brokers'][:20]  # Top 20
     lookback_days = data.get('lookback_days', 60)  # Get lookback period
 
-    # Add broker type info
-    table_data = []
-    for i, b in enumerate(brokers):
-        broker_info = get_broker_info(b['broker_code'])
-        table_data.append({
-            'Rank': i + 1,
-            'Broker': b['broker_code'],
-            'Tipe': broker_info['type_name'],
-            'Win Rate': f"{b['win_rate']:.0f}%",
-            'Lead Time': f"{b['avg_lead_time']:.1f}d",
-            'Correlation': f"{b['correlation']:.0f}%",
-            'Score': f"{b['sensitivity_score']:.0f}",
-            'Accum Days': b['accum_days'],
-            'Signals': b['successful_signals']
-        })
-
-    # Style conditional based on broker type
-    style_data_conditional = [
-        {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
-        {'if': {'filter_query': '{Score} >= 40'}, 'backgroundColor': '#1a472a'},
-        {'if': {'filter_query': '{Tipe} = Asing'}, 'backgroundColor': 'rgba(220, 53, 69, 0.2)'},
-        {'if': {'filter_query': '{Tipe} = BUMN/Pemerintah'}, 'backgroundColor': 'rgba(40, 167, 69, 0.2)'},
-        {'if': {'filter_query': '{Tipe} = Lokal'}, 'backgroundColor': 'rgba(111, 66, 193, 0.2)'},
-    ]
-
-    table = dash_table.DataTable(
-        data=table_data,
-        columns=[
-            {'name': '#', 'id': 'Rank'},
-            {'name': 'Broker', 'id': 'Broker'},
-            {'name': 'Tipe', 'id': 'Tipe'},
-            {'name': 'Win Rate', 'id': 'Win Rate'},
-            {'name': 'Lead Time', 'id': 'Lead Time'},
-            {'name': 'Correlation', 'id': 'Correlation'},
-            {'name': 'Score', 'id': 'Score'},
-            {'name': 'Accum Days', 'id': 'Accum Days'},
-            {'name': 'Signals', 'id': 'Signals'}
-        ],
-        style_table={'overflowX': 'auto'},
-        style_cell={
-            'textAlign': 'left',
-            'backgroundColor': '#303030',
-            'color': 'white',
-            'padding': '8px',
-            'minWidth': '70px',
-            'fontSize': '12px'
-        },
-        style_header={
-            'backgroundColor': '#404040',
-            'fontWeight': 'bold'
-        },
-        style_data_conditional=style_data_conditional,
-        sort_action='native',
-        page_size=10
-    )
+    # Create HTML table with proper broker colors
+    table = html.Table([
+        html.Thead(html.Tr([
+            html.Th("#", style={"width": "40px"}),
+            html.Th("Broker", style={"width": "70px"}),
+            html.Th("Tipe", style={"width": "120px"}),
+            html.Th("Win Rate", style={"width": "80px"}),
+            html.Th("Lead Time", style={"width": "80px"}),
+            html.Th("Correlation", style={"width": "90px"}),
+            html.Th("Score", style={"width": "60px"}),
+            html.Th("Accum Days", style={"width": "90px"}),
+            html.Th("Signals", style={"width": "70px"})
+        ])),
+        html.Tbody([
+            html.Tr([
+                html.Td(i + 1),
+                html.Td(colored_broker(b['broker_code'], with_badge=True)),
+                html.Td(html.Span(
+                    get_broker_info(b['broker_code'])['type_name'],
+                    className=f"broker-{get_broker_type(b['broker_code']).lower()}"
+                )),
+                html.Td(f"{b['win_rate']:.0f}%"),
+                html.Td(f"{b['avg_lead_time']:.1f}d"),
+                html.Td(f"{b['correlation']:.0f}%"),
+                html.Td(f"{b['sensitivity_score']:.0f}"),
+                html.Td(b['accum_days']),
+                html.Td(b['successful_signals'])
+            ]) for i, b in enumerate(brokers)
+        ])
+    ], className="table table-sm table-dark table-hover", style={"fontSize": "12px"})
 
     # Broker legend
     broker_legend = html.Div([
@@ -5397,13 +5413,13 @@ def create_alerts_list(alerts):
         broker_type = get_broker_type(broker_code)
         broker_color = get_broker_color(broker_code)
 
-        # Map broker type to label
+        # Map broker type to label and color (using hex for purple LOCAL)
         type_labels = {
-            'FOREIGN': ('ASING', 'danger'),
-            'BUMN': ('BUMN', 'success'),
-            'LOCAL': ('LOKAL', 'secondary')
+            'FOREIGN': ('ASING', '#dc3545'),
+            'BUMN': ('BUMN', '#28a745'),
+            'LOCAL': ('LOKAL', '#6f42c1')
         }
-        type_label, type_badge_color = type_labels.get(broker_type, ('LOKAL', 'secondary'))
+        type_label, type_bg_color = type_labels.get(broker_type, ('LOKAL', '#6f42c1'))
 
         alert_items.append(
             dbc.Alert([
@@ -5412,16 +5428,14 @@ def create_alerts_list(alerts):
                         html.H5([
                             html.Span(
                                 broker_code,
-                                className="badge me-2",
-                                style={
-                                    'backgroundColor': broker_color,
-                                    'color': 'white',
-                                    'fontSize': '0.9rem',
-                                    'padding': '5px 10px',
-                                    'borderRadius': '4px'
-                                }
+                                className=f"broker-badge broker-badge-{broker_type.lower()} me-2",
+                                style={'fontSize': '0.9rem', 'padding': '5px 10px'}
                             ),
-                            dbc.Badge(type_label, color=type_badge_color, className="me-2", style={'fontSize': '0.7rem'}),
+                            html.Span(
+                                type_label,
+                                className=f"broker-badge broker-badge-{broker_type.lower()} me-2",
+                                style={'fontSize': '0.7rem', 'opacity': '0.85'}
+                            ),
                             f"Akumulasi {alert['streak_days']} hari berturut-turut"
                         ]),
                         html.P([html.Strong("Total Net: "), f"Rp {alert['total_net_value']/1e9:.1f} Miliar"], className="mb-0")
@@ -5707,7 +5721,15 @@ def create_summary_cards(stock_code='CDIA'):
         ], color="dark", outline=True), width=3),
         dbc.Col(dbc.Card([
             dbc.CardHeader("Top Accumulator Today"),
-            dbc.CardBody([html.H3(top_acc_name), html.P(f"Net: Rp {top_acc_val:.1f}B")])
+            dbc.CardBody([
+                html.H3([
+                    html.Span(
+                        top_acc_name,
+                        className=f"broker-badge-lg broker-badge-{get_broker_type(top_acc_name).lower()}"
+                    ) if top_acc_name != '-' else '-'
+                ]),
+                html.P(f"Net: Rp {top_acc_val:.1f}B")
+            ])
         ], color="dark", outline=True), width=3),
         dbc.Col(dbc.Card([
             dbc.CardHeader("Active Alerts"),
@@ -5996,47 +6018,31 @@ def create_position_page(stock_code='CDIA'):
                         ], className="mb-0")
                     ]),
                     dbc.CardBody([
-                        dash_table.DataTable(
-                            data=top_holders[[
-                                'broker_code', 'broker_type', 'net_lot', 'weighted_avg_buy', 'floating_pnl_pct'
-                            ]].to_dict('records') if not top_holders.empty else [],
-                            columns=[
-                                {'name': 'Broker', 'id': 'broker_code'},
-                                {'name': 'Type', 'id': 'broker_type'},
-                                {'name': 'Net Lot', 'id': 'net_lot', 'type': 'numeric',
-                                 'format': {'specifier': ',.0f'}},
-                                {'name': 'Avg Buy', 'id': 'weighted_avg_buy', 'type': 'numeric',
-                                 'format': {'specifier': ',.0f'}},
-                                {'name': 'Float P/L', 'id': 'floating_pnl_pct', 'type': 'numeric',
-                                 'format': {'specifier': '+.1f'}},
-                            ],
-                            style_table={'overflowX': 'auto'},
-                            style_cell={'textAlign': 'center', 'padding': '8px',
-                                       'backgroundColor': '#303030', 'color': 'white'},
-                            style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
-                            style_data_conditional=[
-                                {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
-                                # Broker type colors
-                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_code'},
-                                 'color': '#dc3545', 'fontWeight': 'bold'},
-                                {'if': {'filter_query': '{broker_type} = FOREIGN', 'column_id': 'broker_type'},
-                                 'backgroundColor': '#dc3545', 'color': 'white'},
-                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_code'},
-                                 'color': '#28a745', 'fontWeight': 'bold'},
-                                {'if': {'filter_query': '{broker_type} = BUMN', 'column_id': 'broker_type'},
-                                 'backgroundColor': '#28a745', 'color': 'white'},
-                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_code'},
-                                 'color': '#6f42c1', 'fontWeight': 'bold'},
-                                {'if': {'filter_query': '{broker_type} = LOCAL', 'column_id': 'broker_type'},
-                                 'backgroundColor': '#6f42c1', 'color': 'white'},
-                                # Float P/L colors
-                                {'if': {'filter_query': '{floating_pnl_pct} > 0', 'column_id': 'floating_pnl_pct'},
-                                 'color': '#00ff00'},
-                                {'if': {'filter_query': '{floating_pnl_pct} < 0', 'column_id': 'floating_pnl_pct'},
-                                 'color': '#ff4444'},
-                            ],
-                            page_size=10,
-                        ),
+                        # HTML Table instead of DataTable for better styling control
+                        html.Table([
+                            html.Thead(html.Tr([
+                                html.Th("Broker", style={"width": "80px"}),
+                                html.Th("Type", style={"width": "100px"}),
+                                html.Th("Net Lot", style={"width": "120px"}),
+                                html.Th("Avg Buy", style={"width": "100px"}),
+                                html.Th("Float P/L", style={"width": "80px"})
+                            ])),
+                            html.Tbody([
+                                html.Tr([
+                                    html.Td(colored_broker(row['broker_code'], with_badge=True)),
+                                    html.Td(html.Span(
+                                        row['broker_type'],
+                                        className=f"broker-{row['broker_type'].lower()}"
+                                    )),
+                                    html.Td(f"{row['net_lot']:,.0f}"),
+                                    html.Td(f"{row['weighted_avg_buy']:,.0f}"),
+                                    html.Td(
+                                        f"{row['floating_pnl_pct']:+.1f}",
+                                        className="text-success" if row['floating_pnl_pct'] > 0 else "text-danger"
+                                    )
+                                ]) for _, row in top_holders.iterrows()
+                            ]) if not top_holders.empty else html.Tbody([])
+                        ], className="table table-sm table-dark table-hover", style={"fontSize": "12px"}),
                         # Legend
                         html.Div([
                             html.Span([html.I(className="fas fa-circle me-1", style={"color": "#dc3545", "fontSize": "8px"}), "Asing "], className="me-3", style={"fontSize": "11px"}),
@@ -6080,7 +6086,8 @@ def create_position_page(stock_code='CDIA'):
                             html.Small("(Broker floating loss - potential sellers)", className="text-muted d-block mb-2"),
                             *([html.Div([
                                 html.Span(f"Rp {r['price']:,.0f}", className="fw-bold"),
-                                html.Span(f" - {r['broker']}", className="text-muted"),
+                                html.Span(" - "),
+                                colored_broker(r['broker'], with_badge=True),
                                 html.Span(f" ({r['lot']:,.0f} lot)", className="small"),
                                 html.Span(f" {r['pnl']:+.1f}%", className="text-danger small ms-2"),
                             ], className="mb-1") for r in sr_levels.get('resistances', [])] if sr_levels.get('resistances') else [
@@ -6094,7 +6101,7 @@ def create_position_page(stock_code='CDIA'):
                             html.Div([
                                 html.I(className="fas fa-arrow-right me-2 text-warning"),
                                 html.Strong(f"Current: Rp {current_price:,.0f}", className="text-warning")
-                            ], className="mb-3 text-center py-2", style={'backgroundColor': '#404040', 'borderRadius': '5px'}),
+                            ], className="mb-3 text-center py-2 rounded metric-box"),
                         ]),
 
                         html.Hr(),
@@ -6104,7 +6111,8 @@ def create_position_page(stock_code='CDIA'):
                             html.Small("(Broker floating profit - will defend)", className="text-muted d-block mb-2"),
                             *([html.Div([
                                 html.Span(f"Rp {s['price']:,.0f}", className="fw-bold"),
-                                html.Span(f" - {s['broker']}", className="text-muted"),
+                                html.Span(" - "),
+                                colored_broker(s['broker'], with_badge=True),
                                 html.Span(f" ({s['lot']:,.0f} lot)", className="small"),
                                 html.Span(f" {s['pnl']:+.1f}%", className="text-success small ms-2"),
                             ], className="mb-1") for s in sr_levels.get('supports', [])] if sr_levels.get('supports') else [
@@ -6343,43 +6351,14 @@ def toggle_navbar_collapse(n_clicks, pathname, is_open):
 
     return is_open
 
-# Theme toggle callback - switch between dark/light mode
+# Theme toggle callback - switch between dark/light mode (lightweight version)
 app.clientside_callback(
     """
     function(n_clicks, currentTheme) {
-        // Function to fix inline styles for light mode
-        function applyLightModeStyles() {
-            // Remove dark backgrounds from elements with inline styles
-            document.querySelectorAll('[style*="background"]').forEach(function(el) {
-                var bg = el.style.backgroundColor;
-                if (bg && (bg.includes('rgb(56') || bg.includes('rgb(45') || bg.includes('rgb(48') ||
-                    bg.includes('rgb(42') || bg.includes('rgb(58') || bg.includes('rgb(35') ||
-                    bg.includes('#383838') || bg.includes('#2a2a2a') || bg.includes('#2d2d2d') ||
-                    bg.includes('#303030') || bg.includes('#404040') || bg.includes('#2d3a2d') ||
-                    bg.includes('#3a2d2d') || bg.includes('#3a3a2d'))) {
-                    el.style.backgroundColor = '#e8e8e8';
-                    el.style.color = '#1a1a1a';
-                    el.style.borderColor = '#d0d0d0';
-                }
-            });
-            // Fix DataTable cells
-            document.querySelectorAll('.dash-cell, .dash-header').forEach(function(el) {
-                el.style.backgroundColor = '#f7f7f7';
-                el.style.color = '#1a1a1a';
-            });
-        }
-
-        // Function to restore dark mode styles
-        function applyDarkModeStyles() {
-            // Restore will happen on page reload or let original styles take effect
-            location.reload();
-        }
-
         if (!n_clicks) {
             // On initial load, apply saved theme
             if (currentTheme === 'light') {
                 document.body.classList.add('light-mode');
-                setTimeout(applyLightModeStyles, 100);
                 return ['light', 'fas fa-moon'];
             }
             return ['dark', 'fas fa-sun'];
@@ -6388,12 +6367,9 @@ app.clientside_callback(
         // Toggle theme
         if (currentTheme === 'dark') {
             document.body.classList.add('light-mode');
-            setTimeout(applyLightModeStyles, 100);
             return ['light', 'fas fa-moon'];
         } else {
             document.body.classList.remove('light-mode');
-            // Reload to restore dark mode properly
-            setTimeout(function() { location.reload(); }, 50);
             return ['dark', 'fas fa-sun'];
         }
     }

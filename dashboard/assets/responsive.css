@@ -709,7 +709,8 @@ body.light-mode .dash-table-container {
   color: #1a1a1a !important;
 }
 
-body.light-mode .table th {
+body.light-mode .table th,
+body.light-mode table th {
   background-color: #eeeeee !important;
   color: #1a1a1a !important;
   font-weight: 600 !important;
@@ -717,6 +718,11 @@ body.light-mode .table th {
   text-transform: uppercase !important;
   font-size: 0.75rem !important;
   letter-spacing: 0.5px !important;
+}
+
+body.light-mode table td {
+  background-color: #f7f7f7 !important;
+  border-bottom: 1px solid #e0e0e0 !important;
 }
 
 body.light-mode .table td,
@@ -731,8 +737,59 @@ body.light-mode .table-dark th {
   color: #1a1a1a !important;
 }
 
-body.light-mode .table tbody tr:hover {
-  background-color: #f8f9fa !important;
+body.light-mode .table tbody tr:hover,
+body.light-mode .table-hover tbody tr:hover,
+body.light-mode .table-dark tbody tr:hover,
+body.light-mode .table.table-dark.table-hover tbody tr:hover {
+  background-color: #ffe5cc !important;
+  color: #333333 !important;
+}
+
+body.light-mode .table tbody tr:hover td,
+body.light-mode .table-hover tbody tr:hover td,
+body.light-mode .table-dark tbody tr:hover td,
+body.light-mode .table.table-sm.table-dark.table-hover tbody tr:hover td {
+  background-color: #ffe5cc !important;
+  color: #333333 !important;
+}
+
+/* Force override Bootstrap table-dark in light mode */
+body.light-mode table.table-dark,
+body.light-mode .table.table-dark {
+  --bs-table-bg: #f7f7f7 !important;
+  --bs-table-striped-bg: #eeeeee !important;
+  --bs-table-hover-bg: #ffe5cc !important;
+  background-color: #f7f7f7 !important;
+}
+
+body.light-mode table.table-dark tbody tr,
+body.light-mode .table.table-dark tbody tr {
+  background-color: #f7f7f7 !important;
+}
+
+body.light-mode table.table-dark tbody tr:hover,
+body.light-mode .table.table-dark tbody tr:hover {
+  background-color: #ffe5cc !important;
+}
+
+body.light-mode table.table-dark tbody tr:hover td,
+body.light-mode .table.table-dark tbody tr:hover td,
+body.light-mode table.table-dark tbody tr:hover th,
+body.light-mode .table.table-dark tbody tr:hover th {
+  background-color: #ffe5cc !important;
+  color: #333333 !important;
+}
+
+/* Dark mode table hover - lighter gray */
+.table-dark tbody tr:hover,
+.table.table-dark tbody tr:hover,
+.table-hover tbody tr:hover {
+  background-color: #4a4a4a !important;
+}
+
+.table-dark tbody tr:hover td,
+.table.table-dark tbody tr:hover td {
+  background-color: #4a4a4a !important;
 }
 
 /* Text colors - High contrast */
@@ -757,12 +814,35 @@ body.light-mode .h4, body.light-mode .h5, body.light-mode .h6 {
 
 body.light-mode p, body.light-mode span, body.light-mode div,
 body.light-mode label, body.light-mode small {
-  color: inherit !important;
+  color: #333333 !important;
+}
+
+/* Override inline white color styles */
+body.light-mode [style*="color: white"],
+body.light-mode [style*="color:#fff"],
+body.light-mode [style*="color: #fff"],
+body.light-mode [style*="color:#ffffff"],
+body.light-mode [style*="color: #ffffff"] {
+  color: #333333 !important;
 }
 
 /* Keep colored text visible */
-body.light-mode .text-success { color: #198754 !important; }
-body.light-mode .text-danger { color: #dc3545 !important; }
+body.light-mode .text-success,
+body.light-mode span.text-success,
+body.light-mode .metric-box .text-success,
+body.light-mode .metric-box span.text-success,
+body.light-mode .info-box .text-success {
+  color: #198754 !important;
+}
+
+body.light-mode .text-danger,
+body.light-mode span.text-danger,
+body.light-mode .metric-box .text-danger,
+body.light-mode .metric-box span.text-danger,
+body.light-mode .info-box .text-danger {
+  color: #dc3545 !important;
+}
+
 body.light-mode .text-warning { color: #cc8800 !important; }
 body.light-mode .text-primary { color: #0066cc !important; }
 
@@ -797,13 +877,29 @@ body.light-mode .alert-danger {
 
 /* Badges */
 body.light-mode .badge-success,
-body.light-mode .bg-success { background-color: #198754 !important; }
+body.light-mode .bg-success,
+body.light-mode .badge.bg-success {
+  background-color: #198754 !important;
+  color: #ffffff !important;
+}
 body.light-mode .badge-danger,
-body.light-mode .bg-danger { background-color: #dc3545 !important; }
+body.light-mode .bg-danger,
+body.light-mode .badge.bg-danger {
+  background-color: #dc3545 !important;
+  color: #ffffff !important;
+}
 body.light-mode .badge-warning,
-body.light-mode .bg-warning { background-color: #ffc107 !important; color: #333 !important; }
+body.light-mode .bg-warning,
+body.light-mode .badge.bg-warning {
+  background-color: #ffc107 !important;
+  color: #333333 !important;
+}
 body.light-mode .badge-info,
-body.light-mode .bg-info { background-color: #0dcaf0 !important; }
+body.light-mode .bg-info,
+body.light-mode .badge.bg-info {
+  background-color: #17a2b8 !important;
+  color: #ffffff !important;
+}
 
 /* Buttons */
 body.light-mode .btn-primary {
@@ -908,6 +1004,15 @@ body.light-mode .dash-spreadsheet-container {
   background: #f7f7f7 !important;
 }
 
+/* Dark mode (default) DataTable */
+.dash-header {
+  color: white;  /* Default dark mode text */
+}
+
+.dash-cell {
+  color: white;  /* Default dark mode text */
+}
+
 body.light-mode .dash-header {
   background-color: #eeeeee !important;
   color: #1a1a1a !important;
@@ -961,9 +1066,9 @@ body.light-mode .metric-box h4,
 body.light-mode .metric-box h5,
 body.light-mode .metric-box .h4,
 body.light-mode .metric-box .h5,
-body.light-mode .metric-box span,
-body.light-mode .info-box span {
-  color: inherit;
+body.light-mode .metric-box span:not(.text-success):not(.text-danger):not(.text-warning):not(.text-info):not(.broker-foreign):not(.broker-bumn):not(.broker-local):not(.broker-badge):not(.broker-badge-foreign):not(.broker-badge-bumn):not(.broker-badge-local),
+body.light-mode .info-box span:not(.text-success):not(.text-danger):not(.text-warning):not(.text-info):not(.phase-accumulation):not(.phase-markup):not(.phase-distribution):not(.phase-markdown) {
+  color: #1a1a1a !important;
 }
 
 /* ============================================
@@ -1004,10 +1109,14 @@ body.light-mode .alert-box-warning {
   border: 1px solid #ffeeba !important;
 }
 
-body.light-mode .alert-box-success .text-success,
-body.light-mode .alert-box-danger .text-danger,
+body.light-mode .alert-box-success .text-success {
+  color: #155724 !important;
+}
+body.light-mode .alert-box-danger .text-danger {
+  color: #721c24 !important;
+}
 body.light-mode .alert-box-warning .text-warning {
-  color: inherit !important;
+  color: #856404 !important;
 }
 
 /* ============================================
@@ -1065,5 +1174,340 @@ body.light-mode div[style*="background"] {
 /* Badge percentage styling */
 body.light-mode .badge.bg-secondary,
 body.light-mode .badge[style*="background"] {
-  background-color: #6c757d !important;
+  background-color: #ff9800 !important;
+  color: #000000 !important;
+  font-weight: 700 !important;
+}
+
+/* ============================================
+   DATATABLE LIGHT MODE - OVERRIDE INLINE STYLES
+   ============================================ */
+body.light-mode .dash-spreadsheet-container,
+body.light-mode .dash-spreadsheet,
+body.light-mode .dash-table-container {
+  background-color: #f7f7f7 !important;
+}
+
+body.light-mode .dash-spreadsheet td,
+body.light-mode .dash-spreadsheet th,
+body.light-mode td.dash-cell,
+body.light-mode th.dash-header,
+body.light-mode .dash-cell,
+body.light-mode .dash-header,
+body.light-mode .dash-cell div,
+body.light-mode .dash-header div,
+body.light-mode .cell-value,
+body.light-mode .cell-table,
+body.light-mode .cell-markdown {
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
+  border-color: #e0e0e0 !important;
+}
+
+body.light-mode .dash-spreadsheet tr:nth-child(odd) td,
+body.light-mode .dash-spreadsheet tr:nth-child(odd) .dash-cell {
+  background-color: #eeeeee !important;
+}
+
+body.light-mode .dash-spreadsheet th.dash-header,
+body.light-mode th.dash-header {
+  background-color: #e0e0e0 !important;
+  font-weight: 600 !important;
+}
+
+/* Fix filter inputs in DataTable */
+body.light-mode .dash-spreadsheet input,
+body.light-mode .dash-filter {
+  background-color: #ffffff !important;
+  color: #333333 !important;
+  border: 1px solid #cccccc !important;
+}
+
+/* Keep conditional formatting colors visible */
+body.light-mode td[style*="background-color: rgb(40, 167, 69)"],
+body.light-mode td[style*="background-color: #28a745"] {
+  background-color: #28a745 !important;
+  color: #ffffff !important;
+}
+
+body.light-mode td[style*="background-color: rgb(220, 53, 69)"],
+body.light-mode td[style*="background-color: #dc3545"] {
+  background-color: #dc3545 !important;
+  color: #ffffff !important;
+}
+
+body.light-mode td[style*="background-color: rgb(111, 66, 193)"],
+body.light-mode td[style*="background-color: #6f42c1"] {
+  background-color: #6f42c1 !important;
+  color: #ffffff !important;
+}
+
+/* Keep broker text colors visible in light mode (without background) */
+body.light-mode td[style*="color: rgb(220, 53, 69)"],
+body.light-mode td[style*="color: #dc3545"],
+body.light-mode .dash-cell[style*="color: rgb(220, 53, 69)"],
+body.light-mode .dash-cell[style*="color: #dc3545"] {
+  color: #dc3545 !important;
+}
+
+body.light-mode td[style*="color: rgb(40, 167, 69)"],
+body.light-mode td[style*="color: #28a745"],
+body.light-mode .dash-cell[style*="color: rgb(40, 167, 69)"],
+body.light-mode .dash-cell[style*="color: #28a745"] {
+  color: #28a745 !important;
+}
+
+body.light-mode td[style*="color: rgb(111, 66, 193)"],
+body.light-mode td[style*="color: #6f42c1"],
+body.light-mode .dash-cell[style*="color: rgb(111, 66, 193)"],
+body.light-mode .dash-cell[style*="color: #6f42c1"] {
+  color: #6f42c1 !important;
+}
+
+/* ============================================
+   ADDITIONAL LIGHT MODE OVERRIDES
+   ============================================ */
+body.light-mode .text-center.py-2[style*="background"],
+body.light-mode div[style*="backgroundColor"][style*="borderRadius"] {
+  background-color: #e8e8e8 !important;
+  color: #1a1a1a !important;
+}
+
+/* ============================================
+   PHASE ANALYSIS COLORS - High Priority
+   ============================================ */
+.phase-accumulation,
+body.light-mode .phase-accumulation,
+body.light-mode .phase-accumulation * {
+  color: #17a2b8 !important;
+}
+
+.phase-markup,
+body.light-mode .phase-markup,
+body.light-mode .phase-markup * {
+  color: #28a745 !important;
+}
+
+.phase-distribution,
+body.light-mode .phase-distribution,
+body.light-mode .phase-distribution * {
+  color: #ffc107 !important;
+}
+
+.phase-markdown,
+body.light-mode .phase-markdown,
+body.light-mode .phase-markdown * {
+  color: #dc3545 !important;
+}
+
+.phase-unknown,
+body.light-mode .phase-unknown,
+body.light-mode .phase-unknown * {
+  color: #6c757d !important;
+}
+
+/* ============================================
+   UPLOAD AREA - Theme Responsive
+   ============================================ */
+.upload-area {
+  background-color: #2a2a2a;
+  border-color: #555555 !important;
+}
+
+body.light-mode .upload-area {
+  background-color: #f0f0f0 !important;
+  border-color: #cccccc !important;
+  color: #333333 !important;
+}
+
+/* ============================================
+   BROKER TYPE COLORS - High Priority
+   Must override body.light-mode span rule
+   ============================================ */
+.broker-foreign,
+span.broker-foreign,
+body.light-mode .broker-foreign,
+body.light-mode span.broker-foreign {
+  color: #dc3545 !important;
+  font-weight: bold !important;
+  font-size: 13px;  /* Desktop size */
+}
+
+.broker-bumn,
+span.broker-bumn,
+body.light-mode .broker-bumn,
+body.light-mode span.broker-bumn {
+  color: #28a745 !important;
+  font-weight: bold !important;
+  font-size: 13px;  /* Desktop size */
+}
+
+.broker-local,
+span.broker-local,
+body.light-mode .broker-local,
+body.light-mode span.broker-local {
+  color: #6f42c1 !important;
+  font-weight: bold !important;
+  font-size: 13px;  /* Desktop size */
+}
+
+/* Broker Badge - white text on colored background */
+.broker-badge,
+span.broker-badge,
+body.light-mode .broker-badge,
+body.light-mode span.broker-badge {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 12px !important;
+  padding: 3px 8px !important;
+  border-radius: 4px !important;
+  display: inline-block !important;
+}
+
+/* Large broker badge for cards */
+.broker-badge-lg,
+span.broker-badge-lg,
+body.light-mode .broker-badge-lg,
+body.light-mode span.broker-badge-lg {
+  color: #ffffff !important;
+  font-weight: 700 !important;
+  font-size: 1.75rem !important;
+  padding: 10px 24px !important;
+  border-radius: 6px !important;
+  display: inline-block !important;
+}
+
+.broker-badge-foreign {
+  background-color: #dc3545 !important;
+}
+
+.broker-badge-bumn {
+  background-color: #28a745 !important;
+}
+
+.broker-badge-local {
+  background-color: #6f42c1 !important;
+}
+
+/* Mobile/PWA - keep smaller font */
+@media screen and (max-width: 767px) {
+  .broker-foreign,
+  .broker-bumn,
+  .broker-local {
+    font-size: 11px !important;
+  }
+  .broker-badge {
+    font-size: 10px !important;
+    padding: 2px 6px !important;
+  }
+}
+
+/* ============================================
+   TABLE HEADER & CELL CLASSES
+   ============================================ */
+/* Dark mode (default) */
+.table-header {
+  background-color: #404040 !important;
+  color: white !important;
+  padding: 6px 8px !important;
+  font-size: 11px !important;
+  font-weight: bold !important;
+  border-bottom: 1px solid #555 !important;
+}
+
+.table-cell {
+  background-color: #303030 !important;
+  color: white;  /* No !important - allow inline style override */
+  padding: 5px 8px !important;
+  font-size: 11px !important;
+  border-bottom: 1px solid #444 !important;
+}
+
+/* Light mode */
+body.light-mode .table-header {
+  background-color: #e8e8e8 !important;
+  color: #1a1a1a !important;
+  border-bottom: 2px solid #d0d0d0 !important;
+}
+
+body.light-mode .table-cell {
+  background-color: #f7f7f7 !important;
+  color: #333333;  /* No !important - allow inline style override */
+  border-bottom: 1px solid #e0e0e0 !important;
+}
+
+/* ============================================
+   COMPREHENSIVE LIGHT MODE TEXT FIX
+   Ensure all text is visible on light background
+   ============================================ */
+
+/* Force all elements to have dark text in light mode */
+body.light-mode * {
+  --text-color: #333333;
+}
+
+/* Fix Bootstrap text-white class */
+body.light-mode .text-white,
+body.light-mode .text-light {
+  color: #333333 !important;
+}
+
+/* Fix any remaining white text from inline styles or other sources */
+body.light-mode .card *,
+body.light-mode .container-fluid *,
+body.light-mode .row * {
+  color: inherit;
+}
+
+/* Ensure text is visible in all common containers */
+body.light-mode .card-body > *,
+body.light-mode .card-header > *,
+body.light-mode .metric-box > *,
+body.light-mode .info-box > *,
+body.light-mode .alert > * {
+  color: inherit;
+}
+
+/* Make sure numbers and values are dark */
+body.light-mode .display-4,
+body.light-mode .display-5,
+body.light-mode .display-6,
+body.light-mode .lead,
+body.light-mode strong,
+body.light-mode b {
+  color: #1a1a1a !important;
+}
+
+/* Fix potential Plotly/Chart text issues */
+body.light-mode .gtitle,
+body.light-mode .xtitle,
+body.light-mode .ytitle {
+  fill: #333333 !important;
+}
+
+/* Navbar brand and links in light mode */
+body.light-mode .navbar *:not(.badge) {
+  color: #333333;
+}
+
+body.light-mode .navbar .nav-link {
+  color: #555555 !important;
+}
+
+body.light-mode .navbar .nav-link:hover,
+body.light-mode .navbar .nav-link.active {
+  color: #000000 !important;
+}
+
+/* Fix dropdown text in navbar */
+body.light-mode .navbar .dropdown-menu {
+  background-color: #ffffff !important;
+}
+
+body.light-mode .navbar .dropdown-item {
+  color: #333333 !important;
+}
+
+body.light-mode .navbar .dropdown-item:hover {
+  background-color: #f5f5f5 !important;
 }
