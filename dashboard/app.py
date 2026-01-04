@@ -2047,20 +2047,31 @@ def create_navbar():
     stocks = get_available_stocks()
     return dbc.Navbar(
         dbc.Container([
-            # Brand + Stock Selector (always visible)
+            # Brand + Stock Selector + Theme Toggle (always visible)
             html.Div([
                 dbc.NavbarBrand("HermanStock", href="/", className="me-2", style={"fontSize": "1rem"}),
-                # Stock Selector - always visible, compact on mobile
+                # Stock Selector - searchable dropdown for 30+ stocks
                 dcc.Dropdown(
                     id='stock-selector',
                     options=[{'label': s, 'value': s} for s in stocks],
                     value=stocks[0] if stocks else 'PANI',
-                    style={'width': '100px', 'minWidth': '100px'},
+                    style={'width': '120px', 'minWidth': '120px'},
                     clearable=False,
+                    searchable=True,  # Enable search/filter
+                    placeholder="Cari emiten...",
                     persistence=True,
                     persistence_type='session',
                     className="stock-dropdown"
-                )
+                ),
+                # Theme toggle button (sun/moon icon)
+                dbc.Button(
+                    html.I(className="fas fa-sun", id="theme-icon"),
+                    id="theme-toggle",
+                    color="link",
+                    size="sm",
+                    className="ms-2 text-warning",
+                    title="Toggle Light/Dark Mode"
+                ),
             ], className="d-flex align-items-center"),
 
             # Hamburger toggle button for mobile
@@ -2084,7 +2095,8 @@ def create_navbar():
         ], fluid=True),
         color="dark",
         dark=True,
-        className="mb-2 py-1"
+        className="mb-2 py-1",
+        id="main-navbar"
     )
 
 
@@ -6304,9 +6316,10 @@ def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
         dcc.Location(id='url', refresh=False),
+        dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         create_navbar(),
         dbc.Container(id='page-content', fluid=True)
-    ])
+    ], id='main-container')
 
 app.layout = create_app_layout()
 
@@ -6337,6 +6350,34 @@ def toggle_navbar_collapse(n_clicks, pathname, is_open):
         return not is_open
 
     return is_open
+
+# Theme toggle callback - switch between dark/light mode
+app.clientside_callback(
+    """
+    function(n_clicks, currentTheme) {
+        if (!n_clicks) {
+            // On initial load, apply saved theme
+            if (currentTheme === 'light') {
+                document.body.classList.add('light-mode');
+                return ['light', 'fas fa-moon'];
+            }
+            return ['dark', 'fas fa-sun'];
+        }
+
+        // Toggle theme
+        if (currentTheme === 'dark') {
+            document.body.classList.add('light-mode');
+            return ['light', 'fas fa-moon'];
+        } else {
+            document.body.classList.remove('light-mode');
+            return ['dark', 'fas fa-sun'];
+        }
+    }
+    """,
+    [Output('theme-store', 'data'), Output('theme-icon', 'className')],
+    [Input('theme-toggle', 'n_clicks')],
+    [State('theme-store', 'data')]
+)
 
 @app.callback(
     Output('page-content', 'children'),
