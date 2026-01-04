@@ -5715,7 +5715,11 @@ def create_price_chart(stock_code='CDIA'):
     colors = ['green' if row['close_price'] >= row['open_price'] else 'red' for _, row in price_df.iterrows()]
     fig.add_trace(go.Bar(x=price_df['date'], y=price_df['volume'], marker_color=colors, name='Volume'), row=2, col=1)
     fig.update_layout(template='plotly_dark', height=500, xaxis_rangeslider_visible=False, showlegend=False)
-    return dcc.Graph(figure=fig, id='price-chart')
+    # Wrap in scrollable container for mobile
+    return html.Div(
+        dcc.Graph(figure=fig, id='price-chart', style={'minWidth': '600px'}),
+        style={'overflowX': 'auto', 'WebkitOverflowScrolling': 'touch'}
+    )
 
 
 def create_broker_flow_chart(stock_code='CDIA'):
@@ -5727,7 +5731,11 @@ def create_broker_flow_chart(stock_code='CDIA'):
     colors = ['green' if v >= 0 else 'red' for v in daily_flow['net_value']]
     fig = go.Figure(go.Bar(x=daily_flow['date'], y=daily_flow['net_value'] / 1e9, marker_color=colors))
     fig.update_layout(template='plotly_dark', height=300, yaxis_title='Net Flow (Billion)')
-    return dcc.Graph(figure=fig)
+    # Wrap in scrollable container for mobile
+    return html.Div(
+        dcc.Graph(figure=fig, style={'minWidth': '600px'}),
+        style={'overflowX': 'auto', 'WebkitOverflowScrolling': 'touch'}
+    )
 
 
 def create_top_brokers_table(stock_code='CDIA'):
