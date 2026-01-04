@@ -1327,7 +1327,11 @@ body.light-mode .upload-area {
 .broker-foreign,
 span.broker-foreign,
 body.light-mode .broker-foreign,
-body.light-mode span.broker-foreign {
+body.light-mode span.broker-foreign,
+body.light-mode td .broker-foreign,
+body.light-mode td span.broker-foreign,
+body.light-mode .table .broker-foreign,
+body.light-mode .table span.broker-foreign {
   color: #dc3545 !important;
   font-weight: bold !important;
   font-size: 13px;  /* Desktop size */
@@ -1336,7 +1340,11 @@ body.light-mode span.broker-foreign {
 .broker-bumn,
 span.broker-bumn,
 body.light-mode .broker-bumn,
-body.light-mode span.broker-bumn {
+body.light-mode span.broker-bumn,
+body.light-mode td .broker-bumn,
+body.light-mode td span.broker-bumn,
+body.light-mode .table .broker-bumn,
+body.light-mode .table span.broker-bumn {
   color: #28a745 !important;
   font-weight: bold !important;
   font-size: 13px;  /* Desktop size */
@@ -1345,7 +1353,11 @@ body.light-mode span.broker-bumn {
 .broker-local,
 span.broker-local,
 body.light-mode .broker-local,
-body.light-mode span.broker-local {
+body.light-mode span.broker-local,
+body.light-mode td .broker-local,
+body.light-mode td span.broker-local,
+body.light-mode .table .broker-local,
+body.light-mode .table span.broker-local {
   color: #6f42c1 !important;
   font-weight: bold !important;
   font-size: 13px;  /* Desktop size */

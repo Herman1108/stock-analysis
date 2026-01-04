@@ -3699,7 +3699,7 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
                 html.Small("Historical Performance", className="text-muted fw-bold mb-2 d-block"),
                 html.Table([
                     html.Thead(html.Tr([
-                        html.Th("", className="table-header"),
+                        html.Th("#", className="table-header", style={"width": "40px"}),
                         html.Th("Broker", className="table-header"),
                         html.Th("Tipe", className="table-header"),
                         html.Th("Win%", className="table-header"),
@@ -3709,7 +3709,7 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
                     ])),
                     html.Tbody([
                         html.Tr([
-                            html.Td('🥇' if i==0 else '🥈' if i==1 else '🥉' if i==2 else str(i+1), className="table-cell"),
+                            html.Td(str(i+1), className="table-cell fw-bold"),
                             html.Td(colored_broker(b['broker'], with_badge=True), className="table-cell"),
                             html.Td(html.Span(b['type'], className=f"broker-{get_broker_type(b['broker']).lower()}"), className="table-cell"),
                             html.Td(f"{b['win_rate']:.0f}%", className="table-cell"),
