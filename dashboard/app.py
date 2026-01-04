@@ -2107,16 +2107,16 @@ def create_navbar():
             # Hamburger toggle button for mobile
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
 
-            # Collapsible nav items
+            # Collapsible nav items - Orange buttons with white bold text
             dbc.Collapse(
                 dbc.Nav([
-                    dbc.NavItem(dbc.NavLink("Home", href="/", id="nav-home")),
-                    dbc.NavItem(dbc.NavLink("Dashboard", href="/dashboard", id="nav-dashboard")),
-                    dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
-                    dbc.NavItem(dbc.NavLink("Ranking", href="/ranking", id="nav-ranking")),
-                    dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
-                    dbc.NavItem(dbc.NavLink("Position", href="/position", id="nav-position")),
-                    dbc.NavItem(dbc.NavLink("Upload", href="/upload", id="nav-upload")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Ranking", color="warning", size="sm", className="fw-bold text-white me-1"), href="/ranking")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Alerts", color="warning", size="sm", className="fw-bold text-white me-1"), href="/alerts")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Position", color="warning", size="sm", className="fw-bold text-white me-1"), href="/position")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
                 ], className="ms-auto", navbar=True),
                 id="navbar-collapse",
                 is_open=False,

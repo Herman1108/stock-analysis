@@ -1523,3 +1523,31 @@ body.light-mode .navbar .dropdown-item {
 body.light-mode .navbar .dropdown-item:hover {
   background-color: #f5f5f5 !important;
 }
+
+/* ============================================
+   NAVBAR MENU BUTTONS - Orange with White Text
+   ============================================ */
+.navbar .btn-warning {
+  background-color: #ff9800 !important;
+  border-color: #ff9800 !important;
+  color: #ffffff !important;
+  font-weight: bold !important;
+}
+
+.navbar .btn-warning:hover {
+  background-color: #e68900 !important;
+  border-color: #e68900 !important;
+  color: #ffffff !important;
+}
+
+/* Light mode navbar buttons */
+body.light-mode .navbar .btn-warning {
+  background-color: #ff9800 !important;
+  border-color: #ff9800 !important;
+  color: #ffffff !important;
+}
+
+body.light-mode .navbar .btn-warning:hover {
+  background-color: #e68900 !important;
+  border-color: #e68900 !important;
+}
