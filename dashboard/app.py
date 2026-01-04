@@ -2112,7 +2112,6 @@ def create_navbar():
                 dbc.Nav([
                     dbc.NavItem(dbc.NavLink("Home", href="/", id="nav-home")),
                     dbc.NavItem(dbc.NavLink("Dashboard", href="/dashboard", id="nav-dashboard")),
-                    dbc.NavItem(dbc.NavLink("Movement", href="/movement", id="nav-movement")),
                     dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
                     dbc.NavItem(dbc.NavLink("Ranking", href="/ranking", id="nav-ranking")),
                     dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
@@ -5195,7 +5194,7 @@ def create_dashboard_page(stock_code='CDIA'):
                         dbc.Button([
                             html.I(className="fas fa-exchange-alt me-2"),
                             "Broker Movement"
-                        ], color="warning", size="sm", className="fw-bold"),
+                        ], color="info", size="sm", className="fw-bold"),
                         href="/movement"
                     )
                 ], className="d-flex align-items-center")
