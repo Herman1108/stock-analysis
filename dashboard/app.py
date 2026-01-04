@@ -4069,6 +4069,12 @@ def create_broker_activity_table(stock_code, broker_codes, days):
     if period_df.empty:
         return html.Div("No activity in this period", className="text-muted small")
 
+    # Get avg buy price for each broker
+    avg_buy_df = get_broker_avg_buy(stock_code, days=days)
+    avg_buy_dict = {}
+    if not avg_buy_df.empty:
+        avg_buy_dict = dict(zip(avg_buy_df['broker_code'], avg_buy_df['avg_buy_price']))
+
     # Aggregate by broker
     activity = period_df.groupby('broker_code').agg({
         'buy_value': 'sum',
@@ -4089,13 +4095,15 @@ def create_broker_activity_table(stock_code, broker_codes, days):
         action = "BUY" if net_val > 0 else "SELL" if net_val < 0 else "HOLD"
         action_color = "text-success" if net_val > 0 else "text-danger" if net_val < 0 else "text-muted"
 
+        # Get avg buy price for this broker
+        avg_buy = avg_buy_dict.get(row['broker_code'], 0)
+
         rows.append(html.Tr([
             html.Td(colored_broker(row['broker_code'], with_badge=True), className="table-cell"),
             html.Td(html.Span(action, className=f"fw-bold {action_color}"), className="table-cell"),
             html.Td(f"{net_val/1e9:+.2f}B", className=f"table-cell {action_color}"),
             html.Td(f"{net_lot/1e6:+.2f}M", className=f"table-cell {action_color}"),
-            html.Td(f"{row['buy_value']/1e9:.2f}B", className="table-cell text-success"),
-            html.Td(f"{row['sell_value']/1e9:.2f}B", className="table-cell text-danger"),
+            html.Td(f"Rp {avg_buy:,.0f}" if avg_buy > 0 else "-", className="table-cell"),
         ]))
 
     return html.Table([
@@ -4104,8 +4112,7 @@ def create_broker_activity_table(stock_code, broker_codes, days):
             html.Th("Action", className="table-header"),
             html.Th("Net Val", className="table-header"),
             html.Th("Net Lot", className="table-header"),
-            html.Th("Buy", className="table-header"),
-            html.Th("Sell", className="table-header"),
+            html.Th("Avg Buy", className="table-header"),
         ])),
         html.Tbody(rows)
     ], className="table table-sm", style={'width': '100%'})
