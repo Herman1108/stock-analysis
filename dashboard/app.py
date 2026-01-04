@@ -4110,6 +4110,100 @@ def create_broker_activity_table(stock_code, broker_codes, days):
     ], className="table table-sm", style={'width': '100%'})
 
 
+def create_broker_summary_card(stock_code, broker_codes):
+    """Create summary card showing accumulation/distribution/neutral status for each broker"""
+    broker_df = get_broker_data(stock_code)
+    if broker_df.empty or not broker_codes:
+        return html.Div("No data available", className="text-muted")
+
+    end_date = broker_df['date'].max()
+    periods = [7, 14, 21, 30]  # 1 week, 2 weeks, 3 weeks, 1 month
+
+    summary_rows = []
+    for broker_code in broker_codes:
+        # Calculate net value for each period
+        period_results = []
+        total_net = 0
+
+        for days in periods:
+            start_date = end_date - pd.Timedelta(days=days)
+            period_df = broker_df[(broker_df['date'] >= start_date) & (broker_df['broker_code'] == broker_code)]
+
+            if not period_df.empty:
+                net_val = period_df['net_value'].sum()
+                total_net += net_val
+                period_results.append(net_val)
+            else:
+                period_results.append(0)
+
+        # Determine overall status based on consistency
+        positive_periods = sum(1 for v in period_results if v > 0)
+        negative_periods = sum(1 for v in period_results if v < 0)
+
+        if positive_periods >= 3:
+            status = "AKUMULASI"
+            status_color = "text-success"
+            status_bg = "bg-success"
+            status_icon = "🟢"
+        elif negative_periods >= 3:
+            status = "DISTRIBUSI"
+            status_color = "text-danger"
+            status_bg = "bg-danger"
+            status_icon = "🔴"
+        else:
+            status = "NETRAL"
+            status_color = "text-warning"
+            status_bg = "bg-warning"
+            status_icon = "🟡"
+
+        # Calculate trend (comparing recent vs older)
+        recent_net = period_results[0] + period_results[1]  # 1-2 weeks
+        older_net = period_results[2] + period_results[3]   # 3-4 weeks
+
+        if recent_net > older_net * 1.2:
+            trend = "↗️ Meningkat"
+            trend_color = "text-success"
+        elif recent_net < older_net * 0.8:
+            trend = "↘️ Menurun"
+            trend_color = "text-danger"
+        else:
+            trend = "➡️ Stabil"
+            trend_color = "text-muted"
+
+        # Period indicators (✓ or ✗)
+        period_indicators = []
+        period_labels = ["1M", "2M", "3M", "1B"]
+        for i, (val, label) in enumerate(zip(period_results, period_labels)):
+            if val > 0:
+                period_indicators.append(html.Span(f"✓{label}", className="text-success me-1", style={"fontSize": "10px"}))
+            elif val < 0:
+                period_indicators.append(html.Span(f"✗{label}", className="text-danger me-1", style={"fontSize": "10px"}))
+            else:
+                period_indicators.append(html.Span(f"-{label}", className="text-muted me-1", style={"fontSize": "10px"}))
+
+        summary_rows.append(html.Tr([
+            html.Td(colored_broker(broker_code, with_badge=True), className="table-cell"),
+            html.Td([
+                html.Span(f"{status_icon} ", style={"fontSize": "14px"}),
+                html.Span(status, className=f"fw-bold {status_color}")
+            ], className="table-cell"),
+            html.Td(period_indicators, className="table-cell"),
+            html.Td(html.Span(trend, className=trend_color), className="table-cell"),
+            html.Td(f"{total_net/1e9:+.2f}B", className=f"table-cell {'text-success' if total_net > 0 else 'text-danger' if total_net < 0 else 'text-muted'}"),
+        ]))
+
+    return html.Table([
+        html.Thead(html.Tr([
+            html.Th("Broker", className="table-header"),
+            html.Th("Status", className="table-header"),
+            html.Th("Per Periode", className="table-header"),
+            html.Th("Trend", className="table-header"),
+            html.Th("Total Net", className="table-header"),
+        ])),
+        html.Tbody(summary_rows)
+    ], className="table table-sm", style={'width': '100%'})
+
+
 def create_sensitive_broker_page(stock_code='CDIA'):
     """Create dedicated Sensitive Broker page with sensitivity pattern and activity"""
     price_df = get_price_data(stock_code)
@@ -4146,6 +4240,34 @@ def create_sensitive_broker_page(stock_code='CDIA'):
 
         # Broker Sensitivity Pattern Container
         html.Div(id="sensitive-pattern-container", children=create_broker_sensitivity_pattern(stock_code)),
+
+        # Summary Card - Accumulation/Distribution/Neutral
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-balance-scale me-2"),
+                html.Span("📈 Summary Status Broker Sensitif", className="fw-bold"),
+                html.Small(" - Akumulasi / Distribusi / Netral", className="text-muted ms-2")
+            ]),
+            dbc.CardBody([
+                html.Div(id="broker-summary-container", children=create_broker_summary_card(stock_code, top_5_codes)),
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Keterangan: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("• Status: "), "🟢 AKUMULASI = net buy ≥3 periode, 🔴 DISTRIBUSI = net sell ≥3 periode, 🟡 NETRAL = mixed",
+                        html.Br(),
+                        html.Strong("• Per Periode: "), "✓ = net positif (beli), ✗ = net negatif (jual). 1M=1 minggu, 2M=2 minggu, 3M=3 minggu, 1B=1 bulan",
+                        html.Br(),
+                        html.Strong("• Trend: "), "Perbandingan aktivitas 2 minggu terakhir vs 2 minggu sebelumnya",
+                        html.Br(),
+                        html.Strong("💡 Signal: "), "Broker dengan status AKUMULASI dan trend Meningkat = potensi harga naik!"
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded info-box mt-2")
+            ])
+        ], className="mb-3"),
 
         # Broker Activity Over Time Periods
         dbc.Card([
@@ -6743,6 +6865,7 @@ def refresh_movement_page(n_clicks, stock_code):
 # Sensitive Broker page refresh callback
 @app.callback(
     [Output("sensitive-pattern-container", "children"),
+     Output("broker-summary-container", "children"),
      Output("activity-1week", "children"),
      Output("activity-2weeks", "children"),
      Output("activity-3weeks", "children"),
@@ -6764,6 +6887,7 @@ def refresh_sensitive_page(n_clicks, stock_code):
 
     return (
         create_broker_sensitivity_pattern(stock_code),
+        create_broker_summary_card(stock_code, top_5_codes),
         create_broker_activity_table(stock_code, top_5_codes, 7),
         create_broker_activity_table(stock_code, top_5_codes, 14),
         create_broker_activity_table(stock_code, top_5_codes, 21),
