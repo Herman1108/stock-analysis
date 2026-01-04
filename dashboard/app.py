@@ -3523,14 +3523,14 @@ def create_broker_movement_alert(stock_code='CDIA'):
                         html.Div([
                             html.Small("🟢 New Accumulation", className="text-success fw-bold"),
                             *accum_items
-                        ], className="p-2 rounded", style={"backgroundColor": "#2d3a2d"})
+                        ], className="p-2 rounded alert-box-success")
                     ], width=6),
                     # New Distribution Warning
                     dbc.Col([
                         html.Div([
                             html.Small("🔴 New Distribution", className="text-danger fw-bold"),
                             *dist_items
-                        ], className="p-2 rounded", style={"backgroundColor": "#3a2d2d"})
+                        ], className="p-2 rounded alert-box-danger")
                     ], width=6),
                 ], className="mb-3"),
 
@@ -3582,14 +3582,14 @@ def create_broker_movement_alert(stock_code='CDIA'):
                         html.Br(),
                         html.Strong("💡 Tip: "), "Perhatikan jika broker asing/sensitif muncul di New Accumulation!"
                     ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+                ], className="p-2 rounded info-box")
             ])
-        ], className="mb-3", color="dark", outline=True)
+        ], className="mb-3")
     except Exception as e:
         return dbc.Card([
             dbc.CardHeader("🔔 Broker Movement"),
             dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
-        ], className="mb-3", color="dark")
+        ], className="mb-3")
 
 
 def create_broker_sensitivity_pattern(stock_code='CDIA'):
@@ -3727,7 +3727,7 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
                         if accum_brokers else "Belum ada broker sensitif yang mulai akumulasi",
                         className="text-success" if accum_brokers else "text-muted"
                     )
-                ], className="mt-2 p-2 rounded", style={"backgroundColor": "#2d3a2d" if accum_brokers else "#383838"}),
+                ], className=f"mt-2 p-2 rounded {'alert-box-success' if accum_brokers else 'metric-box'}"),
 
                 html.Hr(className="my-2"),
 
@@ -3762,14 +3762,14 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
                         html.Strong("💡 Strategi: "), "Jika broker dengan Win% tinggi dan Lead Time pendek mulai akumulasi, ",
                         html.Span("pertimbangkan untuk ikut beli!", className="text-warning")
                     ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+                ], className="p-2 rounded info-box")
             ])
-        ], className="mb-3", color="dark", outline=True)
+        ], className="mb-3")
     except Exception as e:
         return dbc.Card([
             dbc.CardHeader("🎯 Broker Sensitivity Pattern"),
             dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
-        ], className="mb-3", color="dark")
+        ], className="mb-3")
 
 
 def create_broker_watchlist(stock_code='CDIA'):
@@ -3886,7 +3886,7 @@ def create_broker_watchlist(stock_code='CDIA'):
                         html.Div([
                             html.Small("🔥 Accumulation Streak", className="text-success fw-bold mb-2 d-block"),
                             *accum_items
-                        ], className="p-2 rounded h-100", style={"backgroundColor": "#2d3a2d"})
+                        ], className="p-2 rounded h-100 alert-box-success")
                     ], width=4),
 
                     # Distribution Warning
@@ -3894,7 +3894,7 @@ def create_broker_watchlist(stock_code='CDIA'):
                         html.Div([
                             html.Small("⚠️ Distribution Warning", className="text-danger fw-bold mb-2 d-block"),
                             *dist_items
-                        ], className="p-2 rounded h-100", style={"backgroundColor": "#3a2d2d"})
+                        ], className="p-2 rounded h-100 alert-box-danger")
                     ], width=4),
 
                     # Floating Loss
@@ -3902,7 +3902,7 @@ def create_broker_watchlist(stock_code='CDIA'):
                         html.Div([
                             html.Small("💸 Floating Loss", className="text-warning fw-bold mb-2 d-block"),
                             *float_items
-                        ], className="p-2 rounded h-100", style={"backgroundColor": "#3a3a2d"})
+                        ], className="p-2 rounded h-100 alert-box-warning")
                     ], width=4),
                 ]),
 
@@ -3945,14 +3945,14 @@ def create_broker_watchlist(stock_code='CDIA'):
                         html.Br(),
                         "• Perhatikan level Avg Buy broker Float Loss sebagai potensi support/resistance"
                     ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded", style={"backgroundColor": "#2a2a2a"})
+                ], className="p-2 rounded info-box")
             ])
-        ], className="mb-3", color="dark", outline=True)
+        ], className="mb-3")
     except Exception as e:
         return dbc.Card([
             dbc.CardHeader("👁️ Broker Watchlist"),
             dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
-        ], className="mb-3", color="dark")
+        ], className="mb-3")
 
 
 # ============================================================

@@ -955,3 +955,47 @@ body.light-mode .metric-box .h4,
 body.light-mode .metric-box .h5 {
   color: inherit;
 }
+
+/* ============================================
+   ALERT BOXES - Theme Responsive
+   ============================================ */
+/* Dark mode (default) */
+.alert-box-success {
+  background-color: #2d3a2d;
+  color: #ffffff;
+}
+
+.alert-box-danger {
+  background-color: #3a2d2d;
+  color: #ffffff;
+}
+
+.alert-box-warning {
+  background-color: #3a3a2d;
+  color: #ffffff;
+}
+
+/* Light mode */
+body.light-mode .alert-box-success {
+  background-color: #d4edda !important;
+  color: #155724 !important;
+  border: 1px solid #c3e6cb !important;
+}
+
+body.light-mode .alert-box-danger {
+  background-color: #f8d7da !important;
+  color: #721c24 !important;
+  border: 1px solid #f5c6cb !important;
+}
+
+body.light-mode .alert-box-warning {
+  background-color: #fff3cd !important;
+  color: #856404 !important;
+  border: 1px solid #ffeeba !important;
+}
+
+body.light-mode .alert-box-success .text-success,
+body.light-mode .alert-box-danger .text-danger,
+body.light-mode .alert-box-warning .text-warning {
+  color: inherit !important;
+}
