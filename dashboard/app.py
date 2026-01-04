@@ -6485,7 +6485,7 @@ def update_broker_detail(broker_code, stock_code):
 
 # Upload callbacks
 @app.callback(
-    [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children')],
+    [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children'), Output('stock-selector', 'options')],
     [Input('upload-data', 'contents')],
     [State('upload-data', 'filename'), State('upload-stock-code', 'value')],
     prevent_initial_call=True
@@ -6496,11 +6496,16 @@ def handle_upload(contents, filename, stock_code):
 
     stocks_list = create_stocks_list()
 
+    # Get current stock options for dropdown
+    def get_stock_options():
+        stocks = get_available_stocks()
+        return [{'label': s, 'value': s} for s in stocks]
+
     if contents is None:
-        return html.Div(), stocks_list, html.Div("No imports yet", className="text-muted")
+        return html.Div(), stocks_list, html.Div("No imports yet", className="text-muted"), get_stock_options()
 
     if not stock_code or len(stock_code) < 2:
-        return dbc.Alert("Masukkan kode saham terlebih dahulu (min 2 karakter)", color="danger"), stocks_list, html.Div()
+        return dbc.Alert("Masukkan kode saham terlebih dahulu (min 2 karakter)", color="danger"), stocks_list, html.Div(), get_stock_options()
 
     stock_code = stock_code.upper().strip()
 
@@ -6557,7 +6562,7 @@ def handle_upload(contents, filename, stock_code):
 
         print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records")
 
-        return status, create_stocks_list(), log
+        return status, create_stocks_list(), log, get_stock_options()
 
     except Exception as e:
         error_detail = traceback.format_exc()
@@ -6571,7 +6576,7 @@ def handle_upload(contents, filename, stock_code):
                 html.Summary("Detail Error"),
                 html.Pre(error_detail, style={'fontSize': '10px', 'maxHeight': '200px', 'overflow': 'auto'})
             ])
-        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger")
+        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger"), get_stock_options()
 
 
 def create_stocks_list():
