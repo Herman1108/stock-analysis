@@ -1039,3 +1039,31 @@ body.light-mode .alert-dark {
   color: #1a1a1a !important;
   border-color: #d0d0d0 !important;
 }
+
+/* ============================================
+   FORCE LIGHT BACKGROUNDS FOR ALL DARK ELEMENTS
+   ============================================ */
+body.light-mode .rounded.p-2,
+body.light-mode .rounded.p-2.mb-2,
+body.light-mode div.rounded.p-2,
+body.light-mode div.mb-2.p-2.rounded {
+  background-color: #e8e8e8 !important;
+  color: #1a1a1a !important;
+}
+
+body.light-mode .border.rounded.p-2 {
+  background-color: #e8e8e8 !important;
+  color: #1a1a1a !important;
+  border-color: #d0d0d0 !important;
+}
+
+/* Target all divs with dark inline backgrounds */
+body.light-mode div[style*="background"] {
+  background-color: #e8e8e8 !important;
+}
+
+/* Badge percentage styling */
+body.light-mode .badge.bg-secondary,
+body.light-mode .badge[style*="background"] {
+  background-color: #6c757d !important;
+}
