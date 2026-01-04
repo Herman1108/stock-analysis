@@ -2112,6 +2112,7 @@ def create_navbar():
                 dbc.Nav([
                     dbc.NavItem(dbc.NavLink("Home", href="/", id="nav-home")),
                     dbc.NavItem(dbc.NavLink("Dashboard", href="/dashboard", id="nav-dashboard")),
+                    dbc.NavItem(dbc.NavLink("Movement", href="/movement", id="nav-movement")),
                     dbc.NavItem(dbc.NavLink("Analysis", href="/analysis", id="nav-analysis")),
                     dbc.NavItem(dbc.NavLink("Ranking", href="/ranking", id="nav-ranking")),
                     dbc.NavItem(dbc.NavLink("Alerts", href="/alerts", id="nav-alerts")),
@@ -2156,10 +2157,24 @@ def create_landing_page():
             last_price = 0
             price_change = 0
             if not price_df.empty:
-                if 'close' in price_df.columns and len(price_df) > 0:
+                # Sort by date to ensure latest is last
+                if 'date' in price_df.columns:
+                    price_df = price_df.sort_values('date')
+
+                # Try different column names for close price
+                if 'close_price' in price_df.columns and len(price_df) > 0:
+                    last_price = price_df['close_price'].iloc[-1]
+                elif 'close' in price_df.columns and len(price_df) > 0:
                     last_price = price_df['close'].iloc[-1]
-                if 'change' in price_df.columns and len(price_df) > 0:
-                    price_change = price_df['change'].iloc[-1] if pd.notna(price_df['change'].iloc[-1]) else 0
+
+                # Calculate price change from last 2 days
+                if len(price_df) >= 2:
+                    close_col = 'close_price' if 'close_price' in price_df.columns else 'close'
+                    if close_col in price_df.columns:
+                        today = price_df[close_col].iloc[-1]
+                        yesterday = price_df[close_col].iloc[-2]
+                        if yesterday > 0:
+                            price_change = ((today - yesterday) / yesterday) * 100
 
             # Date range
             if not broker_df.empty:
@@ -3988,6 +4003,42 @@ def create_broker_watchlist(stock_code='CDIA'):
 
 
 # ============================================================
+# PAGE: BROKER MOVEMENT (Movement Alert + Watchlist)
+# ============================================================
+
+def create_broker_movement_page(stock_code='CDIA'):
+    """Create dedicated Broker Movement page with alerts and watchlist"""
+    price_df = get_price_data(stock_code)
+    current_price = price_df['close_price'].iloc[-1] if not price_df.empty and 'close_price' in price_df.columns else 0
+
+    return html.Div([
+        # Page Header
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-exchange-alt me-2"),
+                f"Broker Movement - {stock_code}"
+            ], className="mb-1"),
+            html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
+        ], className="mb-4"),
+
+        # Broker Movement Alert Container
+        html.Div(id="movement-alert-container", children=create_broker_movement_alert(stock_code)),
+
+        # Broker Watchlist Container
+        html.Div(id="movement-watchlist-container", children=create_broker_watchlist(stock_code)),
+
+        # Refresh Button with last refresh time
+        html.Div([
+            dbc.Button([
+                html.I(className="fas fa-sync-alt me-2"),
+                "Refresh Data"
+            ], id="movement-refresh-btn", color="primary", className="mt-3"),
+            html.Small(id="movement-last-refresh", className="text-muted ms-3")
+        ], className="text-center d-flex align-items-center justify-content-center")
+    ])
+
+
+# ============================================================
 # PAGE: COMPREHENSIVE ANALYSIS (Merged Bandarmology + Summary)
 # ============================================================
 
@@ -5162,14 +5213,8 @@ def create_dashboard_page(stock_code='CDIA'):
             ], width=6),
         ], className="mb-3"),
 
-        # Row 2: Broker Movement Alert
-        html.Div(id="movement-container"),
-
-        # Row 3: Broker Sensitivity Pattern
+        # Row 2: Broker Sensitivity Pattern
         html.Div(id="sensitivity-container"),
-
-        # Row 4: Broker Watchlist
-        html.Div(id="watchlist-container"),
 
         # Broker Detail
         dbc.Card([
@@ -6409,6 +6454,8 @@ def display_page(pathname, selected_stock):
         return create_position_page(selected_stock)
     elif pathname == '/upload':
         return create_upload_page()
+    elif pathname == '/movement':
+        return create_broker_movement_page(selected_stock)
     else:
         return create_landing_page()
 
@@ -6451,8 +6498,7 @@ def update_broker_options(pathname, stock_code):
     [Output("summary-cards", "children"), Output("price-chart-container", "children"),
      Output("flow-chart-container", "children"),
      Output("sentiment-container", "children"), Output("metrics-container", "children"),
-     Output("movement-container", "children"), Output("sensitivity-container", "children"),
-     Output("watchlist-container", "children"),
+     Output("sensitivity-container", "children"),
      Output("last-refresh", "children")],
     [Input("refresh-btn", "n_clicks"), Input('stock-selector', 'value')],
     prevent_initial_call=False
@@ -6468,9 +6514,7 @@ def refresh_dashboard(n_clicks, stock_code):
         # New sections replacing Top Brokers Summary
         create_quick_sentiment_summary(stock_code),
         create_key_metrics_compact(stock_code),
-        create_broker_movement_alert(stock_code),
         create_broker_sensitivity_pattern(stock_code),
-        create_broker_watchlist(stock_code),
         f"Refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
 
@@ -6482,6 +6526,24 @@ def update_broker_detail(broker_code, stock_code):
         stocks = get_available_stocks()
         stock_code = stocks[0] if stocks else 'PANI'
     return create_broker_history_chart(broker_code, stock_code)
+
+# Movement page refresh callback
+@app.callback(
+    [Output("movement-alert-container", "children"),
+     Output("movement-watchlist-container", "children"),
+     Output("movement-last-refresh", "children")],
+    [Input("movement-refresh-btn", "n_clicks"), Input('stock-selector', 'value')],
+    prevent_initial_call=True
+)
+def refresh_movement_page(n_clicks, stock_code):
+    if not stock_code:
+        stocks = get_available_stocks()
+        stock_code = stocks[0] if stocks else 'PANI'
+    return (
+        create_broker_movement_alert(stock_code),
+        create_broker_watchlist(stock_code),
+        f"Last refresh: {datetime.now().strftime('%H:%M:%S')}"
+    )
 
 # Upload callbacks
 @app.callback(
