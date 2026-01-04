@@ -644,102 +644,208 @@
 }
 
 /* ============================================
-   LIGHT MODE THEME
+   LIGHT MODE THEME - Complete Override
    ============================================ */
-body.light-mode {
-  background-color: #f5f5f5 !important;
-  color: #333 !important;
+body.light-mode,
+body.light-mode #main-container {
+  background-color: #f0f2f5 !important;
+  color: #1a1a2e !important;
 }
 
-body.light-mode .navbar {
-  background-color: #e9ecef !important;
+/* Navbar */
+body.light-mode .navbar,
+body.light-mode .navbar-dark {
+  background-color: #ffffff !important;
+  border-bottom: 1px solid #dee2e6 !important;
 }
 
+body.light-mode .navbar-brand,
+body.light-mode .nav-link {
+  color: #1a1a2e !important;
+}
+
+body.light-mode .nav-link:hover {
+  color: #0d6efd !important;
+}
+
+/* Container */
+body.light-mode .container-fluid {
+  background-color: #f0f2f5 !important;
+}
+
+/* Cards - All types */
 body.light-mode .card {
-  background-color: #fff !important;
-  color: #333 !important;
-  border-color: #dee2e6 !important;
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
+  border: 1px solid #dee2e6 !important;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1) !important;
 }
 
 body.light-mode .card-header {
   background-color: #f8f9fa !important;
-  color: #333 !important;
-  border-color: #dee2e6 !important;
+  color: #1a1a2e !important;
+  border-bottom: 1px solid #dee2e6 !important;
 }
 
 body.light-mode .card-body {
-  background-color: #fff !important;
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
 }
 
-body.light-mode .table {
-  color: #333 !important;
-}
-
-body.light-mode .table-dark {
+body.light-mode .card-footer {
   background-color: #f8f9fa !important;
-  color: #333 !important;
+  border-top: 1px solid #dee2e6 !important;
 }
 
+/* Tables */
+body.light-mode .table,
+body.light-mode .table-dark,
+body.light-mode .dash-table-container {
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
+}
+
+body.light-mode .table th,
+body.light-mode .table td,
 body.light-mode .table-dark th,
 body.light-mode .table-dark td {
-  background-color: #fff !important;
-  color: #333 !important;
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
   border-color: #dee2e6 !important;
 }
 
+body.light-mode .table-striped tbody tr:nth-of-type(odd) {
+  background-color: #f8f9fa !important;
+}
+
+body.light-mode .table thead th {
+  background-color: #e9ecef !important;
+  color: #1a1a2e !important;
+}
+
+/* Text colors */
 body.light-mode .text-muted {
   color: #6c757d !important;
 }
 
-body.light-mode .text-info {
-  color: #0d6efd !important;
+body.light-mode .text-white {
+  color: #1a1a2e !important;
+}
+
+body.light-mode h1, body.light-mode h2, body.light-mode h3,
+body.light-mode h4, body.light-mode h5, body.light-mode h6 {
+  color: #1a1a2e !important;
+}
+
+body.light-mode p, body.light-mode span, body.light-mode div {
+  color: inherit !important;
+}
+
+/* Alerts */
+body.light-mode .alert {
+  border: 1px solid !important;
 }
 
 body.light-mode .alert-info {
-  background-color: #cfe2ff !important;
-  color: #084298 !important;
+  background-color: #cff4fc !important;
+  color: #055160 !important;
+  border-color: #b6effb !important;
 }
 
-body.light-mode .btn-outline-primary {
-  color: #0d6efd !important;
+body.light-mode .alert-warning {
+  background-color: #fff3cd !important;
+  color: #664d03 !important;
+  border-color: #ffecb5 !important;
+}
+
+body.light-mode .alert-success {
+  background-color: #d1e7dd !important;
+  color: #0f5132 !important;
+  border-color: #badbcc !important;
+}
+
+body.light-mode .alert-danger {
+  background-color: #f8d7da !important;
+  color: #842029 !important;
+  border-color: #f5c2c7 !important;
+}
+
+/* Badges */
+body.light-mode .badge {
+  color: #fff !important;
+}
+
+/* Buttons */
+body.light-mode .btn-primary {
+  background-color: #0d6efd !important;
   border-color: #0d6efd !important;
 }
 
-body.light-mode .nav-link {
-  color: #333 !important;
+body.light-mode .btn-outline-info {
+  color: #0dcaf0 !important;
+  border-color: #0dcaf0 !important;
 }
 
-body.light-mode .dropdown-menu {
-  background-color: #fff !important;
-  color: #333 !important;
+/* Forms & Inputs */
+body.light-mode input,
+body.light-mode select,
+body.light-mode textarea {
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
+  border-color: #ced4da !important;
 }
 
-body.light-mode .stock-dropdown .Select-control {
-  background-color: #fff !important;
+/* Dropdown */
+body.light-mode .stock-dropdown .Select-control,
+body.light-mode .Select-control {
+  background-color: #ffffff !important;
   border-color: #ced4da !important;
 }
 
 body.light-mode .stock-dropdown .Select-value-label,
-body.light-mode .stock-dropdown .Select-placeholder {
-  color: #333 !important;
+body.light-mode .stock-dropdown .Select-placeholder,
+body.light-mode .Select-value-label {
+  color: #1a1a2e !important;
 }
 
-body.light-mode .stock-dropdown .Select-menu-outer {
-  background-color: #fff !important;
+body.light-mode .stock-dropdown .Select-menu-outer,
+body.light-mode .Select-menu-outer {
+  background-color: #ffffff !important;
   border-color: #ced4da !important;
 }
 
-body.light-mode .stock-dropdown .Select-option {
-  background-color: #fff !important;
-  color: #333 !important;
+body.light-mode .stock-dropdown .Select-option,
+body.light-mode .Select-option {
+  background-color: #ffffff !important;
+  color: #1a1a2e !important;
 }
 
 body.light-mode .stock-dropdown .Select-option:hover,
-body.light-mode .stock-dropdown .Select-option.is-focused {
+body.light-mode .stock-dropdown .Select-option.is-focused,
+body.light-mode .Select-option:hover {
   background-color: #e9ecef !important;
 }
 
-/* Plotly charts in light mode */
-body.light-mode .js-plotly-plot .plotly .main-svg {
-  background: #fff !important;
+/* Progress bars */
+body.light-mode .progress {
+  background-color: #e9ecef !important;
+}
+
+/* Scrollbar */
+body.light-mode ::-webkit-scrollbar-track {
+  background: #f1f1f1 !important;
+}
+
+body.light-mode ::-webkit-scrollbar-thumb {
+  background: #c1c1c1 !important;
+}
+
+/* Plotly charts */
+body.light-mode .js-plotly-plot .plotly .main-svg,
+body.light-mode .js-plotly-plot .plot-container {
+  background: #ffffff !important;
+}
+
+body.light-mode .js-plotly-plot .bg {
+  fill: #ffffff !important;
 }
