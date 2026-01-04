@@ -4051,6 +4051,176 @@ def create_broker_movement_page(stock_code='CDIA'):
 
 
 # ============================================================
+# PAGE: SENSITIVE BROKER (Broker Sensitivity + Activity)
+# ============================================================
+
+def create_broker_activity_table(stock_code, broker_codes, days):
+    """Create activity table for specific brokers over N days"""
+    broker_df = get_broker_data(stock_code)
+    if broker_df.empty:
+        return html.Div("No data", className="text-muted")
+
+    # Filter for date range
+    end_date = broker_df['date'].max()
+    start_date = end_date - pd.Timedelta(days=days)
+    period_df = broker_df[(broker_df['date'] >= start_date) & (broker_df['broker_code'].isin(broker_codes))]
+
+    if period_df.empty:
+        return html.Div("No activity in this period", className="text-muted small")
+
+    # Aggregate by broker
+    activity = period_df.groupby('broker_code').agg({
+        'buy_value': 'sum',
+        'sell_value': 'sum',
+        'net_value': 'sum',
+        'buy_lot': 'sum',
+        'sell_lot': 'sum',
+        'net_lot': 'sum'
+    }).reset_index()
+
+    # Sort by net_value
+    activity = activity.sort_values('net_value', ascending=False)
+
+    rows = []
+    for _, row in activity.iterrows():
+        net_val = row['net_value']
+        net_lot = row['net_lot']
+        action = "BUY" if net_val > 0 else "SELL" if net_val < 0 else "HOLD"
+        action_color = "text-success" if net_val > 0 else "text-danger" if net_val < 0 else "text-muted"
+
+        rows.append(html.Tr([
+            html.Td(colored_broker(row['broker_code'], with_badge=True), className="table-cell"),
+            html.Td(html.Span(action, className=f"fw-bold {action_color}"), className="table-cell"),
+            html.Td(f"{net_val/1e9:+.2f}B", className=f"table-cell {action_color}"),
+            html.Td(f"{net_lot/1e6:+.2f}M", className=f"table-cell {action_color}"),
+            html.Td(f"{row['buy_value']/1e9:.2f}B", className="table-cell text-success"),
+            html.Td(f"{row['sell_value']/1e9:.2f}B", className="table-cell text-danger"),
+        ]))
+
+    return html.Table([
+        html.Thead(html.Tr([
+            html.Th("Broker", className="table-header"),
+            html.Th("Action", className="table-header"),
+            html.Th("Net Val", className="table-header"),
+            html.Th("Net Lot", className="table-header"),
+            html.Th("Buy", className="table-header"),
+            html.Th("Sell", className="table-header"),
+        ])),
+        html.Tbody(rows)
+    ], className="table table-sm", style={'width': '100%'})
+
+
+def create_sensitive_broker_page(stock_code='CDIA'):
+    """Create dedicated Sensitive Broker page with sensitivity pattern and activity"""
+    price_df = get_price_data(stock_code)
+    current_price = price_df['close_price'].iloc[-1] if not price_df.empty and 'close_price' in price_df.columns else 0
+
+    # Get top 5 sensitive brokers
+    broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+    top_5_codes = []
+    if broker_sens and broker_sens.get('brokers'):
+        top_5_codes = [b['broker_code'] for b in broker_sens['brokers'][:5]]
+
+    return html.Div([
+        # Page Header with back button
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4([
+                        html.I(className="fas fa-crosshairs me-2"),
+                        f"Sensitive Broker - {stock_code}"
+                    ], className="mb-0 d-inline-block me-3"),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-arrow-left me-2"),
+                            "Dashboard"
+                        ], color="secondary", size="sm", outline=True),
+                        href="/dashboard"
+                    )
+                ], className="d-flex align-items-center")
+            ], width=8),
+            dbc.Col([
+                html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
+            ], width=4, className="text-end d-flex align-items-center justify-content-end")
+        ], className="mb-4"),
+
+        # Broker Sensitivity Pattern Container
+        html.Div(id="sensitive-pattern-container", children=create_broker_sensitivity_pattern(stock_code)),
+
+        # Broker Activity Over Time Periods
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-line me-2"),
+                html.Span("📊 Aktivitas Top 5 Broker Sensitif", className="fw-bold"),
+                html.Small(" - Perbandingan periode waktu", className="text-muted ms-2")
+            ]),
+            dbc.CardBody([
+                dbc.Row([
+                    # 1 Week
+                    dbc.Col([
+                        html.Div([
+                            html.H6("📅 1 Minggu Terakhir", className="text-info fw-bold mb-2"),
+                            html.Div(id="activity-1week", children=create_broker_activity_table(stock_code, top_5_codes, 7))
+                        ], className="p-2 rounded metric-box")
+                    ], md=6, lg=3, className="mb-3"),
+
+                    # 2 Weeks
+                    dbc.Col([
+                        html.Div([
+                            html.H6("📅 2 Minggu Terakhir", className="text-info fw-bold mb-2"),
+                            html.Div(id="activity-2weeks", children=create_broker_activity_table(stock_code, top_5_codes, 14))
+                        ], className="p-2 rounded metric-box")
+                    ], md=6, lg=3, className="mb-3"),
+
+                    # 3 Weeks
+                    dbc.Col([
+                        html.Div([
+                            html.H6("📅 3 Minggu Terakhir", className="text-info fw-bold mb-2"),
+                            html.Div(id="activity-3weeks", children=create_broker_activity_table(stock_code, top_5_codes, 21))
+                        ], className="p-2 rounded metric-box")
+                    ], md=6, lg=3, className="mb-3"),
+
+                    # 1 Month
+                    dbc.Col([
+                        html.Div([
+                            html.H6("📅 1 Bulan Terakhir", className="text-info fw-bold mb-2"),
+                            html.Div(id="activity-1month", children=create_broker_activity_table(stock_code, top_5_codes, 30))
+                        ], className="p-2 rounded metric-box")
+                    ], md=6, lg=3, className="mb-3"),
+                ]),
+
+                # Explanation
+                html.Div([
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        html.Strong("Cara Baca Aktivitas: ")
+                    ], className="text-info"),
+                    html.Br(),
+                    html.Small([
+                        html.Strong("• Action: "), "BUY = net positif (lebih banyak beli), SELL = net negatif",
+                        html.Br(),
+                        html.Strong("• Net Val: "), "Total nilai bersih (beli - jual) dalam miliar rupiah",
+                        html.Br(),
+                        html.Strong("• Net Lot: "), "Total lot bersih dalam juta lot",
+                        html.Br(),
+                        html.Strong("💡 Tip: "), "Bandingkan aktivitas antar periode. Jika broker konsisten BUY di semua periode, kemungkinan sedang akumulasi besar!"
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="p-2 rounded info-box mt-2")
+            ])
+        ], className="mb-3"),
+
+        # Refresh Button with last refresh time
+        html.Div([
+            dbc.Button([
+                html.I(className="fas fa-sync-alt me-2"),
+                "Refresh Data"
+            ], id="sensitive-refresh-btn", color="primary", className="mt-3"),
+            html.Small(id="sensitive-last-refresh", className="text-muted ms-3")
+        ], className="text-center d-flex align-items-center justify-content-center")
+    ])
+
+
+# ============================================================
 # PAGE: COMPREHENSIVE ANALYSIS (Merged Bandarmology + Summary)
 # ============================================================
 
@@ -5194,10 +5364,17 @@ def create_dashboard_page(stock_code='CDIA'):
                         dbc.Button([
                             html.I(className="fas fa-exchange-alt me-2"),
                             "Broker Movement"
-                        ], color="info", size="sm", className="fw-bold"),
+                        ], color="info", size="sm", className="fw-bold me-2"),
                         href="/movement"
+                    ),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-crosshairs me-2"),
+                            "Sensitive Broker"
+                        ], color="info", size="sm", className="fw-bold"),
+                        href="/sensitive"
                     )
-                ], className="d-flex align-items-center")
+                ], className="d-flex align-items-center flex-wrap")
             ], width=8),
             dbc.Col([
                 dbc.Button("Refresh Data", id="refresh-btn", color="primary", size="sm"),
@@ -5233,9 +5410,6 @@ def create_dashboard_page(stock_code='CDIA'):
                 html.Div(id="metrics-container")
             ], width=6),
         ], className="mb-3"),
-
-        # Row 2: Broker Sensitivity Pattern
-        html.Div(id="sensitivity-container"),
 
         # Broker Detail
         dbc.Card([
@@ -6477,6 +6651,8 @@ def display_page(pathname, selected_stock):
         return create_upload_page()
     elif pathname == '/movement':
         return create_broker_movement_page(selected_stock)
+    elif pathname == '/sensitive':
+        return create_sensitive_broker_page(selected_stock)
     else:
         return create_landing_page()
 
@@ -6519,7 +6695,6 @@ def update_broker_options(pathname, stock_code):
     [Output("summary-cards", "children"), Output("price-chart-container", "children"),
      Output("flow-chart-container", "children"),
      Output("sentiment-container", "children"), Output("metrics-container", "children"),
-     Output("sensitivity-container", "children"),
      Output("last-refresh", "children")],
     [Input("refresh-btn", "n_clicks"), Input('stock-selector', 'value')],
     prevent_initial_call=False
@@ -6535,7 +6710,6 @@ def refresh_dashboard(n_clicks, stock_code):
         # New sections replacing Top Brokers Summary
         create_quick_sentiment_summary(stock_code),
         create_key_metrics_compact(stock_code),
-        create_broker_sensitivity_pattern(stock_code),
         f"Refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
 
@@ -6563,6 +6737,37 @@ def refresh_movement_page(n_clicks, stock_code):
     return (
         create_broker_movement_alert(stock_code),
         create_broker_watchlist(stock_code),
+        f"Last refresh: {datetime.now().strftime('%H:%M:%S')}"
+    )
+
+# Sensitive Broker page refresh callback
+@app.callback(
+    [Output("sensitive-pattern-container", "children"),
+     Output("activity-1week", "children"),
+     Output("activity-2weeks", "children"),
+     Output("activity-3weeks", "children"),
+     Output("activity-1month", "children"),
+     Output("sensitive-last-refresh", "children")],
+    [Input("sensitive-refresh-btn", "n_clicks"), Input('stock-selector', 'value')],
+    prevent_initial_call=True
+)
+def refresh_sensitive_page(n_clicks, stock_code):
+    if not stock_code:
+        stocks = get_available_stocks()
+        stock_code = stocks[0] if stocks else 'PANI'
+
+    # Get top 5 sensitive brokers
+    broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+    top_5_codes = []
+    if broker_sens and broker_sens.get('brokers'):
+        top_5_codes = [b['broker_code'] for b in broker_sens['brokers'][:5]]
+
+    return (
+        create_broker_sensitivity_pattern(stock_code),
+        create_broker_activity_table(stock_code, top_5_codes, 7),
+        create_broker_activity_table(stock_code, top_5_codes, 14),
+        create_broker_activity_table(stock_code, top_5_codes, 21),
+        create_broker_activity_table(stock_code, top_5_codes, 30),
         f"Last refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
 
