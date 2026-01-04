@@ -680,40 +680,40 @@ body.light-mode .container-fluid {
   background-color: #f7f7f7 !important;
 }
 
-/* Cards - Clean white with subtle shadow */
+/* Cards - Blend with page, text contrasts */
 body.light-mode .card {
-  background-color: #ffffff !important;
-  color: #333333 !important;
-  border: 1px solid #e5e5e5 !important;
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
+  border: none !important;
   border-radius: 8px !important;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.08) !important;
+  box-shadow: none !important;
 }
 
 body.light-mode .card-header {
-  background-color: #ffffff !important;
-  color: #333333 !important;
-  border-bottom: 1px solid #eeeeee !important;
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
+  border-bottom: 1px solid #e0e0e0 !important;
   font-weight: 600 !important;
 }
 
 body.light-mode .card-body {
-  background-color: #ffffff !important;
-  color: #333333 !important;
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
 }
 
 /* Tables - Clean and readable */
 body.light-mode .table,
 body.light-mode .table-dark,
 body.light-mode .dash-table-container {
-  background-color: #ffffff !important;
-  color: #333333 !important;
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
 }
 
 body.light-mode .table th {
-  background-color: #fafafa !important;
-  color: #666666 !important;
+  background-color: #eeeeee !important;
+  color: #1a1a1a !important;
   font-weight: 600 !important;
-  border-bottom: 2px solid #e5e5e5 !important;
+  border-bottom: 2px solid #d0d0d0 !important;
   text-transform: uppercase !important;
   font-size: 0.75rem !important;
   letter-spacing: 0.5px !important;
@@ -721,14 +721,14 @@ body.light-mode .table th {
 
 body.light-mode .table td,
 body.light-mode .table-dark td {
-  background-color: #ffffff !important;
-  color: #333333 !important;
-  border-bottom: 1px solid #f0f0f0 !important;
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
+  border-bottom: 1px solid #e0e0e0 !important;
 }
 
 body.light-mode .table-dark th {
-  background-color: #fafafa !important;
-  color: #666666 !important;
+  background-color: #eeeeee !important;
+  color: #1a1a1a !important;
 }
 
 body.light-mode .table tbody tr:hover {
@@ -900,29 +900,29 @@ body.light-mode ::-webkit-scrollbar-thumb:hover {
   background: #999999 !important;
 }
 
-/* Plotly charts - White background */
+/* Plotly charts - Match card background */
 body.light-mode .js-plotly-plot .plotly,
 body.light-mode .js-plotly-plot .main-svg,
 body.light-mode .js-plotly-plot .plot-container {
-  background: #ffffff !important;
+  background: #f7f7f7 !important;
 }
 
 body.light-mode .js-plotly-plot .bg {
-  fill: #ffffff !important;
+  fill: #f7f7f7 !important;
 }
 
 /* Dash DataTable */
 body.light-mode .dash-spreadsheet-container {
-  background: #ffffff !important;
+  background: #f7f7f7 !important;
 }
 
 body.light-mode .dash-header {
-  background-color: #fafafa !important;
-  color: #666666 !important;
+  background-color: #eeeeee !important;
+  color: #1a1a1a !important;
 }
 
 body.light-mode .dash-cell {
-  background-color: #ffffff !important;
-  color: #333333 !important;
-  border-color: #f0f0f0 !important;
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
+  border-color: #e0e0e0 !important;
 }
