@@ -900,16 +900,8 @@ body.light-mode ::-webkit-scrollbar-thumb:hover {
   background: #999999 !important;
 }
 
-/* Plotly charts - Match card background */
-body.light-mode .js-plotly-plot .plotly,
-body.light-mode .js-plotly-plot .main-svg,
-body.light-mode .js-plotly-plot .plot-container {
-  background: #f7f7f7 !important;
-}
-
-body.light-mode .js-plotly-plot .bg {
-  fill: #f7f7f7 !important;
-}
+/* Plotly charts - Keep dark template intact in light mode */
+/* Charts will have dark background even in light mode for visibility */
 
 /* Dash DataTable */
 body.light-mode .dash-spreadsheet-container {
