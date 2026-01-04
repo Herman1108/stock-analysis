@@ -999,3 +999,33 @@ body.light-mode .alert-box-danger .text-danger,
 body.light-mode .alert-box-warning .text-warning {
   color: inherit !important;
 }
+
+/* ============================================
+   OVERRIDE BOOTSTRAP DARK CARDS IN LIGHT MODE
+   ============================================ */
+body.light-mode .card.bg-dark,
+body.light-mode .card[class*="border-dark"],
+body.light-mode .card.text-white {
+  background-color: #f7f7f7 !important;
+  color: #1a1a1a !important;
+  border-color: #e0e0e0 !important;
+}
+
+body.light-mode .bg-dark,
+body.light-mode [style*="background-color: rgb(45"],
+body.light-mode [style*="background-color: rgb(48"],
+body.light-mode [style*="backgroundColor"]:not(.alert-box-success):not(.alert-box-danger):not(.alert-box-warning) {
+  background-color: #e8e8e8 !important;
+}
+
+body.light-mode .card.bg-dark .text-white,
+body.light-mode .card.bg-dark .text-muted {
+  color: #555555 !important;
+}
+
+/* Override dbc.Alert color="dark" */
+body.light-mode .alert-dark {
+  background-color: #e8e8e8 !important;
+  color: #1a1a1a !important;
+  border-color: #d0d0d0 !important;
+}

@@ -2730,7 +2730,7 @@ def create_multi_period_card(stock_code):
                             style={"fontSize": "12px"}
                         )
                     ])
-                ], className="border rounded p-2", style={"backgroundColor": "#2d2d2d"})
+                ], className="border rounded p-2 metric-box")
             ], width=True)
         )
 
@@ -2789,7 +2789,7 @@ def create_multi_period_card(stock_code):
                 "Jika harga naik tapi broker distribusi = waspada reversal."
             ], className="text-muted d-block mt-2")
         ])
-    ], className="mb-4", color="dark", outline=True)
+    ], className="mb-4")
 
 
 # ============================================================
@@ -3030,7 +3030,7 @@ def create_sr_levels_card(sr_analysis, stock_code):
                 level_data.get('description', ''),
                 className="text-muted"
             )
-        ], className="mb-2 p-2 rounded", style={"backgroundColor": "#383838"})
+        ], className="mb-2 p-2 rounded metric-box")
 
     return dbc.Card([
         dbc.CardHeader([
@@ -3072,7 +3072,7 @@ def create_sr_levels_card(sr_analysis, stock_code):
             ], className="mb-3"),
 
             # Risk/Reward Ratio
-            dbc.Alert([
+            html.Div([
                 html.Strong("Risk/Reward Ratio: "),
                 html.Span(
                     f"{interpretation.get('risk_reward', 0):.2f}x",
@@ -3082,7 +3082,7 @@ def create_sr_levels_card(sr_analysis, stock_code):
                     " (Potential gain vs potential loss dari level saat ini)",
                     className="text-muted ms-2"
                 )
-            ], color="dark", className="mb-3"),
+            ], className="mb-3 p-2 rounded info-box"),
 
             html.Hr(),
 
@@ -3141,7 +3141,7 @@ def create_sr_levels_card(sr_analysis, stock_code):
                 " = Avg Buy broker besar (akan defend/sell di area ini)",
             ], className="text-muted")
         ])
-    ], className="mb-4", color="dark", outline=True)
+    ], className="mb-4")
 
 
 # ============================================================
