@@ -8195,6 +8195,15 @@ def handle_upload(contents, filename, stock_code):
 
         print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records, profile: {profile_imported}")
 
+        # Auto backup to GitHub after successful import
+        try:
+            from auto_backup import auto_backup_and_push
+            backup_msg = f"Auto backup after import: {stock_code} ({price_count} price, {broker_count} broker)"
+            auto_backup_and_push(backup_msg)
+            print(f"[UPLOAD] Auto backup to GitHub completed")
+        except Exception as backup_error:
+            print(f"[UPLOAD] Auto backup failed (non-critical): {backup_error}")
+
         return status, create_stocks_list(), log, get_stock_options()
 
     except Exception as e:
