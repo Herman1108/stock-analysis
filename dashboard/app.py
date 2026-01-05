@@ -54,7 +54,7 @@ from broker_config import (
     classify_brokers, BROKER_COLORS, BROKER_TYPE_NAMES,
     FOREIGN_BROKER_CODES, is_foreign_broker
 )
-from parser import read_excel_data, import_price_data, import_broker_data
+from parser import read_excel_data, import_price_data, import_broker_data, read_profile_data, import_profile_data
 
 # Helper function to create colored broker code span
 def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool = False) -> html.Span:
@@ -88,6 +88,64 @@ def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool =
                 html.Sup(type_short, className=broker_class, style={"fontSize": "8px", "marginLeft": "1px"})
             ])
         return html.Span(broker_code, className=broker_class)
+
+
+def create_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
+    """
+    Create consistent submenu navigation buttons for Analysis subpages.
+    Order: Fundamental | Support & Resistance | Back to Analysis
+
+    Args:
+        current_page: Current page identifier ('fundamental', 'support-resistance')
+        stock_code: Current stock code
+    """
+    # Fundamental button - solid when active, outline when not
+    if current_page == 'fundamental':
+        fundamental_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-chart-line me-2"),
+                "Fundamental"
+            ], className="btn btn-success btn-sm me-2"),
+            href="/fundamental"
+        )
+    else:
+        fundamental_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-chart-line me-2"),
+                "Fundamental"
+            ], className="btn btn-outline-success btn-sm me-2"),
+            href="/fundamental"
+        )
+
+    # Support & Resistance button - solid when active, outline when not
+    if current_page == 'support-resistance':
+        sr_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-layer-group me-2"),
+                "Support & Resistance"
+            ], className="btn btn-info btn-sm me-2"),
+            href="/support-resistance"
+        )
+    else:
+        sr_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-layer-group me-2"),
+                "Support & Resistance"
+            ], className="btn btn-outline-info btn-sm me-2"),
+            href="/support-resistance"
+        )
+
+    # Back to Analysis button - always outline
+    analysis_btn = dcc.Link(
+        dbc.Button([
+            html.I(className="fas fa-arrow-left me-2"),
+            "Analysis"
+        ], className="btn btn-outline-secondary btn-sm"),
+        href="/analysis"
+    )
+
+    return html.Div([fundamental_btn, sr_btn, analysis_btn], className="d-inline-flex flex-wrap")
+
 
 # Initialize Dash app with Font Awesome for help icons
 FA_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
@@ -2864,8 +2922,6 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
     current_price = avg_buy_analysis.get('current_price', 0)
     resistance_levels = avg_buy_analysis.get('resistance_levels', [])  # Above current price
     interest_zone = avg_buy_analysis.get('interest_zone', None)
-    interpretation = avg_buy_analysis.get('interpretation', {})
-    brokers = avg_buy_analysis.get('brokers', [])[:10]  # Top 10
 
     # Use multi-method S/R analysis if available
     if sr_analysis and 'key_support' in sr_analysis:
@@ -2952,53 +3008,6 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
 
             html.Hr(),
 
-            # Broker type legend
-            html.Div([
-                html.Small("Legenda Broker: ", className="text-muted me-2"),
-                html.Span([
-                    html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['FOREIGN'], "fontSize": "10px"}),
-                    "Asing "
-                ], className="me-2", style={"fontSize": "10px"}),
-                html.Span([
-                    html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['BUMN'], "fontSize": "10px"}),
-                    "BUMN "
-                ], className="me-2", style={"fontSize": "10px"}),
-                html.Span([
-                    html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['LOCAL'], "fontSize": "10px"}),
-                    "Lokal "
-                ], style={"fontSize": "10px"}),
-            ], className="mb-2"),
-
-            # Top 10 Brokers Avg Buy Table - dengan warna broker
-            html.H6("Top 10 Broker by Buy Value (60 hari)", className="mb-2"),
-            html.Table([
-                html.Thead(html.Tr([
-                    html.Th("Broker", style={"width": "80px"}),
-                    html.Th("Tipe", style={"width": "120px"}),
-                    html.Th("Avg Buy", style={"width": "100px"}),
-                    html.Th("Buy Value", style={"width": "90px"}),
-                    html.Th("Net", style={"width": "80px"}),
-                    html.Th("Floating", style={"width": "80px"}),
-                    html.Th("Status", style={"width": "70px"})
-                ])),
-                html.Tbody([
-                    html.Tr([
-                        html.Td(colored_broker(b['broker_code'], with_badge=True)),
-                        html.Td(html.Span(
-                            get_broker_info(b['broker_code'])['type_name'],
-                            className=f"broker-{get_broker_type(b['broker_code']).lower()}"
-                        )),
-                        html.Td(f"Rp {b['avg_buy_price']:,.0f}"),
-                        html.Td(f"{b['total_buy_value']/1e9:.1f}B"),
-                        html.Td(f"{b['net_value']/1e9:+.1f}B", className="text-success" if b['net_value'] > 0 else "text-danger"),
-                        html.Td(f"{b.get('floating_pct', 0):+.1f}%", className="text-success" if b.get('floating_pct', 0) > 0 else "text-danger"),
-                        html.Td(b.get('position', '-'), className="text-success" if b.get('position') == 'PROFIT' else "text-danger" if b.get('position') == 'LOSS' else "")
-                    ]) for b in brokers[:10]
-                ])
-            ], className="table table-sm table-dark table-hover", style={"fontSize": "12px"}),
-
-            html.Hr(),
-
             # Interpretation
             html.Small([
                 html.Strong("Cara Baca: "),
@@ -3015,6 +3024,167 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
             ], className="text-muted")
         ])
     ], className="mb-4", color="dark", outline=True)
+
+
+def create_sr_chart(stock_code: str, sr_analysis: dict, days: int = 60):
+    """
+    Create candlestick chart with S/R lines and volume bars.
+
+    Features:
+    - Candlestick price chart
+    - Support lines (green, dashed)
+    - Resistance lines (red, dashed)
+    - Volume bars (colored by price direction)
+    - Current price line
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    price_df = get_price_data(stock_code)
+
+    if price_df.empty:
+        return html.Div("No price data available", className="text-muted p-4")
+
+    # Get last N days
+    df = price_df.sort_values('date').tail(days).copy()
+
+    # Convert to float
+    for col in ['open_price', 'high_price', 'low_price', 'close_price', 'volume']:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+
+    # Get S/R levels
+    supports = sr_analysis.get('supports', [])
+    resistances = sr_analysis.get('resistances', [])
+    key_support = sr_analysis.get('key_support', 0)
+    key_resistance = sr_analysis.get('key_resistance', 0)
+    current_price = sr_analysis.get('current_price', 0)
+
+    # Create figure with secondary y-axis for volume
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.7, 0.3],
+        subplot_titles=('', '')
+    )
+
+    # Candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=df['date'],
+            open=df['open_price'],
+            high=df['high_price'],
+            low=df['low_price'],
+            close=df['close_price'],
+            name='Price',
+            increasing_line_color='#00C853',
+            decreasing_line_color='#FF1744',
+            increasing_fillcolor='#00C853',
+            decreasing_fillcolor='#FF1744'
+        ),
+        row=1, col=1
+    )
+
+    # Volume bars with color based on price direction
+    colors = ['#00C853' if close >= open_p else '#FF1744'
+              for close, open_p in zip(df['close_price'], df['open_price'])]
+
+    fig.add_trace(
+        go.Bar(
+            x=df['date'],
+            y=df['volume'],
+            name='Volume',
+            marker_color=colors,
+            opacity=0.7
+        ),
+        row=2, col=1
+    )
+
+    # Add average volume line
+    avg_volume = df['volume'].mean()
+    fig.add_hline(
+        y=avg_volume,
+        line_dash="dot",
+        line_color="yellow",
+        line_width=1,
+        annotation_text=f"Avg Vol: {avg_volume/1e6:.1f}M",
+        annotation_position="right",
+        row=2, col=1
+    )
+
+    # Add Support lines (green)
+    support_colors = ['#00E676', '#00C853', '#00A844', '#008B35', '#006D27']
+    for i, sup in enumerate(supports[:5]):
+        level = sup['level']
+        color = support_colors[min(i, len(support_colors)-1)]
+        confirmations = sup.get('confirmations', 1)
+        line_width = 1 + confirmations  # Thicker for multi-confirmed
+
+        fig.add_hline(
+            y=level,
+            line_dash="dash",
+            line_color=color,
+            line_width=line_width,
+            annotation_text=f"S: {level:,.0f}",
+            annotation_position="left",
+            annotation_font_color=color,
+            annotation_font_size=10,
+            row=1, col=1
+        )
+
+    # Add Resistance lines (red)
+    resistance_colors = ['#FF5252', '#FF1744', '#D50000', '#B71C1C', '#8B0000']
+    for i, res in enumerate(resistances[:5]):
+        level = res['level']
+        color = resistance_colors[min(i, len(resistance_colors)-1)]
+        confirmations = res.get('confirmations', 1)
+        line_width = 1 + confirmations
+
+        fig.add_hline(
+            y=level,
+            line_dash="dash",
+            line_color=color,
+            line_width=line_width,
+            annotation_text=f"R: {level:,.0f}",
+            annotation_position="right",
+            annotation_font_color=color,
+            annotation_font_size=10,
+            row=1, col=1
+        )
+
+    # Add current price line (blue)
+    fig.add_hline(
+        y=current_price,
+        line_dash="solid",
+        line_color="#2196F3",
+        line_width=2,
+        annotation_text=f"Current: {current_price:,.0f}",
+        annotation_position="right",
+        annotation_font_color="#2196F3",
+        row=1, col=1
+    )
+
+    # Update layout
+    fig.update_layout(
+        title=dict(
+            text=f'{stock_code} - Support & Resistance Chart ({days} days)',
+            font=dict(size=16, color='white')
+        ),
+        template='plotly_dark',
+        height=500,
+        margin=dict(l=60, r=60, t=50, b=30),
+        showlegend=False,
+        xaxis_rangeslider_visible=False,
+        hovermode='x unified'
+    )
+
+    # Update y-axes
+    fig.update_yaxes(title_text="Price (Rp)", row=1, col=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)')
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': True, 'scrollZoom': True})
 
 
 def create_sr_levels_card(sr_analysis, stock_code):
@@ -3043,23 +3213,48 @@ def create_sr_levels_card(sr_analysis, stock_code):
     source_colors = {
         'Volume Profile': '#17a2b8',  # info/cyan
         'Price Bounce': '#ffc107',    # warning/yellow
-        'Broker Position': '#6f42c1'  # purple
+        'Broker Position': '#6f42c1',  # purple
+        'Multi-Confirmed': '#28a745'   # green for multi-confirmed
     }
 
     def create_level_badge(level_data):
-        """Create badge for a support/resistance level"""
+        """Create badge for a support/resistance level with multi-confirmation indicator"""
         source = level_data.get('source', '')
+        confirmations = level_data.get('confirmations', 1)
+        strength = level_data.get('strength', 0)
         color = source_colors.get(source, '#6c757d')
+
+        # Multi-confirmation indicator
+        confirm_badge = None
+        if confirmations >= 2:
+            confirm_badge = dbc.Badge(
+                f"{confirmations}x",
+                color="success",
+                className="me-1",
+                style={"fontSize": "9px"}
+            )
+
+        # Strength indicator (stars based on score)
+        strength_stars = ""
+        if strength >= 100:
+            strength_stars = "★★★"
+        elif strength >= 50:
+            strength_stars = "★★"
+        elif strength >= 20:
+            strength_stars = "★"
+
         return html.Div([
             html.Span(
                 f"Rp {level_data['level']:,.0f}",
                 className="fw-bold me-2"
             ),
+            confirm_badge,
             dbc.Badge(
                 source,
                 style={"backgroundColor": color, "fontSize": "10px"},
                 className="me-2"
             ),
+            html.Span(strength_stars, className="text-warning me-2", style={"fontSize": "10px"}) if strength_stars else None,
             html.Small(
                 level_data.get('description', ''),
                 className="text-muted"
@@ -3176,6 +3371,181 @@ def create_sr_levels_card(sr_analysis, stock_code):
             ], className="text-muted")
         ])
     ], className="mb-4")
+
+
+def create_top_brokers_card(avg_buy_analysis, stock_code):
+    """
+    Create Top 10 Broker by Buy Value card
+    Menampilkan broker dengan buy value terbesar dalam 60 hari terakhir
+    """
+    if 'error' in avg_buy_analysis:
+        return dbc.Card([
+            dbc.CardHeader(html.H5("Top 10 Broker by Buy Value", className="mb-0")),
+            dbc.CardBody([html.P("Data tidak tersedia", className="text-muted")])
+        ], className="mb-4", color="dark")
+
+    brokers = avg_buy_analysis.get('brokers', [])[:10]
+    current_price = avg_buy_analysis.get('current_price', 0)
+
+    # Get sensitive brokers list
+    try:
+        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+        sensitive_brokers = set(broker_sens.get('top_5_brokers', []))
+    except:
+        sensitive_brokers = set()
+
+    if not brokers:
+        return dbc.Card([
+            dbc.CardHeader(html.H5("Top 10 Broker by Buy Value", className="mb-0")),
+            dbc.CardBody([html.P("Tidak ada data broker", className="text-muted")])
+        ], className="mb-4", color="dark")
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="fas fa-users me-2"),
+                "Top 10 Broker by Buy Value ",
+                html.Small("(60 hari terakhir)", className="text-muted")
+            ], className="mb-0"),
+        ]),
+        dbc.CardBody([
+            # Current price reference
+            html.Div([
+                html.Strong("Harga Sekarang: "),
+                html.Span(f"Rp {current_price:,.0f}", className="text-info")
+            ], className="mb-3"),
+
+            # Broker type legend
+            html.Div([
+                html.Small("Legenda Broker: ", className="text-muted me-2"),
+                html.Span([
+                    html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['FOREIGN'], "fontSize": "10px"}),
+                    "Asing "
+                ], className="me-2", style={"fontSize": "10px"}),
+                html.Span([
+                    html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['BUMN'], "fontSize": "10px"}),
+                    "BUMN "
+                ], className="me-2", style={"fontSize": "10px"}),
+                html.Span([
+                    html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['LOCAL'], "fontSize": "10px"}),
+                    "Lokal "
+                ], style={"fontSize": "10px"}),
+            ], className="mb-3"),
+
+            # Top 10 Brokers Table
+            html.Table([
+                html.Thead(html.Tr([
+                    html.Th("Broker", style={"width": "80px"}),
+                    html.Th("Tipe", style={"width": "120px"}),
+                    html.Th("Avg Buy", style={"width": "100px"}),
+                    html.Th("Buy Value", style={"width": "90px"}),
+                    html.Th("Net", style={"width": "80px"}),
+                    html.Th("Floating", style={"width": "80px"}),
+                    html.Th("Status", style={"width": "70px"})
+                ])),
+                html.Tbody([
+                    html.Tr([
+                        html.Td(colored_broker(b['broker_code'], with_badge=True)),
+                        html.Td(html.Span(
+                            get_broker_info(b['broker_code'])['type_name'],
+                            className=f"broker-{get_broker_type(b['broker_code']).lower()}"
+                        )),
+                        # Avg Buy - orange background for sensitive brokers
+                        html.Td(
+                            html.Span(
+                                f"Rp {b['avg_buy_price']:,.0f}",
+                                style={"backgroundColor": "#FF8C00", "color": "#000", "fontWeight": "bold", "padding": "2px 6px", "borderRadius": "4px", "display": "inline-block"}
+                            ) if b['broker_code'] in sensitive_brokers else f"Rp {b['avg_buy_price']:,.0f}"
+                        ),
+                        html.Td(f"{b['total_buy_value']/1e9:.1f}B"),
+                        # Net - orange background for sensitive brokers
+                        html.Td(
+                            html.Span(
+                                f"{b['net_value']/1e9:+.1f}B",
+                                style={"backgroundColor": "#FF8C00", "color": "#000", "fontWeight": "bold", "padding": "2px 6px", "borderRadius": "4px", "display": "inline-block"}
+                            ) if b['broker_code'] in sensitive_brokers else html.Span(
+                                f"{b['net_value']/1e9:+.1f}B",
+                                className="text-success" if b['net_value'] > 0 else "text-danger"
+                            )
+                        ),
+                        html.Td(f"{b.get('floating_pct', 0):+.1f}%", className="text-success" if b.get('floating_pct', 0) > 0 else "text-danger"),
+                        html.Td(b.get('position', '-'), className="text-success" if b.get('position') == 'PROFIT' else "text-danger" if b.get('position') == 'LOSS' else "")
+                    ]) for b in brokers
+                ])
+            ], className="table table-sm table-dark table-hover", style={"fontSize": "12px"}),
+
+            html.Hr(),
+
+            # Interpretation
+            html.Small([
+                html.Strong("Cara Baca: "),
+                html.Br(),
+                "• ", html.Span("Avg Buy", className="text-info"), " = Rata-rata harga beli broker dalam 60 hari",
+                html.Br(),
+                "• ", html.Span("Floating +%", className="text-success"), " = Broker sedang profit",
+                html.Br(),
+                "• ", html.Span("Floating -%", className="text-danger"), " = Broker sedang loss (mungkin defend/averaging)",
+                html.Br(),
+                "• Net positif = akumulasi, Net negatif = distribusi",
+                html.Br(),
+                "• ", html.Span("Background Orange", style={"backgroundColor": "#FF8C00", "color": "#000", "padding": "1px 4px", "borderRadius": "3px"}), " = Broker Sensitive (pola akumulasi akurat)"
+            ], className="text-muted")
+        ])
+    ], className="mb-4", color="dark", outline=True)
+
+
+# ============================================================
+# PAGE: SUPPORT & RESISTANCE (New Sub-menu from Analysis)
+# ============================================================
+
+def create_support_resistance_page(stock_code='CDIA'):
+    """Create Support & Resistance analysis page - moved from Analysis page"""
+    try:
+        # Get Avg Buy Analysis
+        avg_buy_analysis = analyze_avg_buy_position(stock_code)
+
+        # Get Support/Resistance Analysis (Multi-Method)
+        sr_analysis = analyze_support_resistance(stock_code)
+
+    except Exception as e:
+        return html.Div([
+            dbc.Alert(f"Error loading S/R analysis for {stock_code}: {str(e)}", color="danger"),
+            html.P("Pastikan data sudah diupload dengan benar")
+        ])
+
+    return html.Div([
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-layer-group me-2"),
+                f"Support & Resistance - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_submenu_nav('support-resistance', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
+
+        # ========== S/R CHART WITH VOLUME ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.H5([
+                    html.I(className="fas fa-chart-area me-2"),
+                    "Price Chart with S/R Levels"
+                ], className="mb-0"),
+            ]),
+            dbc.CardBody([
+                create_sr_chart(stock_code, sr_analysis, days=60)
+            ], className="p-2")
+        ], className="mb-4", color="dark"),
+
+        # ========== SUPPORT/RESISTANCE LEVELS (Multi-Method) ==========
+        create_sr_levels_card(sr_analysis, stock_code),
+
+        # ========== AVG BUY ANALYSIS ==========
+        create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis),
+
+        # ========== TOP 10 BROKER BY BUY VALUE ==========
+        create_top_brokers_card(avg_buy_analysis, stock_code),
+
+    ], className="container-fluid p-4")
 
 
 # ============================================================
@@ -4002,6 +4372,304 @@ def create_broker_watchlist(stock_code='CDIA'):
 
 
 # ============================================================
+# PAGE: COMPANY PROFILE
+# ============================================================
+
+def get_stock_profile(stock_code: str) -> dict:
+    """Get stock profile from database"""
+    import json
+    query = """
+        SELECT * FROM stock_profile WHERE stock_code = %s
+    """
+    result = execute_query(query, (stock_code,))
+    if result and len(result) > 0:
+        row = result[0]
+        # Parse directors/commissioners - could be string or already parsed
+        directors = row['directors']
+        if isinstance(directors, str):
+            directors = json.loads(directors) if directors else []
+        commissioners = row['commissioners']
+        if isinstance(commissioners, str):
+            commissioners = json.loads(commissioners) if commissioners else []
+        shareholder_history = row['shareholder_history']
+        if isinstance(shareholder_history, str):
+            shareholder_history = json.loads(shareholder_history) if shareholder_history else []
+
+        return {
+            'stock_code': row['stock_code'],
+            'company_name': row['company_name'],
+            'listing_board': row['listing_board'],
+            'sector': row['sector'],
+            'subsector': row['subsector'],
+            'industry': row['industry'],
+            'business_activity': row['business_activity'],
+            'listing_date': row['listing_date'],
+            'effective_date': row['effective_date'],
+            'nominal_value': float(row['nominal_value']) if row['nominal_value'] else None,
+            'ipo_price': float(row['ipo_price']) if row['ipo_price'] else None,
+            'ipo_shares': row['ipo_shares'],
+            'ipo_amount': float(row['ipo_amount']) if row['ipo_amount'] else None,
+            'underwriter': row['underwriter'],
+            'share_registrar': row['share_registrar'],
+            'company_background': row['company_background'],
+            'major_shareholder': row['major_shareholder'],
+            'major_shareholder_pct': float(row['major_shareholder_pct']) if row['major_shareholder_pct'] else 0,
+            'public_pct': float(row['public_pct']) if row['public_pct'] else 0,
+            'total_shares': row['total_shares'],
+            'president_director': row['president_director'],
+            'president_commissioner': row['president_commissioner'],
+            'directors': directors,
+            'commissioners': commissioners,
+            'shareholder_history': shareholder_history,
+        }
+    return {}
+
+
+def create_company_profile_page(stock_code='CDIA'):
+    """Create Company Profile page with attractive, colorful design"""
+    profile = get_stock_profile(stock_code)
+
+    if not profile:
+        return html.Div([
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.H4([
+                            html.I(className="fas fa-building me-2"),
+                            f"Company Profile - {stock_code}"
+                        ], className="mb-0 d-inline-block me-3"),
+                        dcc.Link(
+                            dbc.Button([
+                                html.I(className="fas fa-arrow-left me-2"),
+                                "Dashboard"
+                            ], color="secondary", size="sm", outline=True),
+                            href="/dashboard"
+                        )
+                    ], className="d-flex align-items-center")
+                ], width=12)
+            ], className="mb-4"),
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                f"Belum ada data profile untuk {stock_code}. ",
+                "Silakan upload file Excel yang berisi data profile di kolom AI-AJ."
+            ], color="info")
+        ])
+
+    # Define colors for sections
+    colors = {
+        'identity': {'bg': '#E8F6F3', 'header': '#1ABC9C', 'border': '#16A085'},
+        'history': {'bg': '#FEF9E7', 'header': '#F39C12', 'border': '#E67E22'},
+        'background': {'bg': '#EBF5FB', 'header': '#3498DB', 'border': '#2980B9'},
+        'shareholders': {'bg': '#F5EEF8', 'header': '#9B59B6', 'border': '#8E44AD'},
+        'directors': {'bg': '#FDEDEC', 'header': '#E74C3C', 'border': '#C0392B'},
+        'commissioners': {'bg': '#E8F8F5', 'header': '#1ABC9C', 'border': '#16A085'},
+    }
+
+    return html.Div([
+        # Page Header with back button
+        dbc.Row([
+            dbc.Col([
+                html.Div([
+                    html.H4([
+                        html.I(className="fas fa-building me-2", style={'color': '#3498DB'}),
+                        f"Company Profile - {stock_code}"
+                    ], className="mb-0 d-inline-block me-3"),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-arrow-left me-2"),
+                            "Dashboard"
+                        ], color="secondary", size="sm", outline=True),
+                        href="/dashboard"
+                    )
+                ], className="d-flex align-items-center")
+            ], width=12)
+        ], className="mb-4"),
+
+        # Company Name Banner
+        dbc.Card([
+            dbc.CardBody([
+                html.H3(profile.get('company_name', stock_code), className="text-center mb-1", style={'color': '#2C3E50'}),
+                html.P(f"Kode Saham: {profile.get('stock_code', stock_code)}", className="text-center text-muted mb-0")
+            ])
+        ], className="mb-4", style={'background': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', 'border': 'none'}),
+
+        dbc.Row([
+            # Left Column
+            dbc.Col([
+                # Identity Card
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-id-card me-2"),
+                        "Identitas Perusahaan"
+                    ], style={'backgroundColor': colors['identity']['header'], 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.Div([
+                            html.Div([
+                                html.Small("Papan Pencatatan", className="text-muted"),
+                                html.P(profile.get('listing_board', '-'), className="mb-2 fw-bold")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small("Sektor", className="text-muted"),
+                                html.P(profile.get('sector', '-'), className="mb-2 fw-bold")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small("Sub Sektor", className="text-muted"),
+                                html.P(profile.get('subsector', '-'), className="mb-2 fw-bold")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small("Industri", className="text-muted"),
+                                html.P(profile.get('industry', '-'), className="mb-2 fw-bold")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small("Aktivitas Bisnis", className="text-muted"),
+                                html.P(profile.get('business_activity', '-'), className="mb-0", style={'fontSize': '0.9rem'})
+                            ])
+                        ])
+                    ], style={'backgroundColor': colors['identity']['bg']})
+                ], className="mb-3", style={'border': f"2px solid {colors['identity']['border']}"}),
+
+                # IPO History Card
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-history me-2"),
+                        "Sejarah & IPO"
+                    ], style={'backgroundColor': colors['history']['header'], 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Tanggal Listing", className="text-muted"),
+                                html.P(str(profile.get('listing_date', '-')) if profile.get('listing_date') else '-', className="mb-2 fw-bold")
+                            ], width=6),
+                            dbc.Col([
+                                html.Small("Harga IPO", className="text-muted"),
+                                html.P(f"Rp {profile.get('ipo_price', 0):,.0f}" if profile.get('ipo_price') else '-', className="mb-2 fw-bold")
+                            ], width=6),
+                        ]),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Saham IPO", className="text-muted"),
+                                html.P(f"{profile.get('ipo_shares', 0):,.0f}" if profile.get('ipo_shares') else '-', className="mb-2 fw-bold")
+                            ], width=6),
+                            dbc.Col([
+                                html.Small("Dana IPO", className="text-muted"),
+                                html.P(f"Rp {profile.get('ipo_amount', 0)/1e9:,.1f} M" if profile.get('ipo_amount') else '-', className="mb-2 fw-bold")
+                            ], width=6),
+                        ]),
+                        html.Hr(),
+                        html.Div([
+                            html.Small("Penjamin Emisi", className="text-muted"),
+                            html.P(profile.get('underwriter', '-'), className="mb-2", style={'fontSize': '0.85rem'})
+                        ]),
+                        html.Div([
+                            html.Small("BAE (Biro Administrasi Efek)", className="text-muted"),
+                            html.P(profile.get('share_registrar', '-'), className="mb-0", style={'fontSize': '0.85rem'})
+                        ])
+                    ], style={'backgroundColor': colors['history']['bg']})
+                ], className="mb-3", style={'border': f"2px solid {colors['history']['border']}"}),
+
+                # Company Background
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-book-open me-2"),
+                        "Latar Belakang"
+                    ], style={'backgroundColor': colors['background']['header'], 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.P(profile.get('company_background', '-'), style={'textAlign': 'justify', 'fontSize': '0.9rem'})
+                    ], style={'backgroundColor': colors['background']['bg']})
+                ], className="mb-3", style={'border': f"2px solid {colors['background']['border']}"})
+            ], md=6),
+
+            # Right Column
+            dbc.Col([
+                # Shareholders Card
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-users me-2"),
+                        "Pemegang Saham"
+                    ], style={'backgroundColor': colors['shareholders']['header'], 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        # Major shareholder
+                        html.Div([
+                            html.Div([
+                                html.Span(profile.get('major_shareholder', '-'), className="fw-bold"),
+                                html.Span(f" {profile.get('major_shareholder_pct', 0):.2f}%", className="text-success fw-bold ms-2")
+                            ], className="d-flex justify-content-between align-items-center"),
+                            dbc.Progress(value=profile.get('major_shareholder_pct', 0), color="success", className="mb-2", style={'height': '8px'})
+                        ], className="mb-3"),
+                        # Public
+                        html.Div([
+                            html.Div([
+                                html.Span("Publik", className="fw-bold"),
+                                html.Span(f" {profile.get('public_pct', 0):.2f}%", className="text-info fw-bold ms-2")
+                            ], className="d-flex justify-content-between align-items-center"),
+                            dbc.Progress(value=profile.get('public_pct', 0), color="info", className="mb-2", style={'height': '8px'})
+                        ], className="mb-3"),
+                        html.Hr(),
+                        html.Div([
+                            html.Small("Total Saham Beredar", className="text-muted"),
+                            html.P(f"{profile.get('total_shares', 0):,.0f} lembar" if profile.get('total_shares') else '-', className="fw-bold mb-0")
+                        ]),
+                        # Shareholder history
+                        html.Hr() if profile.get('shareholder_history') else None,
+                        html.Div([
+                            html.Small("Jumlah Investor", className="text-muted d-block mb-2"),
+                            html.Div([
+                                html.Div([
+                                    html.Small(h.get('period', ''), className="text-muted"),
+                                    # Parse count to color the change: green for +, red for -
+                                    html.Span([
+                                        html.Span(h.get('count', '').split('(')[0].strip(), className="fw-bold"),
+                                        html.Span(
+                                            f" ({h.get('count', '').split('(')[1]}" if '(' in h.get('count', '') else '',
+                                            className="fw-bold text-success" if '+' in h.get('count', '') else "fw-bold text-danger"
+                                        )
+                                    ], className="ms-2")
+                                ], className="mb-1")
+                                for h in (profile.get('shareholder_history', []) or [])[:4]
+                            ])
+                        ]) if profile.get('shareholder_history') else None
+                    ], style={'backgroundColor': colors['shareholders']['bg']})
+                ], className="mb-3", style={'border': f"2px solid {colors['shareholders']['border']}"}),
+
+                # Board of Directors
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-user-tie me-2"),
+                        "Direksi"
+                    ], style={'backgroundColor': colors['directors']['header'], 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.Div([
+                            html.Div([
+                                html.Small(d.get('position', ''), className="text-muted", style={'fontSize': '0.75rem'}),
+                                html.P(d.get('name', ''), className="mb-2 fw-bold", style={'fontSize': '0.9rem'})
+                            ], className="mb-1")
+                            for d in (profile.get('directors', []) or [])
+                        ]) if profile.get('directors') else html.P("-", className="text-muted")
+                    ], style={'backgroundColor': colors['directors']['bg']})
+                ], className="mb-3", style={'border': f"2px solid {colors['directors']['border']}"}),
+
+                # Board of Commissioners
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-user-shield me-2"),
+                        "Komisaris"
+                    ], style={'backgroundColor': colors['commissioners']['header'], 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.Div([
+                            html.Div([
+                                html.Small(c.get('position', ''), className="text-muted", style={'fontSize': '0.75rem'}),
+                                html.P(c.get('name', ''), className="mb-2 fw-bold", style={'fontSize': '0.9rem'})
+                            ], className="mb-1")
+                            for c in (profile.get('commissioners', []) or [])
+                        ]) if profile.get('commissioners') else html.P("-", className="text-muted")
+                    ], style={'backgroundColor': colors['commissioners']['bg']})
+                ], className="mb-3", style={'border': f"2px solid {colors['commissioners']['border']}"})
+            ], md=6)
+        ])
+    ])
+
+
+# ============================================================
 # PAGE: BROKER MOVEMENT (Movement Alert + Watchlist)
 # ============================================================
 
@@ -4378,6 +5046,463 @@ def create_sensitive_broker_page(stock_code='CDIA'):
 
 
 # ============================================================
+# PAGE: FUNDAMENTAL ANALYSIS
+# ============================================================
+
+def get_stock_fundamental(stock_code: str) -> dict:
+    """Get stock fundamental from database"""
+    query = """
+        SELECT * FROM stock_fundamental
+        WHERE stock_code = %s
+        ORDER BY report_date DESC
+        LIMIT 1
+    """
+    result = execute_query(query, (stock_code,))
+    if result and len(result) > 0:
+        row = result[0]
+        return {
+            'stock_code': row['stock_code'],
+            'report_date': row['report_date'],
+            'issued_shares': row['issued_shares'],
+            'market_cap': float(row['market_cap']) if row['market_cap'] else 0,
+            'stock_index': float(row['stock_index']) if row['stock_index'] else 0,
+            'sales': float(row['sales']) if row['sales'] else 0,
+            'assets': float(row['assets']) if row['assets'] else 0,
+            'liability': float(row['liability']) if row['liability'] else 0,
+            'equity': float(row['equity']) if row['equity'] else 0,
+            'capex': float(row['capex']) if row['capex'] else 0,
+            'operating_expense': float(row['operating_expense']) if row['operating_expense'] else 0,
+            'operating_cashflow': float(row['operating_cashflow']) if row['operating_cashflow'] else 0,
+            'net_cashflow': float(row['net_cashflow']) if row['net_cashflow'] else 0,
+            'operating_profit': float(row['operating_profit']) if row['operating_profit'] else 0,
+            'net_profit': float(row['net_profit']) if row['net_profit'] else 0,
+            'dps': float(row['dps']) if row['dps'] else 0,
+            'eps': float(row['eps']) if row['eps'] else 0,
+            'rps': float(row['rps']) if row['rps'] else 0,
+            'bvps': float(row['bvps']) if row['bvps'] else 0,
+            'cfps': float(row['cfps']) if row['cfps'] else 0,
+            'ceps': float(row['ceps']) if row['ceps'] else 0,
+            'navs': float(row['navs']) if row['navs'] else 0,
+            'dividend_yield': float(row['dividend_yield']) if row['dividend_yield'] else 0,
+            'per': float(row['per']) if row['per'] else 0,
+            'psr': float(row['psr']) if row['psr'] else 0,
+            'pbvr': float(row['pbvr']) if row['pbvr'] else 0,
+            'pcfr': float(row['pcfr']) if row['pcfr'] else 0,
+            'dpr': float(row['dpr']) if row['dpr'] else 0,
+            'gpm': float(row['gpm']) if row['gpm'] else 0,
+            'opm': float(row['opm']) if row['opm'] else 0,
+            'npm': float(row['npm']) if row['npm'] else 0,
+            'ebitm': float(row['ebitm']) if row['ebitm'] else 0,
+            'roe': float(row['roe']) if row['roe'] else 0,
+            'roa': float(row['roa']) if row['roa'] else 0,
+            'der': float(row['der']) if row['der'] else 0,
+            'cash_ratio': float(row['cash_ratio']) if row['cash_ratio'] else 0,
+            'quick_ratio': float(row['quick_ratio']) if row['quick_ratio'] else 0,
+            'current_ratio': float(row['current_ratio']) if row['current_ratio'] else 0,
+        }
+    return {}
+
+
+def get_fundamental_summary(fund: dict) -> dict:
+    """Generate fundamental summary with ratings"""
+    if not fund:
+        return {}
+
+    # Valuation Analysis
+    per = fund.get('per', 0)
+    pbvr = fund.get('pbvr', 0)
+    psr = fund.get('psr', 0)
+
+    if per > 0 and per < 15:
+        valuation_rating = 'Murah'
+        valuation_color = 'success'
+    elif per >= 15 and per < 25:
+        valuation_rating = 'Wajar'
+        valuation_color = 'info'
+    elif per >= 25 and per < 50:
+        valuation_rating = 'Premium'
+        valuation_color = 'warning'
+    else:
+        valuation_rating = 'Mahal'
+        valuation_color = 'danger'
+
+    # Profitability Analysis
+    npm = fund.get('npm', 0) * 100
+    roe = fund.get('roe', 0) * 100
+    gpm = fund.get('gpm', 0) * 100
+
+    if npm > 20:
+        profit_rating = 'Sangat Baik'
+        profit_color = 'success'
+    elif npm > 10:
+        profit_rating = 'Baik'
+        profit_color = 'info'
+    elif npm > 5:
+        profit_rating = 'Cukup'
+        profit_color = 'warning'
+    else:
+        profit_rating = 'Rendah'
+        profit_color = 'danger'
+
+    # Liquidity Analysis
+    current_ratio = fund.get('current_ratio', 0) * 100
+    der = fund.get('der', 0) * 100
+
+    if current_ratio > 150 and der < 100:
+        liquidity_rating = 'Sehat'
+        liquidity_color = 'success'
+    elif current_ratio > 100:
+        liquidity_rating = 'Cukup'
+        liquidity_color = 'info'
+    else:
+        liquidity_rating = 'Perlu Perhatian'
+        liquidity_color = 'warning'
+
+    # Overall Score
+    score = 0
+    if per > 0 and per < 25: score += 25
+    elif per > 0 and per < 50: score += 15
+    if npm > 10: score += 25
+    elif npm > 5: score += 15
+    if roe > 10: score += 25
+    elif roe > 5: score += 15
+    if current_ratio > 100: score += 25
+    elif current_ratio > 50: score += 15
+
+    if score >= 80:
+        overall = 'SANGAT BAIK'
+        overall_color = 'success'
+    elif score >= 60:
+        overall = 'BAIK'
+        overall_color = 'info'
+    elif score >= 40:
+        overall = 'CUKUP'
+        overall_color = 'warning'
+    else:
+        overall = 'KURANG'
+        overall_color = 'danger'
+
+    return {
+        'valuation_rating': valuation_rating,
+        'valuation_color': valuation_color,
+        'profit_rating': profit_rating,
+        'profit_color': profit_color,
+        'liquidity_rating': liquidity_rating,
+        'liquidity_color': liquidity_color,
+        'overall': overall,
+        'overall_color': overall_color,
+        'score': score
+    }
+
+
+def create_fundamental_page(stock_code='CDIA'):
+    """Create Fundamental Analysis page with attractive design"""
+    fund = get_stock_fundamental(stock_code)
+    summary = get_fundamental_summary(fund)
+
+    if not fund:
+        return html.Div([
+            # Page Header with submenu navigation
+            html.Div([
+                html.H4([
+                    html.I(className="fas fa-chart-line me-2"),
+                    f"Fundamental Analysis - {stock_code}"
+                ], className="mb-0 d-inline-block me-3"),
+                create_submenu_nav('fundamental', stock_code),
+            ], className="d-flex align-items-center flex-wrap mb-4"),
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                f"Belum ada data fundamental untuk {stock_code}. ",
+                "Silakan upload file Excel yang berisi data fundamental di kolom AL-AM."
+            ], color="info")
+        ])
+
+    def format_trillion(val):
+        if val >= 1e12:
+            return f"Rp {val/1e12:,.2f} T"
+        elif val >= 1e9:
+            return f"Rp {val/1e9:,.2f} M"
+        else:
+            return f"Rp {val:,.0f}"
+
+    return html.Div([
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-chart-line me-2", style={'color': '#2E86AB'}),
+                f"Fundamental Analysis - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_submenu_nav('fundamental', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
+
+        # ============ SUMMARY HERO CARD ============
+        dbc.Card([
+            dbc.CardBody([
+                dbc.Row([
+                    # Overall Score
+                    dbc.Col([
+                        html.Div([
+                            html.H1(f"{summary.get('score', 0)}",
+                                   className=f"display-2 text-{summary.get('overall_color', 'secondary')} mb-0 fw-bold"),
+                            html.P("FUNDAMENTAL SCORE", className="text-muted mb-1"),
+                            dbc.Badge(summary.get('overall', 'N/A'),
+                                     color=summary.get('overall_color', 'secondary'),
+                                     className="fs-6 px-3 py-2")
+                        ], className="text-center")
+                    ], md=3),
+                    # Summary Cards
+                    dbc.Col([
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.H6("Valuasi", className="text-muted mb-1"),
+                                        html.H4(summary.get('valuation_rating', '-'),
+                                               className=f"text-{summary.get('valuation_color', 'secondary')} mb-0"),
+                                        html.Small(f"PER: {fund.get('per', 0):.1f}x | PBV: {fund.get('pbvr', 0):.1f}x")
+                                    ], className="text-center py-2")
+                                ], style={'border': f"2px solid", 'borderColor': 'var(--bs-' + summary.get('valuation_color', 'secondary') + ')'})
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.H6("Profitabilitas", className="text-muted mb-1"),
+                                        html.H4(summary.get('profit_rating', '-'),
+                                               className=f"text-{summary.get('profit_color', 'secondary')} mb-0"),
+                                        html.Small(f"NPM: {fund.get('npm', 0)*100:.1f}% | ROE: {fund.get('roe', 0)*100:.1f}%")
+                                    ], className="text-center py-2")
+                                ], style={'border': f"2px solid", 'borderColor': 'var(--bs-' + summary.get('profit_color', 'secondary') + ')'})
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.H6("Likuiditas", className="text-muted mb-1"),
+                                        html.H4(summary.get('liquidity_rating', '-'),
+                                               className=f"text-{summary.get('liquidity_color', 'secondary')} mb-0"),
+                                        html.Small(f"CR: {fund.get('current_ratio', 0)*100:.0f}% | DER: {fund.get('der', 0)*100:.0f}%")
+                                    ], className="text-center py-2")
+                                ], style={'border': f"2px solid", 'borderColor': 'var(--bs-' + summary.get('liquidity_color', 'secondary') + ')'})
+                            ], md=4),
+                        ])
+                    ], md=9)
+                ])
+            ])
+        ], className="mb-4", style={'background': 'linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%)'}),
+
+        # ============ KEY METRICS ROW ============
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6([html.I(className="fas fa-building me-2 text-primary"), "Kapitalisasi Pasar"], className="mb-2"),
+                        html.H4(format_trillion(fund.get('market_cap', 0)), className="text-primary mb-0")
+                    ])
+                ], className="h-100", style={'borderLeft': '4px solid #2E86AB'})
+            ], md=3, className="mb-3"),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6([html.I(className="fas fa-coins me-2 text-success"), "Laba Bersih"], className="mb-2"),
+                        html.H4(format_trillion(fund.get('net_profit', 0)), className="text-success mb-0")
+                    ])
+                ], className="h-100", style={'borderLeft': '4px solid #58B368'})
+            ], md=3, className="mb-3"),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6([html.I(className="fas fa-chart-bar me-2 text-info"), "Total Aset"], className="mb-2"),
+                        html.H4(format_trillion(fund.get('assets', 0)), className="text-info mb-0")
+                    ])
+                ], className="h-100", style={'borderLeft': '4px solid #00B4D8'})
+            ], md=3, className="mb-3"),
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.H6([html.I(className="fas fa-hand-holding-usd me-2 text-warning"), "Total Ekuitas"], className="mb-2"),
+                        html.H4(format_trillion(fund.get('equity', 0)), className="text-warning mb-0")
+                    ])
+                ], className="h-100", style={'borderLeft': '4px solid #F18F01'})
+            ], md=3, className="mb-3"),
+        ]),
+
+        dbc.Row([
+            # Left Column - Financial Position & Per Share
+            dbc.Col([
+                # Financial Position
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-balance-scale me-2"),
+                        "Posisi Keuangan"
+                    ], style={'backgroundColor': '#F18F01', 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.Table([
+                            html.Tbody([
+                                html.Tr([html.Td("Total Pendapatan", className="fw-bold"), html.Td(format_trillion(fund.get('sales', 0)), className="text-end")]),
+                                html.Tr([html.Td("Total Aset", className="fw-bold"), html.Td(format_trillion(fund.get('assets', 0)), className="text-end")]),
+                                html.Tr([html.Td("Total Kewajiban", className="fw-bold"), html.Td(format_trillion(fund.get('liability', 0)), className="text-end")]),
+                                html.Tr([html.Td("Total Ekuitas", className="fw-bold"), html.Td(format_trillion(fund.get('equity', 0)), className="text-end")]),
+                                html.Tr([html.Td("Belanja Modal", className="fw-bold"), html.Td(format_trillion(fund.get('capex', 0)), className="text-end")]),
+                                html.Tr([html.Td("Laba Operasi", className="fw-bold"), html.Td(format_trillion(fund.get('operating_profit', 0)), className="text-end")]),
+                                html.Tr([html.Td("Laba Bersih", className="fw-bold"), html.Td(format_trillion(fund.get('net_profit', 0)), className="text-end text-success")]),
+                            ])
+                        ], className="table table-sm table-borderless mb-0")
+                    ], style={'backgroundColor': '#FFF3E0'})
+                ], className="mb-3"),
+
+                # Per Share Data
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-chart-pie me-2"),
+                        "Data Per Lembar Saham"
+                    ], style={'backgroundColor': '#9B5DE5', 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.Table([
+                            html.Tbody([
+                                html.Tr([html.Td("EPS (Laba/Saham)", className="fw-bold"), html.Td(f"Rp {fund.get('eps', 0):,.2f}", className="text-end")]),
+                                html.Tr([html.Td("BVPS (Nilai Buku/Saham)", className="fw-bold"), html.Td(f"Rp {fund.get('bvps', 0):,.2f}", className="text-end")]),
+                                html.Tr([html.Td("DPS (Dividen/Saham)", className="fw-bold"), html.Td(f"Rp {fund.get('dps', 0):,.0f}", className="text-end")]),
+                                html.Tr([html.Td("RPS (Pendapatan/Saham)", className="fw-bold"), html.Td(f"Rp {fund.get('rps', 0):,.2f}", className="text-end")]),
+                                html.Tr([html.Td("NAVS (Aset Bersih/Saham)", className="fw-bold"), html.Td(f"Rp {fund.get('navs', 0):,.2f}", className="text-end")]),
+                            ])
+                        ], className="table table-sm table-borderless mb-0")
+                    ], style={'backgroundColor': '#F3E8FF'})
+                ], className="mb-3"),
+            ], md=6),
+
+            # Right Column - Valuation & Ratios
+            dbc.Col([
+                # Valuation Metrics
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-tags me-2"),
+                        "Metrik Valuasi"
+                    ], style={'backgroundColor': '#00B4D8', 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.H3(f"{fund.get('per', 0):.1f}x", className="mb-0 text-primary"),
+                                    html.Small("PER", className="text-muted")
+                                ], className="text-center")
+                            ], width=4),
+                            dbc.Col([
+                                html.Div([
+                                    html.H3(f"{fund.get('pbvr', 0):.1f}x", className="mb-0 text-info"),
+                                    html.Small("PBV", className="text-muted")
+                                ], className="text-center")
+                            ], width=4),
+                            dbc.Col([
+                                html.Div([
+                                    html.H3(f"{fund.get('psr', 0):.1f}x", className="mb-0 text-secondary"),
+                                    html.Small("PSR", className="text-muted")
+                                ], className="text-center")
+                            ], width=4),
+                        ], className="mb-3"),
+                        html.Hr(),
+                        html.Div([
+                            html.Span("Dividend Yield: ", className="fw-bold"),
+                            html.Span(f"{fund.get('dividend_yield', 0)*100:.2f}%", className="text-success")
+                        ])
+                    ], style={'backgroundColor': '#E0F7FA'})
+                ], className="mb-3"),
+
+                # Profitability Ratios
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-percentage me-2"),
+                        "Rasio Profitabilitas"
+                    ], style={'backgroundColor': '#E56B6F', 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        html.Div([
+                            html.Div([
+                                html.Span("Margin Laba Kotor (GPM)", className="small"),
+                                html.Span(f"{fund.get('gpm', 0)*100:.1f}%", className="fw-bold float-end")
+                            ]),
+                            dbc.Progress(value=min(fund.get('gpm', 0)*100, 100), color="success", className="mb-2", style={'height': '8px'})
+                        ]),
+                        html.Div([
+                            html.Div([
+                                html.Span("Margin Laba Operasi (OPM)", className="small"),
+                                html.Span(f"{fund.get('opm', 0)*100:.1f}%", className="fw-bold float-end")
+                            ]),
+                            dbc.Progress(value=min(fund.get('opm', 0)*100, 100), color="info", className="mb-2", style={'height': '8px'})
+                        ]),
+                        html.Div([
+                            html.Div([
+                                html.Span("Margin Laba Bersih (NPM)", className="small"),
+                                html.Span(f"{fund.get('npm', 0)*100:.1f}%", className="fw-bold float-end")
+                            ]),
+                            dbc.Progress(value=min(fund.get('npm', 0)*100, 100), color="primary", className="mb-2", style={'height': '8px'})
+                        ]),
+                        html.Hr(),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.H4(f"{fund.get('roe', 0)*100:.1f}%", className="mb-0 text-success"),
+                                    html.Small("ROE", className="text-muted")
+                                ], className="text-center")
+                            ], width=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.H4(f"{fund.get('roa', 0)*100:.1f}%", className="mb-0 text-info"),
+                                    html.Small("ROA", className="text-muted")
+                                ], className="text-center")
+                            ], width=6),
+                        ])
+                    ], style={'backgroundColor': '#FFE4E6'})
+                ], className="mb-3"),
+
+                # Liquidity Ratios
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-tint me-2"),
+                        "Rasio Likuiditas & Solvabilitas"
+                    ], style={'backgroundColor': '#355070', 'color': 'white', 'fontWeight': 'bold'}),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.H4(f"{fund.get('current_ratio', 0)*100:.0f}%", className="mb-0"),
+                                    html.Small("Current Ratio", className="text-muted")
+                                ], className="text-center")
+                            ], width=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.H4(f"{fund.get('quick_ratio', 0)*100:.0f}%", className="mb-0"),
+                                    html.Small("Quick Ratio", className="text-muted")
+                                ], className="text-center")
+                            ], width=6),
+                        ], className="mb-3"),
+                        html.Hr(),
+                        html.Div([
+                            html.Div([
+                                html.Span("Debt to Equity Ratio (DER)", className="small"),
+                                html.Span(f"{fund.get('der', 0)*100:.1f}%", className="fw-bold float-end")
+                            ]),
+                            dbc.Progress(value=min(fund.get('der', 0)*100, 100),
+                                        color="danger" if fund.get('der', 0) > 1 else "success",
+                                        className="mb-2", style={'height': '8px'})
+                        ]),
+                        html.Div([
+                            html.Div([
+                                html.Span("Cash Ratio", className="small"),
+                                html.Span(f"{fund.get('cash_ratio', 0)*100:.1f}%", className="fw-bold float-end")
+                            ]),
+                            dbc.Progress(value=min(fund.get('cash_ratio', 0)*100, 100), color="info", className="mb-2", style={'height': '8px'})
+                        ])
+                    ], style={'backgroundColor': '#E8EEF4'})
+                ], className="mb-3"),
+            ], md=6),
+        ]),
+
+        # Report Date
+        html.Div([
+            html.Small(f"Data per: {fund.get('report_date', '-')}", className="text-muted")
+        ], className="text-end mt-2")
+    ])
+
+
+# ============================================================
 # PAGE: COMPREHENSIVE ANALYSIS (Merged Bandarmology + Summary)
 # ============================================================
 
@@ -4399,12 +5524,6 @@ def create_analysis_page(stock_code='CDIA'):
         # Get Buy Signal Tracker
         buy_signal = track_buy_signal(stock_code)
 
-        # Get Avg Buy Analysis
-        avg_buy_analysis = analyze_avg_buy_position(stock_code)
-
-        # Get Support/Resistance Analysis (Multi-Method)
-        sr_analysis = analyze_support_resistance(stock_code)
-
     except Exception as e:
         return html.Div([
             dbc.Alert(f"Error loading analysis for {stock_code}: {str(e)}", color="danger"),
@@ -4419,7 +5538,24 @@ def create_analysis_page(stock_code='CDIA'):
         return 'danger'
 
     return html.Div([
-        html.H4(f"Comprehensive Analysis - {stock_code}", className="mb-4"),
+        # Page Header with submenu (Fundamental first, then Support & Resistance)
+        html.Div([
+            html.H4(f"Comprehensive Analysis - {stock_code}", className="mb-0 d-inline-block me-3"),
+            dcc.Link(
+                dbc.Button([
+                    html.I(className="fas fa-chart-line me-2"),
+                    "Fundamental"
+                ], color="success", size="sm", className="me-2"),
+                href="/fundamental"
+            ),
+            dcc.Link(
+                dbc.Button([
+                    html.I(className="fas fa-layer-group me-2"),
+                    "Support & Resistance"
+                ], color="info", size="sm"),
+                href="/support-resistance"
+            )
+        ], className="d-flex align-items-center flex-wrap mb-4"),
 
         # ========== COMPOSITE SCORE HERO CARD ==========
         dbc.Card([
@@ -4466,12 +5602,6 @@ def create_analysis_page(stock_code='CDIA'):
 
         # ========== MULTI-PERIOD SUMMARY ==========
         create_multi_period_card(stock_code),
-
-        # ========== AVG BUY ANALYSIS ==========
-        create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis),
-
-        # ========== SUPPORT/RESISTANCE LEVELS (Multi-Method) ==========
-        create_sr_levels_card(sr_analysis, stock_code),
 
         # ========== COMPONENT SCORES ROW (with tooltips) ==========
         # ========== LAYER 1 BASIC FILTER ==========
@@ -5517,6 +6647,13 @@ def create_dashboard_page(stock_code='CDIA'):
             dbc.Col([
                 html.Div([
                     html.H4(f"Dashboard - {stock_code}", className="mb-0 d-inline-block me-3"),
+                    dcc.Link(
+                        dbc.Button([
+                            html.I(className="fas fa-building me-2"),
+                            "Profile"
+                        ], color="success", size="sm", className="fw-bold me-2"),
+                        href="/profile"
+                    ),
                     dcc.Link(
                         dbc.Button([
                             html.I(className="fas fa-exchange-alt me-2"),
@@ -6831,6 +7968,12 @@ def display_page(pathname, selected_stock):
         return create_broker_movement_page(selected_stock)
     elif pathname == '/sensitive':
         return create_sensitive_broker_page(selected_stock)
+    elif pathname == '/profile':
+        return create_company_profile_page(selected_stock)
+    elif pathname == '/fundamental':
+        return create_fundamental_page(selected_stock)
+    elif pathname == '/support-resistance':
+        return create_support_resistance_page(selected_stock)
     else:
         return create_landing_page()
 
@@ -7007,28 +8150,50 @@ def handle_upload(contents, filename, stock_code):
         broker_count = import_broker_data(broker_df, stock_code)
         print(f"[UPLOAD] Broker imported: {broker_count} records")
 
+        # Import profile data if exists
+        profile_data = read_profile_data(temp_path)
+        profile_imported = False
+        if profile_data:
+            profile_count = import_profile_data(profile_data, stock_code)
+            profile_imported = profile_count > 0
+            print(f"[UPLOAD] Profile imported: {profile_imported}")
+
         # Clean up
         try:
             os.remove(temp_path)
         except:
             pass  # Ignore cleanup errors
 
+        # Clear cache so new stock appears immediately
+        clear_cache()
+        clear_analysis_cache(stock_code)  # Clear analysis cache for this stock
+        print(f"[UPLOAD] Cache cleared after import")
+
+        # Build status message
+        status_items = [
+            f"Stock: {stock_code}", html.Br(),
+            f"File: {filename}", html.Br(),
+            f"Price records: {price_count}", html.Br(),
+            f"Broker records: {broker_count}"
+        ]
+        if profile_imported:
+            status_items.extend([html.Br(), "Company Profile: Imported"])
+
         status = dbc.Alert([
             html.H5("Import Berhasil!", className="alert-heading"),
-            html.P([
-                f"Stock: {stock_code}", html.Br(),
-                f"File: {filename}", html.Br(),
-                f"Price records: {price_count}", html.Br(),
-                f"Broker records: {broker_count}"
-            ])
+            html.P(status_items)
         ], color="success")
+
+        log_text = f"  - Price: {price_count} records, Broker: {broker_count} records"
+        if profile_imported:
+            log_text += ", Profile: Yes"
 
         log = html.Div([
             html.P(f"[{datetime.now().strftime('%H:%M:%S')}] Imported {filename} for {stock_code}"),
-            html.P(f"  - Price: {price_count} records, Broker: {broker_count} records", className="text-muted small")
+            html.P(log_text, className="text-muted small")
         ])
 
-        print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records")
+        print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records, profile: {profile_imported}")
 
         return status, create_stocks_list(), log, get_stock_options()
 

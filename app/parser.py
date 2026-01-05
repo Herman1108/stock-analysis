@@ -499,14 +499,262 @@ def import_excel(file_path: str, stock_code: str = 'CDIA'):
     if not ipo_df.empty:
         ipo_count = import_ipo_position(ipo_df, stock_code, period_str)
 
+    # Read and import profile data (if exists)
+    profile_data = read_profile_data(file_path)
+    profile_count = 0
+    if profile_data:
+        profile_count = import_profile_data(profile_data, stock_code)
+
     print("=" * 60)
     print(f"Import completed!")
     print(f"Price records: {price_count}")
     print(f"Broker records: {broker_count}")
     print(f"IPO position records: {ipo_count}")
+    print(f"Profile imported: {'Yes' if profile_count > 0 else 'No'}")
     print("=" * 60)
 
-    return price_count, broker_count, ipo_count
+    return price_count, broker_count, ipo_count, profile_count
+
+def read_profile_data(file_path: str) -> Dict:
+    """
+    Baca data Company Profile dari kolom AI-AJ (index 34-35)
+    Return: Dictionary dengan data profile
+    """
+    import json
+    print(f"Reading profile data from: {file_path}")
+
+    df = pd.read_excel(file_path, sheet_name='Sheet1', header=None)
+
+    # Check if profile columns exist (column 34+)
+    if len(df.columns) < 36:
+        print("No profile data found (columns AI-AJ not present)")
+        return {}
+
+    # Check if column AI has profile data
+    col_ai = df.iloc[:, 34]
+    if col_ai.isna().all() or str(col_ai.iloc[0]).strip() != 'COMPANY PROFILE':
+        print("No profile data found in column AI")
+        return {}
+
+    profile = {}
+
+    # Parse profile data by finding section headers
+    current_section = None
+    for idx in range(len(df)):
+        cell_ai = df.iloc[idx, 34]
+        cell_aj = df.iloc[idx, 35] if len(df.columns) > 35 else None
+
+        if pd.isna(cell_ai):
+            continue
+
+        cell_ai_str = str(cell_ai).strip()
+
+        # Detect sections
+        if cell_ai_str == 'IDENTITAS PERUSAHAAN':
+            current_section = 'identity'
+            continue
+        elif cell_ai_str == 'SEJARAH & PENCATATAN':
+            current_section = 'history'
+            continue
+        elif cell_ai_str == 'LATAR BELAKANG PERUSAHAAN':
+            current_section = 'background'
+            profile['company_background'] = ''
+            continue
+        elif cell_ai_str == 'KOMPOSISI PEMEGANG SAHAM':
+            current_section = 'shareholders'
+            continue
+        elif cell_ai_str == 'PERKEMBANGAN JUMLAH INVESTOR':
+            current_section = 'investor_history'
+            profile['shareholder_history'] = []
+            continue
+        elif cell_ai_str == 'JAJARAN DIREKSI':
+            current_section = 'directors'
+            profile['directors'] = []
+            continue
+        elif cell_ai_str == 'DEWAN KOMISARIS':
+            current_section = 'commissioners'
+            profile['commissioners'] = []
+            continue
+
+        # Parse data based on section
+        if current_section == 'identity' and pd.notna(cell_aj):
+            cell_aj_str = str(cell_aj).strip()
+            if cell_ai_str == 'Nama Emiten':
+                profile['company_name'] = cell_aj_str
+            elif cell_ai_str == 'Kode Saham':
+                profile['stock_code'] = cell_aj_str
+            elif cell_ai_str == 'Papan Pencatatan':
+                profile['listing_board'] = cell_aj_str
+            elif cell_ai_str == 'Sektor Usaha':
+                profile['sector'] = cell_aj_str
+            elif cell_ai_str == 'Sub Sektor':
+                profile['subsector'] = cell_aj_str
+            elif cell_ai_str == 'Bidang Industri':
+                profile['industry'] = cell_aj_str
+            elif cell_ai_str == 'Aktivitas Bisnis':
+                profile['business_activity'] = cell_aj_str
+
+        elif current_section == 'history' and pd.notna(cell_aj):
+            cell_aj_str = str(cell_aj).strip()
+            if cell_ai_str == 'Tanggal Pencatatan':
+                try:
+                    profile['listing_date'] = datetime.strptime(cell_aj_str, '%d %B %Y').date()
+                except:
+                    profile['listing_date_str'] = cell_aj_str
+            elif cell_ai_str == 'Tanggal Efektif':
+                try:
+                    profile['effective_date'] = datetime.strptime(cell_aj_str, '%d %B %Y').date()
+                except:
+                    profile['effective_date_str'] = cell_aj_str
+            elif cell_ai_str == 'Nilai Nominal':
+                profile['nominal_value'] = parse_value_string(cell_aj_str.replace('Rp', '').strip())
+            elif cell_ai_str == 'Harga Penawaran Perdana':
+                profile['ipo_price'] = parse_value_string(cell_aj_str.replace('Rp', '').strip())
+            elif cell_ai_str == 'Jumlah Saham IPO':
+                profile['ipo_shares'] = int(parse_value_string(cell_aj_str.replace('lembar', '').replace('.', '').strip()))
+            elif cell_ai_str == 'Dana IPO Terhimpun':
+                profile['ipo_amount'] = parse_value_string(cell_aj_str.replace('Rp', '').replace('Miliar', 'B').replace('Triliun', 'T').strip())
+            elif cell_ai_str == 'Penjamin Emisi':
+                profile['underwriter'] = cell_aj_str
+            elif cell_ai_str == 'Biro Administrasi Efek':
+                profile['share_registrar'] = cell_aj_str
+
+        elif current_section == 'background':
+            # Append background text
+            if profile.get('company_background'):
+                profile['company_background'] += ' ' + cell_ai_str
+            else:
+                profile['company_background'] = cell_ai_str
+
+        elif current_section == 'shareholders' and pd.notna(cell_aj):
+            cell_aj_str = str(cell_aj).strip()
+            if 'Pengendali' in cell_ai_str:
+                profile['major_shareholder'] = cell_ai_str.replace('(Pengendali)', '').strip()
+                profile['major_shareholder_pct'] = float(cell_aj_str.replace('%', '').replace(',', '.'))
+            elif 'Publik' in cell_ai_str:
+                profile['public_pct'] = float(cell_aj_str.replace('%', '').replace(',', '.'))
+            elif 'Total' in cell_ai_str:
+                profile['total_shares'] = int(parse_value_string(cell_aj_str.replace('lembar', '').replace('.', '').strip()))
+
+        elif current_section == 'investor_history' and pd.notna(cell_aj):
+            cell_aj_str = str(cell_aj).strip()
+            profile['shareholder_history'].append({
+                'period': cell_ai_str,
+                'count': cell_aj_str
+            })
+
+        elif current_section == 'directors' and pd.notna(cell_aj):
+            cell_aj_str = str(cell_aj).strip()
+            # Only match exact "Presiden Direktur", not "Wakil Presiden Direktur"
+            if cell_ai_str == 'Presiden Direktur':
+                profile['president_director'] = cell_aj_str
+            profile['directors'].append({
+                'position': cell_ai_str,
+                'name': cell_aj_str
+            })
+
+        elif current_section == 'commissioners' and pd.notna(cell_aj):
+            cell_aj_str = str(cell_aj).strip()
+            # Only match exact "Presiden Komisaris", not "Wakil Presiden Komisaris"
+            if cell_ai_str == 'Presiden Komisaris':
+                profile['president_commissioner'] = cell_aj_str
+            profile['commissioners'].append({
+                'position': cell_ai_str,
+                'name': cell_aj_str
+            })
+
+    print(f"Profile data parsed: {profile.get('stock_code', 'Unknown')}")
+    return profile
+
+
+def import_profile_data(profile: Dict, stock_code: str = None):
+    """Import profile data ke database"""
+    import json
+
+    if not profile:
+        print("No profile data to import")
+        return 0
+
+    # Use stock_code from profile or parameter
+    code = stock_code or profile.get('stock_code', 'UNKNOWN')
+    print(f"Importing profile for {code}...")
+
+    # Convert lists to JSON strings
+    directors_json = json.dumps(profile.get('directors', []))
+    commissioners_json = json.dumps(profile.get('commissioners', []))
+    shareholder_history_json = json.dumps(profile.get('shareholder_history', []))
+
+    insert_query = """
+        INSERT INTO stock_profile
+        (stock_code, company_name, listing_board, sector, subsector, industry, business_activity,
+         listing_date, effective_date, nominal_value, ipo_price, ipo_shares, ipo_amount,
+         underwriter, share_registrar, company_background, major_shareholder, major_shareholder_pct,
+         public_pct, total_shares, president_director, president_commissioner, directors, commissioners,
+         shareholder_history, updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (stock_code) DO UPDATE SET
+            company_name = EXCLUDED.company_name,
+            listing_board = EXCLUDED.listing_board,
+            sector = EXCLUDED.sector,
+            subsector = EXCLUDED.subsector,
+            industry = EXCLUDED.industry,
+            business_activity = EXCLUDED.business_activity,
+            listing_date = EXCLUDED.listing_date,
+            effective_date = EXCLUDED.effective_date,
+            nominal_value = EXCLUDED.nominal_value,
+            ipo_price = EXCLUDED.ipo_price,
+            ipo_shares = EXCLUDED.ipo_shares,
+            ipo_amount = EXCLUDED.ipo_amount,
+            underwriter = EXCLUDED.underwriter,
+            share_registrar = EXCLUDED.share_registrar,
+            company_background = EXCLUDED.company_background,
+            major_shareholder = EXCLUDED.major_shareholder,
+            major_shareholder_pct = EXCLUDED.major_shareholder_pct,
+            public_pct = EXCLUDED.public_pct,
+            total_shares = EXCLUDED.total_shares,
+            president_director = EXCLUDED.president_director,
+            president_commissioner = EXCLUDED.president_commissioner,
+            directors = EXCLUDED.directors,
+            commissioners = EXCLUDED.commissioners,
+            shareholder_history = EXCLUDED.shareholder_history,
+            updated_at = NOW()
+    """
+
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(insert_query, (
+                code,
+                profile.get('company_name'),
+                profile.get('listing_board'),
+                profile.get('sector'),
+                profile.get('subsector'),
+                profile.get('industry'),
+                profile.get('business_activity'),
+                profile.get('listing_date'),
+                profile.get('effective_date'),
+                profile.get('nominal_value'),
+                profile.get('ipo_price'),
+                profile.get('ipo_shares'),
+                profile.get('ipo_amount'),
+                profile.get('underwriter'),
+                profile.get('share_registrar'),
+                profile.get('company_background'),
+                profile.get('major_shareholder'),
+                profile.get('major_shareholder_pct'),
+                profile.get('public_pct'),
+                profile.get('total_shares'),
+                profile.get('president_director'),
+                profile.get('president_commissioner'),
+                directors_json,
+                commissioners_json,
+                shareholder_history_json
+            ))
+            print(f"Profile imported successfully for {code}")
+            return 1
+    except Exception as e:
+        print(f"Profile import error: {e}")
+        return 0
+
 
 if __name__ == "__main__":
     import sys

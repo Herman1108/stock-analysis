@@ -828,118 +828,528 @@ def cluster_price_levels(prices: List[float], tolerance_pct: float = 2.0) -> Lis
 
 
 # ============================================================
-# COMBINED SUPPORT/RESISTANCE ANALYSIS
+# COMBINED SUPPORT/RESISTANCE ANALYSIS (IMPROVED v2)
 # ============================================================
+
+def calculate_atr(price_df: pd.DataFrame, period: int = 14) -> float:
+    """Calculate Average True Range for dynamic level tolerance"""
+    if len(price_df) < period:
+        return 0
+
+    df = price_df.copy()
+    for col in ['high_price', 'low_price', 'close_price']:
+        df[col] = df[col].astype(float)
+
+    df['prev_close'] = df['close_price'].shift(1)
+    df['tr1'] = df['high_price'] - df['low_price']
+    df['tr2'] = abs(df['high_price'] - df['prev_close'])
+    df['tr3'] = abs(df['low_price'] - df['prev_close'])
+    df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+
+    return df['tr'].tail(period).mean()
+
+
+def detect_price_rejection_v2(stock_code: str, lookback_days: int = 90) -> Dict:
+    """
+    Deteksi rejection/bounce dengan konfirmasi volume (IMPROVED).
+
+    Kriteria rejection yang kuat:
+    1. Harga menyentuh level dan berbalik (wick panjang)
+    2. Volume di atas rata-rata (konfirmasi partisipasi)
+    3. Terjadi multiple times (bukan kebetulan)
+
+    Returns:
+        Dict dengan support dan resistance levels yang tervalidasi
+    """
+    price_df = get_price_data(stock_code)
+
+    if price_df.empty or len(price_df) < 20:
+        return {'support_levels': [], 'resistance_levels': [], 'current_price': 0}
+
+    df = price_df.sort_values('date').tail(lookback_days).copy().reset_index(drop=True)
+
+    # Convert to float
+    for col in ['close_price', 'high_price', 'low_price', 'open_price', 'volume']:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+
+    current_price = float(df.iloc[-1]['close_price'])
+    avg_volume = df['volume'].mean()
+    atr = calculate_atr(df)
+
+    # Dynamic tolerance based on ATR (roughly 0.5 ATR)
+    tolerance = atr * 0.5 if atr > 0 else current_price * 0.01
+
+    support_touches = []  # (price, volume, date, bounce_strength)
+    resistance_touches = []
+
+    for i in range(1, len(df) - 1):
+        row = df.iloc[i]
+        prev_row = df.iloc[i-1]
+        next_row = df.iloc[i+1]
+
+        low = row['low_price']
+        high = row['high_price']
+        close = row['close_price']
+        open_p = row['open_price']
+        volume = row['volume']
+
+        # Calculate wick sizes
+        body_size = abs(close - open_p)
+        lower_wick = min(open_p, close) - low
+        upper_wick = high - max(open_p, close)
+
+        # SUPPORT: Long lower wick + closed higher + volume confirmation
+        if lower_wick > body_size * 0.5:  # Lower wick significant
+            bounce_strength = (close - low) / low * 100  # % bounce from low
+            vol_ratio = volume / avg_volume if avg_volume > 0 else 1
+
+            if bounce_strength > 0.5 and close > low:  # Bounced up
+                support_touches.append({
+                    'price': round(low, 0),
+                    'volume': volume,
+                    'vol_ratio': round(vol_ratio, 2),
+                    'bounce_pct': round(bounce_strength, 2),
+                    'date': row['date']
+                })
+
+        # RESISTANCE: Long upper wick + closed lower + volume confirmation
+        if upper_wick > body_size * 0.5:  # Upper wick significant
+            rejection_strength = (high - close) / high * 100  # % rejection from high
+            vol_ratio = volume / avg_volume if avg_volume > 0 else 1
+
+            if rejection_strength > 0.5 and close < high:  # Rejected down
+                resistance_touches.append({
+                    'price': round(high, 0),
+                    'volume': volume,
+                    'vol_ratio': round(vol_ratio, 2),
+                    'rejection_pct': round(rejection_strength, 2),
+                    'date': row['date']
+                })
+
+    # Cluster support levels
+    support_clusters = cluster_sr_levels_v2(support_touches, tolerance, 'support')
+    resistance_clusters = cluster_sr_levels_v2(resistance_touches, tolerance, 'resistance')
+
+    # Filter: support below current, resistance above current
+    valid_supports = [s for s in support_clusters if s['level'] < current_price]
+    valid_resistances = [r for r in resistance_clusters if r['level'] > current_price]
+
+    # Sort by score (combination of touch count and volume)
+    valid_supports = sorted(valid_supports, key=lambda x: x['score'], reverse=True)
+    valid_resistances = sorted(valid_resistances, key=lambda x: x['score'], reverse=True)
+
+    return {
+        'support_levels': valid_supports[:5],
+        'resistance_levels': valid_resistances[:5],
+        'current_price': current_price,
+        'avg_volume': avg_volume,
+        'atr': atr,
+        'tolerance': tolerance
+    }
+
+
+def cluster_sr_levels_v2(touches: List[Dict], tolerance: float, level_type: str) -> List[Dict]:
+    """
+    Cluster nearby price touches into S/R levels with scoring.
+
+    Score formula:
+    - Base: touch_count * 20
+    - Volume bonus: +10 per touch with vol_ratio > 1.2
+    - Strong reaction bonus: +5 per touch with bounce/rejection > 1%
+    """
+    if not touches:
+        return []
+
+    # Sort by price
+    sorted_touches = sorted(touches, key=lambda x: x['price'])
+
+    clusters = []
+    current_cluster = [sorted_touches[0]]
+
+    for touch in sorted_touches[1:]:
+        cluster_avg = sum(t['price'] for t in current_cluster) / len(current_cluster)
+
+        if abs(touch['price'] - cluster_avg) <= tolerance:
+            current_cluster.append(touch)
+        else:
+            # Save current cluster
+            clusters.append(create_cluster_summary(current_cluster, level_type))
+            current_cluster = [touch]
+
+    # Don't forget last cluster
+    if current_cluster:
+        clusters.append(create_cluster_summary(current_cluster, level_type))
+
+    return clusters
+
+
+def create_cluster_summary(cluster: List[Dict], level_type: str) -> Dict:
+    """Create summary for a cluster of price touches"""
+    avg_price = sum(t['price'] for t in cluster) / len(cluster)
+    touch_count = len(cluster)
+
+    # Count high volume touches (vol_ratio > 1.2)
+    high_vol_touches = sum(1 for t in cluster if t.get('vol_ratio', 0) > 1.2)
+
+    # Count strong reactions
+    if level_type == 'support':
+        strong_reactions = sum(1 for t in cluster if t.get('bounce_pct', 0) > 1.0)
+    else:
+        strong_reactions = sum(1 for t in cluster if t.get('rejection_pct', 0) > 1.0)
+
+    # Calculate score
+    score = touch_count * 20 + high_vol_touches * 10 + strong_reactions * 5
+
+    # Avg volume ratio
+    avg_vol_ratio = sum(t.get('vol_ratio', 1) for t in cluster) / len(cluster)
+
+    return {
+        'level': round(avg_price, 0),
+        'touch_count': touch_count,
+        'high_vol_touches': high_vol_touches,
+        'strong_reactions': strong_reactions,
+        'avg_vol_ratio': round(avg_vol_ratio, 2),
+        'score': score,
+        'min_price': min(t['price'] for t in cluster),
+        'max_price': max(t['price'] for t in cluster)
+    }
+
+
+def get_significant_broker_levels(stock_code: str, current_price: float, min_value_pct: float = 5.0) -> Dict:
+    """
+    Get S/R levels from SIGNIFICANT brokers only (top by buy value).
+
+    Only consider brokers with buy value >= min_value_pct of total.
+    This filters out noise from small/retail brokers.
+
+    Args:
+        stock_code: Stock code
+        current_price: Current stock price
+        min_value_pct: Minimum % of total buy value to be considered significant
+
+    Returns:
+        Dict with support levels (from profit brokers) and resistance (from loss brokers)
+    """
+    broker_df = get_broker_data(stock_code)
+
+    if broker_df.empty:
+        return {'support_levels': [], 'resistance_levels': [], 'significant_brokers': []}
+
+    # Get last 60 days data
+    df = broker_df.sort_values('date')
+    cutoff_date = df['date'].max() - pd.Timedelta(days=60)
+    df = df[df['date'] >= cutoff_date]
+
+    # Calculate broker stats
+    broker_stats = df.groupby('broker_code').agg({
+        'buy_value': 'sum',
+        'buy_lot': 'sum',
+        'sell_value': 'sum',
+        'sell_lot': 'sum',
+        'net_value': 'sum'
+    }).reset_index()
+
+    # Calculate avg buy price
+    broker_stats['avg_buy'] = broker_stats.apply(
+        lambda x: x['buy_value'] / (x['buy_lot'] * 100) if x['buy_lot'] > 0 else 0, axis=1
+    )
+
+    # Filter significant brokers (top by buy value)
+    total_buy_value = broker_stats['buy_value'].sum()
+    broker_stats['value_pct'] = broker_stats['buy_value'] / total_buy_value * 100
+
+    # Only keep brokers with significant buy value
+    significant = broker_stats[broker_stats['value_pct'] >= min_value_pct].copy()
+
+    if significant.empty:
+        # Fallback: take top 10 brokers
+        significant = broker_stats.nlargest(10, 'buy_value').copy()
+
+    # Categorize by profit/loss position
+    significant['floating_pct'] = (current_price - significant['avg_buy']) / significant['avg_buy'] * 100
+    significant['position'] = significant['floating_pct'].apply(
+        lambda x: 'PROFIT' if x > 0 else 'LOSS' if x < 0 else 'BREAK-EVEN'
+    )
+
+    # Support levels: avg buy of PROFIT brokers (they will defend)
+    profit_brokers = significant[significant['position'] == 'PROFIT'].copy()
+    support_levels = []
+    for _, b in profit_brokers.iterrows():
+        if b['avg_buy'] > 0 and b['avg_buy'] < current_price:
+            support_levels.append({
+                'level': round(b['avg_buy'], 0),
+                'broker': b['broker_code'],
+                'buy_value': b['buy_value'],
+                'value_pct': round(b['value_pct'], 2),
+                'net_position': 'NET_BUY' if b['net_value'] > 0 else 'NET_SELL',
+                'floating_pct': round(b['floating_pct'], 2)
+            })
+
+    # Resistance levels: avg buy of LOSS brokers (they may sell to cut loss)
+    loss_brokers = significant[significant['position'] == 'LOSS'].copy()
+    resistance_levels = []
+    for _, b in loss_brokers.iterrows():
+        if b['avg_buy'] > 0 and b['avg_buy'] > current_price:
+            resistance_levels.append({
+                'level': round(b['avg_buy'], 0),
+                'broker': b['broker_code'],
+                'buy_value': b['buy_value'],
+                'value_pct': round(b['value_pct'], 2),
+                'net_position': 'NET_BUY' if b['net_value'] > 0 else 'NET_SELL',
+                'floating_pct': round(b['floating_pct'], 2)
+            })
+
+    # Sort by value_pct (most significant first)
+    support_levels = sorted(support_levels, key=lambda x: x['value_pct'], reverse=True)
+    resistance_levels = sorted(resistance_levels, key=lambda x: x['value_pct'], reverse=True)
+
+    return {
+        'support_levels': support_levels[:5],
+        'resistance_levels': resistance_levels[:5],
+        'significant_brokers': significant.to_dict('records'),
+        'total_buy_value': total_buy_value,
+        'min_value_threshold': min_value_pct
+    }
+
 
 def analyze_support_resistance(stock_code: str) -> Dict:
     """
-    Analisis komprehensif Support dan Resistance levels.
+    Analisis komprehensif Support dan Resistance levels (IMPROVED v2).
 
-    Menggabungkan 3 metode:
-    1. Volume Profile - area transaksi terbesar
-    2. Price Bounce - level yang sering memantul
-    3. Broker Avg Buy - posisi broker besar
+    Menggabungkan 3 metode dengan scoring yang lebih baik:
+    1. Volume Profile - area transaksi terbesar (score by volume %)
+    2. Price Rejection - level yang sering memantul dengan volume (score by touches + volume)
+    3. Broker Position - hanya broker SIGNIFIKAN (score by value %)
+
+    Multi-confirmation bonus: level yang muncul di >1 metode mendapat bonus score.
 
     Returns:
-        Dict dengan combined support/resistance levels
+        Dict dengan combined support/resistance levels terurut by strength
     """
     # Get data from all methods
     volume_profile = calculate_volume_profile(stock_code)
-    price_bounces = detect_price_bounces(stock_code)
-    broker_pl = analyze_avg_buy_position(stock_code)
+    price_rejection = detect_price_rejection_v2(stock_code)
 
-    current_price = volume_profile.get('current_price') or price_bounces.get('current_price') or 0
+    current_price = volume_profile.get('current_price') or price_rejection.get('current_price') or 0
 
-    # Collect all support levels
-    all_supports = []
+    if current_price == 0:
+        return {'error': 'No price data available'}
 
-    # From Volume Profile
+    broker_levels = get_significant_broker_levels(stock_code, current_price)
+
+    # ATR for clustering nearby levels
+    atr = price_rejection.get('atr', current_price * 0.02)
+    cluster_tolerance = atr * 0.75  # Levels within 0.75 ATR are considered same
+
+    # Collect all support candidates with source and raw score
+    support_candidates = []
+    resistance_candidates = []
+
+    # === FROM VOLUME PROFILE ===
     for vp in volume_profile.get('support_from_volume', []):
-        all_supports.append({
+        score = vp['volume_pct'] * 3  # Weight: 3x volume %
+        support_candidates.append({
             'level': vp['price_mid'],
             'source': 'Volume Profile',
-            'strength': vp['volume_pct'],
-            'description': f"High volume area ({vp['volume_pct']:.1f}% of total volume)"
+            'raw_score': score,
+            'detail': f"{vp['volume_pct']:.1f}% of total volume",
+            'data': vp
         })
 
-    # From Price Bounce
-    for pb in price_bounces.get('support_bounces', [])[:3]:
-        all_supports.append({
-            'level': pb['level'],
-            'source': 'Price Bounce',
-            'strength': pb['count'] * 10,  # More bounces = stronger
-            'description': f"Price bounced {pb['count']}x from this level"
-        })
-
-    # From Broker Avg Buy (profit brokers = support)
-    for sup in broker_pl.get('support_levels', [])[:3]:
-        all_supports.append({
-            'level': sup,
-            'source': 'Broker Position',
-            'strength': 30,  # Base strength
-            'description': f"Big broker Avg Buy (will defend this level)"
-        })
-
-    # Collect all resistance levels
-    all_resistances = []
-
-    # From Volume Profile
     for vp in volume_profile.get('resistance_from_volume', []):
-        all_resistances.append({
+        score = vp['volume_pct'] * 3
+        resistance_candidates.append({
             'level': vp['price_mid'],
             'source': 'Volume Profile',
-            'strength': vp['volume_pct'],
-            'description': f"High volume area ({vp['volume_pct']:.1f}% of total volume)"
+            'raw_score': score,
+            'detail': f"{vp['volume_pct']:.1f}% of total volume",
+            'data': vp
         })
 
-    # From Price Bounce
-    for pb in price_bounces.get('resistance_bounces', [])[:3]:
-        all_resistances.append({
-            'level': pb['level'],
+    # === FROM PRICE REJECTION ===
+    for pr in price_rejection.get('support_levels', []):
+        # Score based on touches, volume, and strength
+        score = pr['score']  # Already calculated in detect_price_rejection_v2
+        vol_note = f", {pr['high_vol_touches']} high-vol" if pr['high_vol_touches'] > 0 else ""
+        support_candidates.append({
+            'level': pr['level'],
             'source': 'Price Bounce',
-            'strength': pb['count'] * 10,
-            'description': f"Price rejected {pb['count']}x from this level"
+            'raw_score': score,
+            'detail': f"Bounced {pr['touch_count']}x{vol_note}",
+            'data': pr
         })
 
-    # From Broker Avg Buy (loss brokers = potential selling pressure)
-    for res in broker_pl.get('resistance_levels', [])[:3]:
-        all_resistances.append({
-            'level': res,
+    for pr in price_rejection.get('resistance_levels', []):
+        score = pr['score']
+        vol_note = f", {pr['high_vol_touches']} high-vol" if pr['high_vol_touches'] > 0 else ""
+        resistance_candidates.append({
+            'level': pr['level'],
+            'source': 'Price Bounce',
+            'raw_score': score,
+            'detail': f"Rejected {pr['touch_count']}x{vol_note}",
+            'data': pr
+        })
+
+    # === FROM BROKER POSITION (SIGNIFICANT ONLY) ===
+    for bl in broker_levels.get('support_levels', []):
+        # Score based on value % (significance)
+        score = bl['value_pct'] * 5  # Weight: 5x value %
+        support_candidates.append({
+            'level': bl['level'],
             'source': 'Broker Position',
-            'strength': 25,
-            'description': f"Broker Avg Buy in loss (potential sell pressure)"
+            'raw_score': score,
+            'detail': f"Broker {bl['broker']} ({bl['value_pct']:.1f}% volume)",
+            'data': bl
         })
 
-    # Sort supports (closest to current price first)
-    all_supports = sorted(all_supports, key=lambda x: abs(x['level'] - current_price))
+    for bl in broker_levels.get('resistance_levels', []):
+        score = bl['value_pct'] * 4  # Slightly lower weight for resistance
+        resistance_candidates.append({
+            'level': bl['level'],
+            'source': 'Broker Position',
+            'raw_score': score,
+            'detail': f"Broker {bl['broker']} in loss ({bl['value_pct']:.1f}% volume)",
+            'data': bl
+        })
 
-    # Sort resistances (closest to current price first)
-    all_resistances = sorted(all_resistances, key=lambda x: abs(x['level'] - current_price))
+    # === MERGE NEARBY LEVELS AND ADD MULTI-CONFIRMATION BONUS ===
+    merged_supports = merge_sr_levels(support_candidates, cluster_tolerance, 'support')
+    merged_resistances = merge_sr_levels(resistance_candidates, cluster_tolerance, 'resistance')
 
-    # Find strongest support and resistance
-    strongest_support = max(all_supports, key=lambda x: x['strength']) if all_supports else None
-    strongest_resistance = max(all_resistances, key=lambda x: x['strength']) if all_resistances else None
+    # Sort by final score (highest first)
+    merged_supports = sorted(merged_supports, key=lambda x: x['final_score'], reverse=True)
+    merged_resistances = sorted(merged_resistances, key=lambda x: x['final_score'], reverse=True)
 
-    # Calculate key levels
-    key_support = all_supports[0]['level'] if all_supports else current_price * 0.95
-    key_resistance = all_resistances[0]['level'] if all_resistances else current_price * 1.05
+    # Key levels = highest scored
+    key_support = merged_supports[0]['level'] if merged_supports else current_price * 0.95
+    key_resistance = merged_resistances[0]['level'] if merged_resistances else current_price * 1.05
+
+    # For display, also sort by distance from current price
+    display_supports = sorted(merged_supports[:5], key=lambda x: current_price - x['level'])
+    display_resistances = sorted(merged_resistances[:5], key=lambda x: x['level'] - current_price)
+
+    # Format for UI
+    formatted_supports = []
+    for s in display_supports:
+        sources = ', '.join(s['sources'])
+        formatted_supports.append({
+            'level': s['level'],
+            'source': sources if len(s['sources']) == 1 else 'Multi-Confirmed',
+            'strength': s['final_score'],
+            'description': s['description'],
+            'confirmations': len(s['sources'])
+        })
+
+    formatted_resistances = []
+    for r in display_resistances:
+        sources = ', '.join(r['sources'])
+        formatted_resistances.append({
+            'level': r['level'],
+            'source': sources if len(r['sources']) == 1 else 'Multi-Confirmed',
+            'strength': r['final_score'],
+            'description': r['description'],
+            'confirmations': len(r['sources'])
+        })
+
+    # Find strongest
+    strongest_support = merged_supports[0] if merged_supports else None
+    strongest_resistance = merged_resistances[0] if merged_resistances else None
 
     return {
         'current_price': current_price,
-        'supports': all_supports[:5],  # Top 5 nearest supports
-        'resistances': all_resistances[:5],  # Top 5 nearest resistances
+        'supports': formatted_supports,
+        'resistances': formatted_resistances,
         'strongest_support': strongest_support,
         'strongest_resistance': strongest_resistance,
         'key_support': key_support,
         'key_resistance': key_resistance,
         'volume_profile': volume_profile,
-        'price_bounces': price_bounces,
-        'broker_positions': broker_pl,
+        'price_rejection': price_rejection,
+        'broker_levels': broker_levels,
+        'atr': atr,
+        'cluster_tolerance': cluster_tolerance,
         'interpretation': {
             'support_distance_pct': round((current_price - key_support) / current_price * 100, 2) if key_support else 0,
             'resistance_distance_pct': round((key_resistance - current_price) / current_price * 100, 2) if key_resistance else 0,
             'risk_reward': round((key_resistance - current_price) / (current_price - key_support), 2) if key_support and key_resistance and current_price > key_support else 0
         }
+    }
+
+
+def merge_sr_levels(candidates: List[Dict], tolerance: float, level_type: str) -> List[Dict]:
+    """
+    Merge nearby S/R levels and add multi-confirmation bonus.
+
+    Multi-confirmation bonus:
+    - 2 sources: +50% score
+    - 3 sources: +100% score (double)
+    """
+    if not candidates:
+        return []
+
+    # Sort by level
+    sorted_candidates = sorted(candidates, key=lambda x: x['level'])
+
+    merged = []
+    current_group = [sorted_candidates[0]]
+
+    for cand in sorted_candidates[1:]:
+        group_avg = sum(c['level'] for c in current_group) / len(current_group)
+
+        if abs(cand['level'] - group_avg) <= tolerance:
+            current_group.append(cand)
+        else:
+            merged.append(create_merged_level(current_group, level_type))
+            current_group = [cand]
+
+    # Last group
+    if current_group:
+        merged.append(create_merged_level(current_group, level_type))
+
+    return merged
+
+
+def create_merged_level(group: List[Dict], level_type: str) -> Dict:
+    """Create a merged S/R level from multiple candidates"""
+    # Weighted average level (by score)
+    total_score = sum(c['raw_score'] for c in group)
+    if total_score > 0:
+        weighted_level = sum(c['level'] * c['raw_score'] for c in group) / total_score
+    else:
+        weighted_level = sum(c['level'] for c in group) / len(group)
+
+    # Unique sources
+    sources = list(set(c['source'] for c in group))
+
+    # Multi-confirmation bonus
+    num_sources = len(sources)
+    if num_sources >= 3:
+        bonus_multiplier = 2.0  # 100% bonus
+    elif num_sources == 2:
+        bonus_multiplier = 1.5  # 50% bonus
+    else:
+        bonus_multiplier = 1.0
+
+    base_score = sum(c['raw_score'] for c in group)
+    final_score = base_score * bonus_multiplier
+
+    # Build description
+    details = [c['detail'] for c in group]
+    if num_sources > 1:
+        description = f"Multi-confirmed ({num_sources} sources): " + "; ".join(details[:2])
+    else:
+        description = details[0] if details else ""
+
+    return {
+        'level': round(weighted_level, 0),
+        'sources': sources,
+        'num_confirmations': num_sources,
+        'base_score': round(base_score, 1),
+        'bonus_multiplier': bonus_multiplier,
+        'final_score': round(final_score, 1),
+        'description': description,
+        'candidates': group
     }
 
 
