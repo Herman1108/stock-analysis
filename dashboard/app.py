@@ -93,10 +93,10 @@ def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool =
 def create_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
     """
     Create consistent submenu navigation buttons for Analysis subpages.
-    Order: Fundamental | Support & Resistance | Back to Analysis
+    Order: Fundamental | Support & Resistance | Accumulation | Back to Analysis
 
     Args:
-        current_page: Current page identifier ('fundamental', 'support-resistance')
+        current_page: Current page identifier ('fundamental', 'support-resistance', 'accumulation')
         stock_code: Current stock code
     """
     # Fundamental button - solid when active, outline when not
@@ -135,6 +135,24 @@ def create_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
             href="/support-resistance"
         )
 
+    # Accumulation button - solid when active, outline when not
+    if current_page == 'accumulation':
+        accum_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-cubes me-2"),
+                "Accumulation"
+            ], className="btn btn-warning btn-sm me-2"),
+            href="/accumulation"
+        )
+    else:
+        accum_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-cubes me-2"),
+                "Accumulation"
+            ], className="btn btn-outline-warning btn-sm me-2"),
+            href="/accumulation"
+        )
+
     # Back to Analysis button - always outline
     analysis_btn = dcc.Link(
         dbc.Button([
@@ -144,7 +162,7 @@ def create_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
         href="/analysis"
     )
 
-    return html.Div([fundamental_btn, sr_btn, analysis_btn], className="d-inline-flex flex-wrap")
+    return html.Div([fundamental_btn, sr_btn, accum_btn, analysis_btn], className="d-inline-flex flex-wrap")
 
 
 # Initialize Dash app with Font Awesome for help icons
@@ -4425,6 +4443,146 @@ def get_stock_profile(stock_code: str) -> dict:
     return {}
 
 
+# ============================================================
+# PAGE: ACCUMULATION (New Sub-menu from Analysis)
+# ============================================================
+
+def create_accumulation_page(stock_code='CDIA'):
+    """Create Accumulation analysis page - Active Alerts & Accumulation Phase Criteria"""
+    try:
+        # Get required data
+        composite = get_comprehensive_analysis(stock_code)
+        alerts = generate_alerts(stock_code)
+        accum_phase = composite.get('accumulation_phase', {})
+
+    except Exception as e:
+        return html.Div([
+            dbc.Alert(f"Error loading Accumulation analysis for {stock_code}: {str(e)}", color="danger"),
+            html.P("Pastikan data sudah diupload dengan benar")
+        ])
+
+    return html.Div([
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-cubes me-2"),
+                f"Accumulation Analysis - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_submenu_nav('accumulation', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
+
+        # ========== ACTIVE ALERTS ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.H5("Active Alerts", className="mb-0 d-inline"),
+                dbc.Badge(f"{len(alerts)}", color="warning" if alerts else "secondary", className="ms-2")
+            ]),
+            dbc.CardBody([
+                create_enhanced_alerts_list(alerts) if alerts else dbc.Alert("Tidak ada alert aktif", color="secondary")
+            ])
+        ], className="mb-4"),
+
+        # ========== ACCUMULATION PHASE CRITERIA ==========
+        dbc.Card([
+            dbc.CardHeader(html.H5("Accumulation Phase Criteria", className="mb-0")),
+            dbc.CardBody([
+                create_accumulation_criteria_table(accum_phase.get('criteria', {})),
+                html.Hr(),
+                html.Div([
+                    html.H6("Cara Membaca Kriteria Akumulasi:", className="text-info mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("1. Sideways"), html.Br(),
+                                "Range harga sempit (<10%). Ideal untuk akumulasi.", html.Br(),
+                                html.Span("✓", className="text-success"), " = Range <10%  ",
+                                html.Span("✗", className="text-danger"), " = Range >10%"
+                            ], className="text-muted")
+                        ], xs=12, md=4),
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("2. Volume Increasing"), html.Br(),
+                                "Volume naik = ada aktivitas beli.", html.Br(),
+                                html.Span("✓", className="text-success"), " = Vol naik  ",
+                                html.Span("✗", className="text-danger"), " = Vol turun"
+                            ], className="text-muted")
+                        ], xs=12, md=4),
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("3. Foreign Positive"), html.Br(),
+                                "Asing net buy dalam 10 hari.", html.Br(),
+                                html.Span("✓", className="text-success"), " = Net buy  ",
+                                html.Span("✗", className="text-danger"), " = Net sell"
+                            ], className="text-muted")
+                        ], xs=12, md=4),
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("4. Sensitive Brokers Active"), html.Br(),
+                                "Broker sensitif sedang akumulasi.", html.Br(),
+                                html.Span("✓", className="text-success"), " = >2 broker aktif  ",
+                                html.Span("✗", className="text-danger"), " = <2 broker"
+                            ], className="text-muted")
+                        ], xs=12, md=4),
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("5. Not Breakout"), html.Br(),
+                                "Belum breakout = masih bisa entry.", html.Br(),
+                                html.Span("✓", className="text-success"), " = Belum breakout  ",
+                                html.Span("✗", className="text-danger"), " = Sudah breakout"
+                            ], className="text-muted")
+                        ], xs=12, md=4),
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("Ideal Akumulasi:"), html.Br(),
+                                "Minimal 3-4 kriteria terpenuhi (✓)", html.Br(),
+                                html.Span("Score tinggi = lebih baik", className="text-success")
+                            ], className="text-muted")
+                        ], xs=12, md=4),
+                    ]),
+                ])
+            ])
+        ], className="mb-4"),
+
+        # ========== ACCUMULATION PHASE STATUS ==========
+        dbc.Card([
+            dbc.CardHeader(html.H5([
+                html.I(className="fas fa-chart-pie me-2"),
+                "Accumulation Phase Status"
+            ], className="mb-0")),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.Strong("Phase:"),
+                        html.H4(
+                            accum_phase.get('phase', 'UNKNOWN'),
+                            className=f"text-{'success' if accum_phase.get('phase') == 'ACCUMULATION' else 'warning' if accum_phase.get('phase') == 'DISTRIBUTION' else 'secondary'}"
+                        )
+                    ], width=3),
+                    dbc.Col([
+                        html.Strong("Score:"),
+                        html.H4(f"{accum_phase.get('score', 0):.0f}/100")
+                    ], width=3),
+                    dbc.Col([
+                        html.Strong("Criteria Met:"),
+                        html.H4(f"{accum_phase.get('criteria_met', 0)}/5")
+                    ], width=3),
+                    dbc.Col([
+                        html.Strong("Signal:"),
+                        html.H4(
+                            accum_phase.get('signal', 'NEUTRAL'),
+                            className=f"text-{'success' if 'BUY' in accum_phase.get('signal', '') else 'danger' if 'SELL' in accum_phase.get('signal', '') else 'secondary'}"
+                        )
+                    ], width=3),
+                ]),
+                html.Hr(),
+                html.P(accum_phase.get('message', 'No message'), className="text-muted")
+            ])
+        ], className="mb-4"),
+    ])
+
+
 def create_company_profile_page(stock_code='CDIA'):
     """Create Company Profile page with attractive, colorful design"""
     profile = get_stock_profile(stock_code)
@@ -5538,7 +5696,7 @@ def create_analysis_page(stock_code='CDIA'):
         return 'danger'
 
     return html.Div([
-        # Page Header with submenu (Fundamental first, then Support & Resistance)
+        # Page Header with submenu (Fundamental | Support & Resistance | Accumulation)
         html.Div([
             html.H4(f"Comprehensive Analysis - {stock_code}", className="mb-0 d-inline-block me-3"),
             dcc.Link(
@@ -5552,8 +5710,15 @@ def create_analysis_page(stock_code='CDIA'):
                 dbc.Button([
                     html.I(className="fas fa-layer-group me-2"),
                     "Support & Resistance"
-                ], color="info", size="sm"),
+                ], color="info", size="sm", className="me-2"),
                 href="/support-resistance"
+            ),
+            dcc.Link(
+                dbc.Button([
+                    html.I(className="fas fa-cubes me-2"),
+                    "Accumulation"
+                ], color="warning", size="sm"),
+                href="/accumulation"
             )
         ], className="d-flex align-items-center flex-wrap mb-4"),
 
@@ -5867,17 +6032,6 @@ def create_analysis_page(stock_code='CDIA'):
             ])
         ], className="mb-4", color="dark", outline=True),
 
-        # ========== ALERTS SECTION ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.H5("Active Alerts", className="mb-0 d-inline"),
-                dbc.Badge(f"{len(alerts)}", color="warning" if alerts else "secondary", className="ms-2")
-            ]),
-            dbc.CardBody([
-                create_enhanced_alerts_list(alerts) if alerts else dbc.Alert("Tidak ada alert aktif", color="secondary")
-            ])
-        ], className="mb-4"),
-
         # ========== BROKER SENSITIVITY RANKING ==========
         dbc.Card([
             dbc.CardHeader([
@@ -5939,69 +6093,6 @@ def create_analysis_page(stock_code='CDIA'):
                     ])
                 ], color="dark", outline=True, className="h-100")
             ], width=6),
-        ], className="mb-4"),
-
-        # ========== ACCUMULATION PHASE CRITERIA ==========
-        dbc.Card([
-            dbc.CardHeader(html.H5("Accumulation Phase Criteria", className="mb-0")),
-            dbc.CardBody([
-                create_accumulation_criteria_table(accum_phase['criteria']),
-                html.Hr(),
-                html.Div([
-                    html.H6("Cara Membaca Kriteria Akumulasi:", className="text-info mb-2"),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Small([
-                                html.Strong("1. Sideways"), html.Br(),
-                                "Range harga sempit (<10%). Ideal untuk akumulasi.", html.Br(),
-                                html.Span("✓", className="text-success"), " = Range <10%  ",
-                                html.Span("✗", className="text-danger"), " = Range >10%"
-                            ], className="text-muted")
-                        ], xs=12, md=4),
-                        dbc.Col([
-                            html.Small([
-                                html.Strong("2. Volume Increasing"), html.Br(),
-                                "Volume naik = ada aktivitas beli.", html.Br(),
-                                html.Span("✓", className="text-success"), " = Vol naik  ",
-                                html.Span("✗", className="text-danger"), " = Vol turun"
-                            ], className="text-muted")
-                        ], xs=12, md=4),
-                        dbc.Col([
-                            html.Small([
-                                html.Strong("3. Foreign Positive"), html.Br(),
-                                "Asing net buy dalam 10 hari.", html.Br(),
-                                html.Span("✓", className="text-success"), " = Net buy  ",
-                                html.Span("✗", className="text-danger"), " = Net sell"
-                            ], className="text-muted")
-                        ], xs=12, md=4),
-                    ], className="mb-2"),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Small([
-                                html.Strong("4. Sensitive Brokers Active"), html.Br(),
-                                "Broker sensitif sedang akumulasi.", html.Br(),
-                                html.Span("✓", className="text-success"), " = >2 broker aktif  ",
-                                html.Span("✗", className="text-danger"), " = <2 broker"
-                            ], className="text-muted")
-                        ], xs=12, md=4),
-                        dbc.Col([
-                            html.Small([
-                                html.Strong("5. Not Breakout"), html.Br(),
-                                "Belum breakout = masih bisa entry.", html.Br(),
-                                html.Span("✓", className="text-success"), " = Belum breakout  ",
-                                html.Span("✗", className="text-danger"), " = Sudah breakout"
-                            ], className="text-muted")
-                        ], xs=12, md=4),
-                        dbc.Col([
-                            html.Small([
-                                html.Strong("Ideal Akumulasi:"), html.Br(),
-                                "Minimal 3-4 kriteria terpenuhi (✓)", html.Br(),
-                                html.Span("Score tinggi = lebih baik", className="text-success")
-                            ], className="text-muted")
-                        ], xs=12, md=4),
-                    ]),
-                ])
-            ])
         ], className="mb-4"),
 
         # ========== VOLUME ANALYSIS DETAIL ==========
@@ -7974,6 +8065,8 @@ def display_page(pathname, selected_stock):
         return create_fundamental_page(selected_stock)
     elif pathname == '/support-resistance':
         return create_support_resistance_page(selected_stock)
+    elif pathname == '/accumulation':
+        return create_accumulation_page(selected_stock)
     else:
         return create_landing_page()
 
