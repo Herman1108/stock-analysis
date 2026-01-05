@@ -314,9 +314,9 @@ def format_value(val):
     return f"{val:.0f}"
 
 def get_available_stocks():
-    """Get list of stocks available in database"""
+    """Get list of stocks available in database (no cache for fresh data)"""
     query = "SELECT DISTINCT stock_code FROM stock_daily ORDER BY stock_code"
-    results = execute_query(query)
+    results = execute_query(query, use_cache=False)  # No cache to always get fresh list
     if results:
         return [r['stock_code'] for r in results]
     return ['CDIA']  # Default
@@ -8096,12 +8096,12 @@ def refresh_sensitive_page(n_clicks, stock_code):
 
 # Upload callbacks
 @app.callback(
-    [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children'), Output('stock-selector', 'options')],
+    [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children'), Output('stock-selector', 'options'), Output('stock-selector', 'value')],
     [Input('upload-data', 'contents')],
-    [State('upload-data', 'filename'), State('upload-stock-code', 'value')],
+    [State('upload-data', 'filename'), State('upload-stock-code', 'value'), State('stock-selector', 'value')],
     prevent_initial_call=True
 )
-def handle_upload(contents, filename, stock_code):
+def handle_upload(contents, filename, stock_code, current_stock):
     import tempfile
     import traceback
 
@@ -8113,10 +8113,10 @@ def handle_upload(contents, filename, stock_code):
         return [{'label': s, 'value': s} for s in stocks]
 
     if contents is None:
-        return html.Div(), stocks_list, html.Div("No imports yet", className="text-muted"), get_stock_options()
+        return html.Div(), stocks_list, html.Div("No imports yet", className="text-muted"), get_stock_options(), current_stock
 
     if not stock_code or len(stock_code) < 2:
-        return dbc.Alert("Masukkan kode saham terlebih dahulu (min 2 karakter)", color="danger"), stocks_list, html.Div(), get_stock_options()
+        return dbc.Alert("Masukkan kode saham terlebih dahulu (min 2 karakter)", color="danger"), stocks_list, html.Div(), get_stock_options(), current_stock
 
     stock_code = stock_code.upper().strip()
 
@@ -8204,7 +8204,7 @@ def handle_upload(contents, filename, stock_code):
         except Exception as backup_error:
             print(f"[UPLOAD] Auto backup failed (non-critical): {backup_error}")
 
-        return status, create_stocks_list(), log, get_stock_options()
+        return status, create_stocks_list(), log, get_stock_options(), stock_code  # Set dropdown to newly uploaded stock
 
     except Exception as e:
         error_detail = traceback.format_exc()
@@ -8218,7 +8218,7 @@ def handle_upload(contents, filename, stock_code):
                 html.Summary("Detail Error"),
                 html.Pre(error_detail, style={'fontSize': '10px', 'maxHeight': '200px', 'overflow': 'auto'})
             ])
-        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger"), get_stock_options()
+        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger"), get_stock_options(), current_stock
 
 
 def create_stocks_list():
