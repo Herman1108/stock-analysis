@@ -15,8 +15,16 @@ import threading
 # Database configuration - supports Railway DATABASE_URL or local config
 DATABASE_URL = os.environ.get('DATABASE_URL')
 
+# Connection timeout settings (in seconds)
+CONNECT_TIMEOUT = 30  # Connection timeout
+STATEMENT_TIMEOUT = 60000  # Query timeout in ms (60 seconds)
+
 if DATABASE_URL:
-    # Railway/Production: use DATABASE_URL
+    # Railway/Production: use DATABASE_URL with timeout
+    # Append connect_timeout if not present
+    if 'connect_timeout' not in DATABASE_URL:
+        separator = '&' if '?' in DATABASE_URL else '?'
+        DATABASE_URL = f"{DATABASE_URL}{separator}connect_timeout={CONNECT_TIMEOUT}"
     DB_CONFIG = {'dsn': DATABASE_URL}
 else:
     # Local development
@@ -25,7 +33,8 @@ else:
         'database': os.environ.get('DB_NAME', 'stock_analysis'),
         'user': os.environ.get('DB_USER', 'postgres'),
         'password': os.environ.get('DB_PASSWORD', 'postgres'),
-        'port': int(os.environ.get('DB_PORT', 5432))
+        'port': int(os.environ.get('DB_PORT', 5432)),
+        'connect_timeout': CONNECT_TIMEOUT
     }
 
 # ============================================================
