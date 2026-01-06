@@ -2171,7 +2171,6 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
                     dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
-                    dbc.NavItem(dcc.Link(dbc.Button("Ranking", color="warning", size="sm", className="fw-bold text-white me-1"), href="/ranking")),
                     dbc.NavItem(dcc.Link(dbc.Button("Alerts", color="warning", size="sm", className="fw-bold text-white me-1"), href="/alerts")),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
                 ], className="ms-auto", navbar=True),
@@ -2433,16 +2432,7 @@ def create_landing_page():
                             dbc.Button("Upload", href="/upload", color="outline-light", size="sm")
                         ])
                     ], color="secondary")
-                ], md=4),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H5([html.I(className="fas fa-trophy me-2"), "Broker Ranking"], className="mb-2"),
-                            html.P("Lihat peringkat broker akumulator & distributor", className="text-muted small mb-2"),
-                            dbc.Button("Ranking", href="/ranking", color="outline-light", size="sm")
-                        ])
-                    ], color="info")
-                ], md=4),
+                ], md=6),
                 dbc.Col([
                     dbc.Card([
                         dbc.CardBody([
@@ -2451,7 +2441,7 @@ def create_landing_page():
                             dbc.Button("Alerts", href="/alerts", color="outline-light", size="sm")
                         ])
                     ], color="warning")
-                ], md=4),
+                ], md=6),
             ], className="mb-4")
         ], fluid=True)
     ])
@@ -7528,159 +7518,6 @@ def create_dashboard_page(stock_code='CDIA'):
     ])
 
 # ============================================================
-# PAGE: BROKER RANKING (Dynamic)
-# ============================================================
-
-def create_ranking_page(stock_code='CDIA'):
-    broker_df = get_broker_data(stock_code)
-
-    if broker_df.empty:
-        return html.Div([
-            dbc.Alert(f"Tidak ada data broker untuk {stock_code}", color="warning"),
-            html.P("Silakan upload data terlebih dahulu di menu Upload Data")
-        ])
-
-    # Overall ranking
-    overall = broker_df.groupby('broker_code').agg({
-        'buy_value': 'sum',
-        'sell_value': 'sum',
-        'net_value': 'sum',
-        'buy_lot': 'sum',
-        'sell_lot': 'sum',
-        'net_lot': 'sum',
-        'date': 'count'
-    }).reset_index()
-    overall.columns = ['Broker', 'Total Buy', 'Total Sell', 'Net Value',
-                       'Buy Lot', 'Sell Lot', 'Net Lot', 'Days Active']
-    overall = overall.sort_values('Net Value', ascending=False)
-
-    # Get Avg Buy data
-    avg_buy_df = get_broker_avg_buy(stock_code, days=60)
-    avg_buy_dict = {}
-    if not avg_buy_df.empty:
-        avg_buy_dict = dict(zip(avg_buy_df['broker_code'], avg_buy_df['avg_buy_price']))
-
-    overall['Net (B)'] = overall['Net Value'].apply(lambda x: f"{x/1e9:,.1f}")
-    overall['Buy (B)'] = overall['Total Buy'].apply(lambda x: f"{x/1e9:,.1f}")
-    overall['Sell (B)'] = overall['Total Sell'].apply(lambda x: f"{x/1e9:,.1f}")
-    overall['Avg Buy'] = overall['Broker'].apply(lambda x: f"Rp {avg_buy_dict.get(x, 0):,.0f}" if avg_buy_dict.get(x, 0) > 0 else "-")
-    # Add broker type classification
-    overall['Tipe'] = overall['Broker'].apply(lambda x: get_broker_info(x)['type_name'])
-
-    accumulators = overall[overall['Net Value'] > 0].head(20)
-    distributors = overall[overall['Net Value'] < 0].head(20)
-
-    # Style conditional based on broker type
-    style_data_conditional = [
-        {'if': {'row_index': 'odd'}, 'backgroundColor': '#383838'},
-        {'if': {'filter_query': '{Tipe} = Asing'}, 'backgroundColor': 'rgba(220, 53, 69, 0.2)'},
-        {'if': {'filter_query': '{Tipe} = BUMN/Pemerintah'}, 'backgroundColor': 'rgba(40, 167, 69, 0.2)'},
-        {'if': {'filter_query': '{Tipe} = Lokal'}, 'backgroundColor': 'rgba(111, 66, 193, 0.2)'},
-    ]
-
-    # Legend
-    broker_legend = html.Div([
-        html.Small("Legenda Broker: ", className="text-muted me-2"),
-        html.Span([
-            html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['FOREIGN'], "fontSize": "10px"}),
-            "Asing "
-        ], className="me-3", style={"fontSize": "11px"}),
-        html.Span([
-            html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['BUMN'], "fontSize": "10px"}),
-            "BUMN "
-        ], className="me-3", style={"fontSize": "11px"}),
-        html.Span([
-            html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS['LOCAL'], "fontSize": "10px"}),
-            "Lokal "
-        ], style={"fontSize": "11px"}),
-    ], className="mb-3")
-
-    # Get date range
-    date_range = f"{broker_df['date'].min().strftime('%d %b %Y')} - {broker_df['date'].max().strftime('%d %b %Y')}"
-
-    return html.Div([
-        html.H4(f"Broker Ranking - {stock_code}", className="mb-2"),
-        html.P(f"Period: {date_range}", className="text-muted mb-2"),
-        broker_legend,
-
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("Top 20 Accumulators", className="text-success mb-0")),
-                    dbc.CardBody([
-                        dash_table.DataTable(
-                            data=accumulators[['Broker', 'Tipe', 'Net (B)', 'Buy (B)', 'Avg Buy', 'Days Active']].to_dict('records'),
-                            columns=[
-                                {'name': 'Broker', 'id': 'Broker'},
-                                {'name': 'Tipe', 'id': 'Tipe'},
-                                {'name': 'Net (B)', 'id': 'Net (B)'},
-                                {'name': 'Buy (B)', 'id': 'Buy (B)'},
-                                {'name': 'Avg Buy', 'id': 'Avg Buy'},
-                                {'name': 'Days', 'id': 'Days Active'},
-                            ],
-                            style_table={'overflowX': 'auto'},
-                            style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '8px', 'fontSize': '12px'},
-                            style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
-                            style_data_conditional=style_data_conditional,
-                            page_size=20
-                        )
-                    ])
-                ], className="h-100")
-            ], width=6),
-
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader(html.H5("Top 20 Distributors", className="text-danger mb-0")),
-                    dbc.CardBody([
-                        dash_table.DataTable(
-                            data=distributors[['Broker', 'Tipe', 'Net (B)', 'Buy (B)', 'Avg Buy', 'Days Active']].to_dict('records'),
-                            columns=[
-                                {'name': 'Broker', 'id': 'Broker'},
-                                {'name': 'Tipe', 'id': 'Tipe'},
-                                {'name': 'Net (B)', 'id': 'Net (B)'},
-                                {'name': 'Buy (B)', 'id': 'Buy (B)'},
-                                {'name': 'Avg Buy', 'id': 'Avg Buy'},
-                                {'name': 'Days', 'id': 'Days Active'},
-                            ],
-                            style_table={'overflowX': 'auto'},
-                            style_cell={'textAlign': 'left', 'backgroundColor': '#303030', 'color': 'white', 'padding': '8px', 'fontSize': '12px'},
-                            style_header={'backgroundColor': '#404040', 'fontWeight': 'bold'},
-                            style_data_conditional=style_data_conditional,
-                            page_size=20
-                        )
-                    ])
-                ], className="h-100")
-            ], width=6),
-        ], className="mb-4"),
-
-        # Distribution Chart
-        dbc.Card([
-            dbc.CardHeader("Broker Net Flow Distribution"),
-            dbc.CardBody([
-                dcc.Graph(figure=create_broker_distribution_chart(overall), config={'displayModeBar': False})
-            ])
-        ])
-    ])
-
-
-def create_broker_distribution_chart(df):
-    top_acc = df[df['Net Value'] > 0].head(15)
-    top_dist = df[df['Net Value'] < 0].head(15)
-    combined = pd.concat([top_acc, top_dist]).sort_values('Net Value', ascending=True)
-    colors = ['#dc3545' if x < 0 else '#28a745' for x in combined['Net Value']]
-
-    fig = go.Figure(go.Bar(
-        x=combined['Net Value'] / 1e9,
-        y=combined['Broker'],
-        orientation='h',
-        marker_color=colors,
-        text=[f"{x/1e9:,.0f}B" for x in combined['Net Value']],
-        textposition='outside'
-    ))
-    fig.update_layout(template='plotly_dark', height=600, xaxis_title='Net Value (Billion Rp)', showlegend=False)
-    return fig
-
-# ============================================================
 # PAGE: ALERTS (Dynamic)
 # ============================================================
 
@@ -8945,8 +8782,6 @@ def display_page(pathname, selected_stock):
         return create_bandarmology_page(selected_stock)
     elif pathname == '/summary':
         return create_summary_page(selected_stock)
-    elif pathname == '/ranking':
-        return create_ranking_page(selected_stock)
     elif pathname == '/alerts':
         return create_alerts_page(selected_stock)
     elif pathname == '/position':
