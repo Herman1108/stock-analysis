@@ -2192,7 +2192,7 @@ def create_navbar():
 # ============================================================
 
 def create_landing_page():
-    """Create landing page with stock selection and overview"""
+    """Create landing page with stock selection and overview using unified analysis data from 3 submenus"""
     stocks = get_available_stocks()
 
     if not stocks:
@@ -2201,154 +2201,177 @@ def create_landing_page():
             dbc.Button("Upload Data", href="/upload", color="primary")
         ])
 
-    # Build stock cards with summary
+    # Build stock cards with unified analysis summary
     stock_cards = []
     for stock_code in stocks:
         try:
-            # Get basic data first (more reliable)
-            broker_df = get_broker_data(stock_code)
+            # Get unified analysis from 3 submenus (Fundamental, S&R, Accumulation)
+            unified = get_unified_analysis_summary(stock_code)
+            decision = unified.get('decision', {})
+            accum = unified.get('accumulation', {})
+            fundamental = unified.get('fundamental', {})
+            sr = unified.get('support_resistance', {})
+            summary = accum.get('summary', {})
+            confidence = accum.get('confidence', {})
+            markup_trigger = accum.get('markup_trigger', {})
+
+            # Get current price from S&R or Accum
+            current_price = sr.get('current_price', 0) or accum.get('current_price', 0)
+            entry_zone = unified.get('entry_zone', {})
+            invalidation = unified.get('invalidation', 0)
+
+            # Get basic data for additional info
             price_df = get_price_data(stock_code)
-
-            # Safe access to price data
-            last_price = 0
             price_change = 0
-            if not price_df.empty:
-                # Sort by date to ensure latest is last
-                if 'date' in price_df.columns:
-                    price_df = price_df.sort_values('date')
+            if not price_df.empty and len(price_df) >= 2:
+                price_df = price_df.sort_values('date') if 'date' in price_df.columns else price_df
+                close_col = 'close_price' if 'close_price' in price_df.columns else 'close'
+                if close_col in price_df.columns:
+                    today = price_df[close_col].iloc[-1]
+                    yesterday = price_df[close_col].iloc[-2]
+                    if yesterday > 0:
+                        price_change = ((today - yesterday) / yesterday) * 100
 
-                # Try different column names for close price
-                if 'close_price' in price_df.columns and len(price_df) > 0:
-                    last_price = price_df['close_price'].iloc[-1]
-                elif 'close' in price_df.columns and len(price_df) > 0:
-                    last_price = price_df['close'].iloc[-1]
+            # Determine action from decision
+            action = decision.get('action', 'WAIT')
+            action_color = decision.get('color', 'secondary')
+            action_icon = decision.get('icon', '⏳')
 
-                # Calculate price change from last 2 days
-                if len(price_df) >= 2:
-                    close_col = 'close_price' if 'close_price' in price_df.columns else 'close'
-                    if close_col in price_df.columns:
-                        today = price_df[close_col].iloc[-1]
-                        yesterday = price_df[close_col].iloc[-2]
-                        if yesterday > 0:
-                            price_change = ((today - yesterday) / yesterday) * 100
+            # Overall signal from accumulation
+            overall_signal = summary.get('overall_signal', 'NETRAL')
+            signal_color = "success" if overall_signal == 'AKUMULASI' else "danger" if overall_signal == 'DISTRIBUSI' else "secondary"
 
-            # Date range
-            if not broker_df.empty:
-                date_range = f"{broker_df['date'].min().strftime('%d %b')} - {broker_df['date'].max().strftime('%d %b %Y')}"
-                trading_days = broker_df['date'].nunique()
-            else:
-                date_range = "No data"
-                trading_days = 0
-
-            # Top accumulator
-            if not broker_df.empty:
-                broker_totals = broker_df.groupby('broker_code')['net_value'].sum()
-                top_acc = broker_totals.idxmax() if len(broker_totals) > 0 else "-"
-            else:
-                top_acc = "-"
-
-            # Foreign flow (simple calculation from broker data)
-            foreign_net = 0
-            foreign_trend = "Netral"
-            foreign_color = "secondary"
-            if not broker_df.empty:
-                # Get last 5 days foreign flow
-                foreign_brokers = ['ML', 'CS', 'YU', 'RX', 'CG', 'BK', 'KZ', 'FS', 'AK', 'DB', 'UB', 'MS', 'JP', 'GS', 'MG']
-                recent_dates = broker_df['date'].drop_duplicates().nlargest(5)
-                recent_df = broker_df[broker_df['date'].isin(recent_dates)]
-                foreign_df = recent_df[recent_df['broker_code'].isin(foreign_brokers)]
-                if not foreign_df.empty:
-                    foreign_net = foreign_df['net_value'].sum()
-                    foreign_trend = "Inflow" if foreign_net > 0 else "Outflow" if foreign_net < 0 else "Netral"
-                    foreign_color = "success" if foreign_net > 0 else "danger" if foreign_net < 0 else "secondary"
-
-            # Try to get composite score (optional - fallback if fails)
-            score = 50  # Default
-            action = "HOLD"
-            color = "secondary"
-            try:
-                analysis = get_comprehensive_analysis(stock_code)
-                if analysis and 'composite' in analysis:
-                    composite = analysis.get('composite', {})
-                    score = composite.get('composite_score', 50)
-                    action = composite.get('action', 'HOLD')
-                    color = composite.get('color', 'secondary')
-            except:
-                pass  # Use defaults
-
-            # Create card
+            # Create card with unified analysis
             card = dbc.Col([
                 dbc.Card([
+                    # Header with Decision Action
                     dbc.CardHeader([
                         html.Div([
-                            html.H3(stock_code, className="mb-0 d-inline"),
-                            dbc.Badge(action, color=color, className="ms-2 fs-6")
-                        ])
-                    ], className="bg-dark"),
+                            html.H3(stock_code, className="mb-0 d-inline fw-bold"),
+                            dbc.Badge([
+                                html.Span(action_icon, className="me-1"),
+                                action
+                            ], color=action_color, className="ms-2 fs-6 px-3 py-2")
+                        ], className="d-flex align-items-center justify-content-between")
+                    ], className="bg-dark", style={"borderBottom": f"3px solid var(--bs-{action_color})"}),
+
                     dbc.CardBody([
-                        # Composite Score
+                        # Price & Change Row
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Harga Saat Ini", className="text-muted d-block"),
+                                    html.H4(f"Rp {current_price:,.0f}", className="mb-0 text-warning"),
+                                ], className="text-center")
+                            ], width=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Perubahan", className="text-muted d-block"),
+                                    html.H4(
+                                        f"{price_change:+.1f}%",
+                                        className=f"mb-0 text-{'success' if price_change > 0 else 'danger' if price_change < 0 else 'muted'}"
+                                    ),
+                                ], className="text-center")
+                            ], width=6),
+                        ], className="mb-3"),
+
+                        # Markup Trigger Alert (if detected)
                         html.Div([
-                            html.Div([
-                                html.Span("Composite Score", className="text-muted small"),
-                                html.H2(f"{score:.0f}", className=f"mb-0 text-{color}")
-                            ], className="text-center mb-3"),
-                        ]),
+                            dbc.Badge([
+                                html.Span("🔥", className="me-1"),
+                                "MARKUP TRIGGER!"
+                            ], color="warning", className="w-100 py-2 mb-2")
+                        ]) if markup_trigger.get('markup_triggered') else html.Div(),
 
                         html.Hr(className="my-2"),
 
-                        # Key Metrics Grid
+                        # 3 Submenu Summary Row
+                        html.H6("Ringkasan 3 Analisis", className="text-muted small mb-2 text-center"),
                         dbc.Row([
+                            # Fundamental
                             dbc.Col([
-                                html.Small("Harga", className="text-muted d-block"),
-                                html.Strong(f"Rp {last_price:,.0f}")
-                            ], width=6),
-                            dbc.Col([
-                                html.Small("Change", className="text-muted d-block"),
-                                html.Strong(
-                                    f"{price_change:+.1f}%",
-                                    className=f"text-{'success' if price_change > 0 else 'danger' if price_change < 0 else 'muted'}"
-                                )
-                            ], width=6),
-                        ], className="mb-2"),
+                                html.Div([
+                                    html.Small("Fundamental", className="text-success d-block"),
+                                    html.Div([
+                                        html.Span(f"PER {fundamental.get('per', 0):.1f}x" if fundamental.get('has_data') else "N/A",
+                                                  className="small"),
+                                    ]),
+                                    dbc.Badge(fundamental.get('valuation', 'N/A'),
+                                              color=fundamental.get('valuation_color', 'secondary'),
+                                              className="mt-1", style={"fontSize": "10px"})
+                                ], className="text-center")
+                            ], width=4),
 
-                        dbc.Row([
+                            # Support & Resistance
                             dbc.Col([
-                                html.Small("Foreign Flow", className="text-muted d-block"),
-                                dbc.Badge(foreign_trend, color=foreign_color, className="mt-1")
-                            ], width=6),
+                                html.Div([
+                                    html.Small("Posisi Harga", className="text-info d-block"),
+                                    html.Div([
+                                        html.Span(
+                                            "Dekat Support" if sr.get('position') == 'NEAR_SUPPORT'
+                                            else "Dekat Resist" if sr.get('position') == 'NEAR_RESISTANCE'
+                                            else "Di Tengah" if sr.get('has_data') else "N/A",
+                                            className="small"
+                                        ),
+                                    ]),
+                                    dbc.Badge(
+                                        f"{sr.get('dist_from_support', 0):.0f}% dari support" if sr.get('has_data') else "N/A",
+                                        color="success" if sr.get('position') == 'NEAR_SUPPORT' else "danger" if sr.get('position') == 'NEAR_RESISTANCE' else "secondary",
+                                        className="mt-1", style={"fontSize": "10px"}
+                                    )
+                                ], className="text-center")
+                            ], width=4),
+
+                            # Accumulation
                             dbc.Col([
-                                html.Small("Top Broker", className="text-muted d-block"),
-                                html.Strong(top_acc)
-                            ], width=6),
-                        ], className="mb-2"),
+                                html.Div([
+                                    html.Small("Akumulasi", className="text-warning d-block"),
+                                    dbc.Badge(overall_signal, color=signal_color, className="mb-1"),
+                                    html.Div([
+                                        html.Span(f"{confidence.get('passed', 0)}/6 Valid", className="small text-muted"),
+                                    ]),
+                                ], className="text-center")
+                            ], width=4),
+                        ], className="mb-3"),
 
                         html.Hr(className="my-2"),
 
-                        # Data Info
+                        # Entry Zone & Invalidation
+                        html.Div([
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Small("Entry Zone", className="text-success d-block"),
+                                    html.Strong(f"{entry_zone.get('low', 0):,.0f}-{entry_zone.get('high', 0):,.0f}" if entry_zone else "N/A", className="small")
+                                ], width=6, className="text-center"),
+                                dbc.Col([
+                                    html.Small("Invalidation", className="text-danger d-block"),
+                                    html.Strong(f"< {invalidation:,.0f}" if invalidation else "N/A", className="small")
+                                ], width=6, className="text-center"),
+                            ])
+                        ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
+
+                        # Decision Reason
                         html.Div([
                             html.Small([
-                                html.I(className="fas fa-calendar me-1"),
-                                f"{trading_days} trading days"
-                            ], className="text-muted d-block"),
-                            html.Small([
-                                html.I(className="fas fa-clock me-1"),
-                                date_range
-                            ], className="text-muted"),
+                                html.I(className=f"fas fa-{'check-circle text-success' if action in ['ENTRY', 'ADD'] else 'exclamation-circle text-warning' if action == 'WAIT' else 'times-circle text-danger'} me-2"),
+                                decision.get('description', '')[:60] + "..." if len(decision.get('description', '')) > 60 else decision.get('description', '')
+                            ], className="text-muted")
                         ], className="mb-3"),
 
                         # Action Buttons
                         html.Div([
                             dbc.Button([
+                                html.I(className="fas fa-chart-pie me-1"),
+                                "Analysis"
+                            ], href=f"/analysis?stock={stock_code}", color=action_color, size="sm", className="me-1 flex-grow-1"),
+                            dbc.Button([
                                 html.I(className="fas fa-chart-line me-1"),
                                 "Dashboard"
-                            ], href=f"/dashboard?stock={stock_code}", color="primary", size="sm", className="me-1"),
-                            dbc.Button([
-                                html.I(className="fas fa-search me-1"),
-                                "Analysis"
-                            ], href=f"/analysis?stock={stock_code}", color="outline-info", size="sm"),
-                        ], className="d-flex justify-content-center")
+                            ], href=f"/dashboard?stock={stock_code}", color="outline-light", size="sm", className="flex-grow-1"),
+                        ], className="d-flex")
                     ])
-                ], className="h-100 shadow-sm", color="dark", outline=True)
+                ], className="h-100 shadow", color="dark", outline=True,
+                   style={"borderColor": f"var(--bs-{action_color})", "borderWidth": "2px"})
             ], md=6, lg=4, className="mb-4")
 
             stock_cards.append(card)
@@ -2375,7 +2398,7 @@ def create_landing_page():
                     "Stock Broker Analysis"
                 ], className="display-5 text-center mb-3"),
                 html.P(
-                    "Analisis mendalam pergerakan broker, akumulasi/distribusi, dan sinyal trading untuk saham pilihan Anda",
+                    "Analisis terintegrasi: Fundamental, Support/Resistance, dan Akumulasi untuk keputusan trading optimal",
                     className="lead text-center text-muted mb-4"
                 ),
                 html.Hr(className="my-4"),
@@ -2384,10 +2407,18 @@ def create_landing_page():
 
         # Stock Selection
         dbc.Container([
-            html.H4([
-                html.I(className="fas fa-list-alt me-2"),
-                f"Pilih Emiten ({len(stocks)} tersedia)"
-            ], className="mb-4"),
+            html.Div([
+                html.H4([
+                    html.I(className="fas fa-list-alt me-2"),
+                    f"Pilih Emiten ({len(stocks)} tersedia)"
+                ], className="mb-0 d-inline-block me-3"),
+                # Legend
+                html.Div([
+                    dbc.Badge("🟢 ENTRY/ADD", color="success", className="me-1 small"),
+                    dbc.Badge("🟡 WAIT/HOLD", color="warning", className="me-1 small"),
+                    dbc.Badge("🔴 EXIT", color="danger", className="small"),
+                ], className="d-inline-block")
+            ], className="mb-4 d-flex align-items-center flex-wrap"),
 
             dbc.Row(stock_cards),
 
