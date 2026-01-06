@@ -2162,7 +2162,7 @@ def create_navbar():
                 ),
             ], className="d-flex align-items-center"),
 
-            # Hamburger toggle button for mobile - orange color
+            # Hamburger toggle button for mobile only - orange color
             dbc.Button(
                 html.I(className="fas fa-bars"),
                 id="navbar-toggler",
@@ -2173,17 +2173,26 @@ def create_navbar():
                 style={"border": "none"}
             ),
 
-            # Collapsible nav items - Orange background on mobile dropdown
+            # Desktop nav items - always visible on large screens
+            dbc.Nav([
+                dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
+                dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
+                dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
+                dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
+            ], className="ms-auto d-none d-lg-flex", navbar=True),
+
+            # Mobile dropdown menu - only visible when hamburger clicked
             dbc.Collapse(
                 dbc.Nav([
-                    dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1 mb-1 w-100"), href="/", refresh=True)),
-                    dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1 mb-1 w-100"), href="/dashboard", refresh=True)),
-                    dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1 mb-1 w-100"), href="/analysis", refresh=True)),
-                    dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1 mb-1 w-100"), href="/upload", refresh=True)),
-                ], className="ms-auto p-2 flex-column", navbar=True, style={"backgroundColor": "#fd7e14", "borderRadius": "8px"}),
+                    dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/dashboard", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/analysis", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/upload", refresh=True)),
+                ], className="p-2 flex-column d-lg-none", navbar=True, style={"backgroundColor": "#fd7e14", "borderRadius": "8px"}),
                 id="navbar-collapse",
                 is_open=False,
-                navbar=True
+                navbar=True,
+                className="d-lg-none"
             ),
         ], fluid=True),
         color="dark",
