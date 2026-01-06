@@ -7948,38 +7948,48 @@ def create_summary_cards(stock_code='CDIA'):
     top_acc_name = top_acc['broker_code'].iloc[0] if not top_acc.empty else '-'
     top_acc_val = top_acc['net_value'].iloc[0] / 1e9 if not top_acc.empty else 0
 
+    # Responsive card style: smaller font on mobile
+    card_header_style = {"fontSize": "12px", "padding": "8px"}
+    card_body_style = {"padding": "10px"}
+    value_class = "h5 mb-1"  # Smaller than h3 for mobile-friendly
+    subtitle_class = "small mb-0 text-muted"
+
     return dbc.Row([
         dbc.Col(dbc.Card([
-            dbc.CardHeader(f"{stock_code} Price"),
+            dbc.CardHeader(f"{stock_code} Price", style=card_header_style),
             dbc.CardBody([
-                html.H3(f"Rp {latest_price:,.0f}"),
-                html.P(f"{price_change:+.2f}%", className="text-success" if price_change >= 0 else "text-danger")
-            ])
-        ], color="dark", outline=True), width=3),
+                html.Div(f"Rp {latest_price:,.0f}", className=value_class),
+                html.P(f"{price_change:+.2f}%", className=f"{subtitle_class} text-{'success' if price_change >= 0 else 'danger'}")
+            ], style=card_body_style)
+        ], color="dark", outline=True), xs=6, md=3, className="mb-2"),
         dbc.Col(dbc.Card([
-            dbc.CardHeader("Market Phase"),
+            dbc.CardHeader("Market Phase", style=card_header_style),
             dbc.CardBody([
-                html.H3(phase['phase'].upper()),
-                html.P(f"Range: {phase['details'].get('range_percent', 0):.1f}%")
-            ])
-        ], color="dark", outline=True), width=3),
+                html.Div(phase['phase'].upper(), className=value_class),
+                html.P(f"Range: {phase['details'].get('range_percent', 0):.1f}%", className=subtitle_class)
+            ], style=card_body_style)
+        ], color="dark", outline=True), xs=6, md=3, className="mb-2"),
         dbc.Col(dbc.Card([
-            dbc.CardHeader("Top Accumulator Today"),
+            dbc.CardHeader("Top Accumulator", style=card_header_style),
             dbc.CardBody([
-                html.H3([
+                html.Div([
                     html.Span(
                         top_acc_name,
-                        className=f"broker-badge-lg broker-badge-{get_broker_type(top_acc_name).lower()}"
+                        className=f"broker-badge broker-badge-{get_broker_type(top_acc_name).lower()}",
+                        style={"fontSize": "14px", "padding": "4px 8px"}
                     ) if top_acc_name != '-' else '-'
-                ]),
-                html.P(f"Net: Rp {top_acc_val:.1f}B")
-            ])
-        ], color="dark", outline=True), width=3),
+                ], className="mb-1"),
+                html.P(f"Net: Rp {top_acc_val:.1f}B", className=subtitle_class)
+            ], style=card_body_style)
+        ], color="dark", outline=True), xs=6, md=3, className="mb-2"),
         dbc.Col(dbc.Card([
-            dbc.CardHeader("Active Alerts"),
-            dbc.CardBody([html.H3(f"{len(alerts)}"), html.P("Accumulation signals")])
-        ], color="warning" if alerts else "dark", outline=True), width=3),
-    ], className="mb-4")
+            dbc.CardHeader("Active Alerts", style=card_header_style),
+            dbc.CardBody([
+                html.Div(f"{len(alerts)}", className=value_class),
+                html.P("Accumulation signals", className=subtitle_class)
+            ], style=card_body_style)
+        ], color="warning" if alerts else "dark", outline=True), xs=6, md=3, className="mb-2"),
+    ], className="mb-3")
 
 
 def create_price_chart(stock_code='CDIA'):
