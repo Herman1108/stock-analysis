@@ -5370,7 +5370,7 @@ def create_broker_watchlist(stock_code='CDIA'):
                             html.Small("🔥 Accumulation Streak", className="text-success fw-bold mb-2 d-block"),
                             *accum_items
                         ], className="p-2 rounded h-100 alert-box-success")
-                    ], width=4),
+                    ], xs=12, md=4, className="mb-2 mb-md-0"),
 
                     # Distribution Warning
                     dbc.Col([
@@ -5378,7 +5378,7 @@ def create_broker_watchlist(stock_code='CDIA'):
                             html.Small("⚠️ Distribution Warning", className="text-danger fw-bold mb-2 d-block"),
                             *dist_items
                         ], className="p-2 rounded h-100 alert-box-danger")
-                    ], width=4),
+                    ], xs=12, md=4, className="mb-2 mb-md-0"),
 
                     # Floating Loss
                     dbc.Col([
@@ -5386,7 +5386,7 @@ def create_broker_watchlist(stock_code='CDIA'):
                             html.Small("💸 Floating Loss", className="text-warning fw-bold mb-2 d-block"),
                             *float_items
                         ], className="p-2 rounded h-100 alert-box-warning")
-                    ], width=4),
+                    ], xs=12, md=4),
                 ]),
 
                 html.Hr(className="my-2"),
