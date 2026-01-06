@@ -2165,14 +2165,14 @@ def create_navbar():
             # Hamburger toggle button for mobile
             dbc.NavbarToggler(id="navbar-toggler", n_clicks=0),
 
-            # Collapsible nav items - Orange buttons with white bold text
+            # Collapsible nav items - Orange background on mobile dropdown
             dbc.Collapse(
                 dbc.Nav([
-                    dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
-                    dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
-                    dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
-                    dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
-                ], className="ms-auto", navbar=True),
+                    dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1 mb-1"), href="/", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1 mb-1"), href="/dashboard", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1 mb-1"), href="/analysis", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1 mb-1"), href="/upload", refresh=True)),
+                ], className="ms-auto p-2", navbar=True, style={"backgroundColor": "#fd7e14", "borderRadius": "8px"}),
                 id="navbar-collapse",
                 is_open=False,
                 navbar=True
