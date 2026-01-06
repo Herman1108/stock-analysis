@@ -7481,14 +7481,14 @@ def create_dashboard_page(stock_code='CDIA'):
         # NEW SECTIONS - Replacing Top 10 Acc/Dist duplicates
         # ============================================================
 
-        # Row 1: Quick Sentiment + Key Metrics
+        # Quick Sentiment + Key Metrics (responsive: stack on mobile, side-by-side on desktop)
         dbc.Row([
             dbc.Col([
                 html.Div(id="sentiment-container")
-            ], width=6),
+            ], xs=12, md=6),
             dbc.Col([
                 html.Div(id="metrics-container")
-            ], width=6),
+            ], xs=12, md=6),
         ], className="mb-3"),
 
         # Broker Detail
