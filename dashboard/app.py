@@ -2171,7 +2171,6 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
                     dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
-                    dbc.NavItem(dcc.Link(dbc.Button("Alerts", color="warning", size="sm", className="fw-bold text-white me-1"), href="/alerts")),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
                 ], className="ms-auto", navbar=True),
                 id="navbar-collapse",
@@ -2432,16 +2431,7 @@ def create_landing_page():
                             dbc.Button("Upload", href="/upload", color="outline-light", size="sm")
                         ])
                     ], color="secondary")
-                ], md=6),
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H5([html.I(className="fas fa-bell me-2"), "Alerts"], className="mb-2"),
-                            html.P("Monitor sinyal akumulasi dan pergerakan broker", className="text-muted small mb-2"),
-                            dbc.Button("Alerts", href="/alerts", color="outline-light", size="sm")
-                        ])
-                    ], color="warning")
-                ], md=6),
+                ], md=12),
             ], className="mb-4")
         ], fluid=True)
     ])
@@ -7517,119 +7507,6 @@ def create_dashboard_page(stock_code='CDIA'):
         ], className="mb-4"),
     ])
 
-# ============================================================
-# PAGE: ALERTS (Dynamic)
-# ============================================================
-
-def create_alerts_page(stock_code='CDIA'):
-    broker_df = get_broker_data(stock_code)
-
-    if broker_df.empty:
-        return html.Div([
-            dbc.Alert(f"Tidak ada data untuk {stock_code}", color="warning")
-        ])
-
-    alerts = check_accumulation_alerts(broker_df, stock_code)
-    broker_analysis = analyze_broker_accumulation(broker_df, stock_code)
-
-    return html.Div([
-        html.H4(f"Accumulation Alerts - {stock_code}", className="mb-4"),
-
-        # Broker Type Legend
-        dbc.Card([
-            dbc.CardBody([
-                html.Span("Legenda Warna Broker: ", className="fw-bold me-3"),
-                html.Span([
-                    html.Span("ASING", className="badge me-1", style={'backgroundColor': '#dc3545', 'color': 'white'}),
-                    html.Small("(Foreign)", className="text-muted me-3"),
-                ]),
-                html.Span([
-                    html.Span("BUMN", className="badge me-1", style={'backgroundColor': '#28a745', 'color': 'white'}),
-                    html.Small("(Government)", className="text-muted me-3"),
-                ]),
-                html.Span([
-                    html.Span("LOKAL", className="badge me-1", style={'backgroundColor': '#6f42c1', 'color': 'white'}),
-                    html.Small("(Local)", className="text-muted"),
-                ]),
-            ], className="py-2")
-        ], className="mb-3", color="dark", outline=True),
-
-        dbc.Card([
-            dbc.CardHeader([
-                html.H5("Active Accumulation Signals", className="mb-0"),
-                dbc.Badge(f"{len(alerts)} Active", color="warning", className="ms-2")
-            ]),
-            dbc.CardBody([
-                create_alerts_list(alerts) if alerts else dbc.Alert("No active alerts", color="secondary")
-            ])
-        ], className="mb-4"),
-
-        dbc.Card([
-            dbc.CardHeader("Broker Accumulation Patterns"),
-            dbc.CardBody([
-                create_accumulation_table(broker_analysis, stock_code) if not broker_analysis.empty else "No data"
-            ])
-        ], className="mb-4"),
-
-        dbc.Card([
-            dbc.CardHeader("Recent 7-Day Activity Heatmap"),
-            dbc.CardBody([
-                create_recent_activity_chart(broker_df)
-            ])
-        ])
-    ])
-
-
-def create_alerts_list(alerts):
-    alert_items = []
-    for alert in alerts:
-        color = "warning" if alert['streak_days'] >= 5 else "info"
-        broker_code = alert['broker_code']
-
-        # Get broker type and color
-        broker_type = get_broker_type(broker_code)
-        broker_color = get_broker_color(broker_code)
-
-        # Map broker type to label and color (using hex for purple LOCAL)
-        type_labels = {
-            'FOREIGN': ('ASING', '#dc3545'),
-            'BUMN': ('BUMN', '#28a745'),
-            'LOCAL': ('LOKAL', '#6f42c1')
-        }
-        type_label, type_bg_color = type_labels.get(broker_type, ('LOKAL', '#6f42c1'))
-
-        alert_items.append(
-            dbc.Alert([
-                dbc.Row([
-                    dbc.Col([
-                        html.H5([
-                            html.Span(
-                                broker_code,
-                                className=f"broker-badge broker-badge-{broker_type.lower()} me-2",
-                                style={'fontSize': '0.9rem', 'padding': '5px 10px'}
-                            ),
-                            html.Span(
-                                type_label,
-                                className=f"broker-badge broker-badge-{broker_type.lower()} me-2",
-                                style={'fontSize': '0.7rem', 'opacity': '0.85'}
-                            ),
-                            f"Akumulasi {alert['streak_days']} hari berturut-turut"
-                        ]),
-                        html.P([html.Strong("Total Net: "), f"Rp {alert['total_net_value']/1e9:.1f} Miliar"], className="mb-0")
-                    ], width=9),
-                    dbc.Col([
-                        html.Div([
-                            html.Span(f"{alert['streak_days']}", style={'fontSize': '2rem', 'fontWeight': 'bold'}),
-                            html.Br(),
-                            html.Small("days")
-                        ], className="text-center")
-                    ], width=3)
-                ])
-            ], color=color, className="mb-2")
-        )
-    return html.Div(alert_items)
-
-
 def create_accumulation_table(df, stock_code='CDIA'):
     if df.empty:
         return "No data"
@@ -8782,8 +8659,6 @@ def display_page(pathname, selected_stock):
         return create_bandarmology_page(selected_stock)
     elif pathname == '/summary':
         return create_summary_page(selected_stock)
-    elif pathname == '/alerts':
-        return create_alerts_page(selected_stock)
     elif pathname == '/position':
         return create_position_page(selected_stock)
     elif pathname == '/upload':
