@@ -146,6 +146,66 @@ def create_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
     return html.Div([fundamental_btn, sr_btn, accum_btn], className="d-inline-flex flex-wrap")
 
 
+def create_dashboard_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
+    """
+    Create consistent submenu navigation buttons for Dashboard subpages.
+    Order: Profile | Broker Movement | Sensitive Broker | Position
+    All buttons use solid colors matching Analysis submenu style.
+
+    Args:
+        current_page: Current page identifier ('profile', 'movement', 'sensitive', 'position', 'dashboard')
+        stock_code: Current stock code
+    """
+    # Profile button - solid green
+    profile_btn = dcc.Link(
+        dbc.Button([
+            html.I(className="fas fa-building me-2"),
+            "Profile"
+        ], color="success", size="sm", className="me-2 mb-1"),
+        href="/profile"
+    )
+
+    # Broker Movement button - solid info/teal
+    movement_btn = dcc.Link(
+        dbc.Button([
+            html.I(className="fas fa-exchange-alt me-2"),
+            "Broker Movement"
+        ], color="info", size="sm", className="me-2 mb-1"),
+        href="/movement"
+    )
+
+    # Sensitive Broker button - solid info/cyan
+    sensitive_btn = dcc.Link(
+        dbc.Button([
+            html.I(className="fas fa-crosshairs me-2"),
+            "Sensitive Broker"
+        ], color="info", size="sm", className="me-2 mb-1"),
+        href="/sensitive"
+    )
+
+    # Position button - solid info
+    position_btn = dcc.Link(
+        dbc.Button([
+            html.I(className="fas fa-chart-pie me-2"),
+            "Position"
+        ], color="info", size="sm", className="me-2 mb-1"),
+        href="/position"
+    )
+
+    # Only show Dashboard button if not on dashboard page
+    if current_page != 'dashboard':
+        dashboard_btn = dcc.Link(
+            dbc.Button([
+                html.I(className="fas fa-arrow-left me-2"),
+                "Dashboard"
+            ], color="primary", size="sm", className="mb-1"),
+            href="/dashboard"
+        )
+        return html.Div([profile_btn, movement_btn, sensitive_btn, position_btn, dashboard_btn], className="d-inline-flex flex-wrap")
+
+    return html.Div([profile_btn, movement_btn, sensitive_btn, position_btn], className="d-inline-flex flex-wrap")
+
+
 # Initialize Dash app with Font Awesome for help icons
 FA_CSS = "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css"
 
@@ -5494,23 +5554,14 @@ def create_company_profile_page(stock_code='CDIA'):
 
     if not profile:
         return html.Div([
-            dbc.Row([
-                dbc.Col([
-                    html.Div([
-                        html.H4([
-                            html.I(className="fas fa-building me-2"),
-                            f"Company Profile - {stock_code}"
-                        ], className="mb-0 d-inline-block me-3"),
-                        dcc.Link(
-                            dbc.Button([
-                                html.I(className="fas fa-arrow-left me-2"),
-                                "Dashboard"
-                            ], color="secondary", size="sm", outline=True),
-                            href="/dashboard"
-                        )
-                    ], className="d-flex align-items-center")
-                ], width=12)
-            ], className="mb-4"),
+            # Page Header with submenu navigation
+            html.Div([
+                html.H4([
+                    html.I(className="fas fa-building me-2"),
+                    f"Company Profile - {stock_code}"
+                ], className="mb-0 d-inline-block me-3"),
+                create_dashboard_submenu_nav('profile', stock_code),
+            ], className="d-flex align-items-center flex-wrap mb-4"),
             dbc.Alert([
                 html.I(className="fas fa-info-circle me-2"),
                 f"Belum ada data profile untuk {stock_code}. ",
@@ -5529,24 +5580,14 @@ def create_company_profile_page(stock_code='CDIA'):
     }
 
     return html.Div([
-        # Page Header with back button
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H4([
-                        html.I(className="fas fa-building me-2", style={'color': '#3498DB'}),
-                        f"Company Profile - {stock_code}"
-                    ], className="mb-0 d-inline-block me-3"),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-arrow-left me-2"),
-                            "Dashboard"
-                        ], color="secondary", size="sm", outline=True),
-                        href="/dashboard"
-                    )
-                ], className="d-flex align-items-center")
-            ], width=12)
-        ], className="mb-4"),
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-building me-2", style={'color': '#3498DB'}),
+                f"Company Profile - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_dashboard_submenu_nav('profile', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
 
         # Company Name Banner
         dbc.Card([
@@ -5742,27 +5783,14 @@ def create_broker_movement_page(stock_code='CDIA'):
     current_price = price_df['close_price'].iloc[-1] if not price_df.empty and 'close_price' in price_df.columns else 0
 
     return html.Div([
-        # Page Header with back button
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H4([
-                        html.I(className="fas fa-exchange-alt me-2"),
-                        f"Broker Movement - {stock_code}"
-                    ], className="mb-0 d-inline-block me-3"),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-arrow-left me-2"),
-                            "Dashboard"
-                        ], color="secondary", size="sm", outline=True),
-                        href="/dashboard"
-                    )
-                ], className="d-flex align-items-center")
-            ], width=8),
-            dbc.Col([
-                html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
-            ], width=4, className="text-end d-flex align-items-center justify-content-end")
-        ], className="mb-4"),
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-exchange-alt me-2"),
+                f"Broker Movement - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_dashboard_submenu_nav('movement', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
 
         # Broker Movement Alert Container
         html.Div(id="movement-alert-container", children=create_broker_movement_alert(stock_code)),
@@ -5980,27 +6008,14 @@ def create_sensitive_broker_page(stock_code='CDIA'):
         top_5_codes = [b['broker_code'] for b in broker_sens['brokers'][:5]]
 
     return html.Div([
-        # Page Header with back button
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H4([
-                        html.I(className="fas fa-crosshairs me-2"),
-                        f"Sensitive Broker - {stock_code}"
-                    ], className="mb-0 d-inline-block me-3"),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-arrow-left me-2"),
-                            "Dashboard"
-                        ], color="secondary", size="sm", outline=True),
-                        href="/dashboard"
-                    )
-                ], className="d-flex align-items-center")
-            ], width=8),
-            dbc.Col([
-                html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
-            ], width=4, className="text-end d-flex align-items-center justify-content-end")
-        ], className="mb-4"),
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-crosshairs me-2"),
+                f"Sensitive Broker - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_dashboard_submenu_nav('sensitive', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
 
         # Broker Sensitivity Pattern Container
         html.Div(id="sensitive-pattern-container", children=create_broker_sensitivity_pattern(stock_code)),
@@ -7438,45 +7453,18 @@ def create_broker_consistency_table(df):
 
 def create_dashboard_page(stock_code='CDIA'):
     return html.Div([
-        # Header with stock info
+        # Header with submenu navigation
         dbc.Row([
             dbc.Col([
                 html.Div([
                     html.H4(f"Dashboard - {stock_code}", className="mb-0 d-inline-block me-3"),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-building me-2"),
-                            "Profile"
-                        ], color="success", size="sm", className="fw-bold me-2"),
-                        href="/profile"
-                    ),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-exchange-alt me-2"),
-                            "Broker Movement"
-                        ], color="info", size="sm", className="fw-bold me-2"),
-                        href="/movement"
-                    ),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-crosshairs me-2"),
-                            "Sensitive Broker"
-                        ], color="info", size="sm", className="fw-bold me-2"),
-                        href="/sensitive"
-                    ),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-chart-pie me-2"),
-                            "Position"
-                        ], color="info", size="sm", className="fw-bold"),
-                        href="/position"
-                    )
+                    create_dashboard_submenu_nav('dashboard', stock_code),
                 ], className="d-flex align-items-center flex-wrap")
-            ], width=8),
+            ], xs=12, md=8),
             dbc.Col([
                 dbc.Button("Refresh Data", id="refresh-btn", color="primary", size="sm"),
                 html.Span(id="last-refresh", className="ms-3 text-muted small")
-            ], width=4, className="text-end")
+            ], xs=12, md=4, className="text-end mt-2 mt-md-0")
         ], className="mb-3"),
 
         # Summary Cards
@@ -8225,27 +8213,14 @@ def create_position_page(stock_code='CDIA'):
     in_loss = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] < 0)]
 
     return html.Div([
-        # Page Header with back button
-        dbc.Row([
-            dbc.Col([
-                html.Div([
-                    html.H4([
-                        html.I(className="fas fa-chart-pie me-2"),
-                        f"Position - {stock_code}"
-                    ], className="mb-0 d-inline-block me-3"),
-                    dcc.Link(
-                        dbc.Button([
-                            html.I(className="fas fa-arrow-left me-2"),
-                            "Dashboard"
-                        ], color="secondary", size="sm", outline=True),
-                        href="/dashboard"
-                    )
-                ], className="d-flex align-items-center")
-            ], width=8),
-            dbc.Col([
-                html.Small(f"Current Price: Rp {current_price:,.0f}", className="text-muted")
-            ], width=4, className="text-end d-flex align-items-center justify-content-end")
-        ], className="mb-2"),
+        # Page Header with submenu navigation
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-chart-pie me-2"),
+                f"Position - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            create_dashboard_submenu_nav('position', stock_code),
+        ], className="d-flex align-items-center flex-wrap mb-2"),
         html.P(period_str, className="text-muted mb-4"),
 
         # Summary Cards
