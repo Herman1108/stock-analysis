@@ -756,6 +756,345 @@ def import_profile_data(profile: Dict, stock_code: str = None):
         return 0
 
 
+def read_fundamental_data(file_path: str) -> Dict:
+    """
+    Parse fundamental data dari kolom AL-AM Excel file.
+    Menggunakan keyword matching untuk mendukung berbagai format label.
+    """
+    print(f"Reading fundamental data from: {file_path}")
+
+    try:
+        df = pd.read_excel(file_path, sheet_name=0, header=None)
+    except Exception as e:
+        print(f"Error reading Excel: {e}")
+        return {}
+
+    # Check if columns AL-AM exist (index 37-38)
+    if df.shape[1] < 39:
+        print(f"File only has {df.shape[1]} columns, no fundamental data (need columns AL-AM)")
+        return {}
+
+    fund_data = {}
+    report_date = None
+
+    # Keyword mapping - maps keywords to database field names
+    # Format: 'keyword_in_label': 'database_field'
+    keyword_map = {
+        # Shares & Market Cap
+        ('saham beredar', 'total saham'): 'issued_shares',
+        ('kapitalisasi',): 'market_cap',
+        ('indeks saham',): 'stock_index',
+        # Financial Position
+        ('pendapatan usaha', 'total pendapatan'): 'sales',
+        ('total aset',): 'assets',
+        ('total liabilitas', 'total kewajiban'): 'liability',
+        ('total ekuitas',): 'equity',
+        ('capex', 'belanja modal'): 'capex',
+        ('biaya operasional', 'beban operasional'): 'operating_expense',
+        ('arus kas operasional', 'arus kas dari operasi'): 'operating_cashflow',
+        ('arus kas bersih',): 'net_cashflow',
+        ('laba usaha', 'laba operasi'): 'operating_profit',
+        ('laba tahun berjalan', 'laba bersih'): 'net_profit',
+        # Per Share Data
+        ('dps', 'dividen per saham'): 'dps',
+        ('eps', 'laba per saham'): 'eps',
+        ('rps', 'pendapatan per saham'): 'rps',
+        ('bvps', 'nilai buku per saham'): 'bvps',
+        ('cfps', 'arus kas per saham'): 'cfps',
+        ('ceps', 'kas setara per saham'): 'ceps',
+        ('navs', 'aset bersih per saham'): 'navs',
+        # Valuation Metrics
+        ('yield dividen', 'imbal hasil dividen'): 'dividend_yield',
+        ('(per)', 'harga/laba', 'harga terhadap laba', 'rasio harga/laba'): 'per',
+        ('(psr)', 'harga/pendapatan', 'harga terhadap penjualan'): 'psr',
+        ('(pbv)', 'harga/nilai buku', 'harga terhadap nilai buku'): 'pbvr',
+        ('(pcfr)', 'harga/arus kas', 'harga terhadap arus kas'): 'pcfr',
+        # Profitability Ratios
+        ('dpr', 'pembayaran dividen'): 'dpr',
+        ('gpm', 'laba kotor'): 'gpm',
+        ('opm', 'laba usaha', 'marjin laba usaha'): 'opm',
+        ('npm', 'laba bersih', 'marjin laba bersih'): 'npm',
+        ('ebitm', 'ebit'): 'ebitm',
+        ('roe', 'pengembalian ekuitas', 'imbal hasil ekuitas'): 'roe',
+        ('roa', 'pengembalian aset', 'imbal hasil aset'): 'roa',
+        # Liquidity Ratios
+        ('der', 'utang/ekuitas', 'utang terhadap ekuitas'): 'der',
+        ('cash ratio', 'rasio kas'): 'cash_ratio',
+        ('quick ratio', 'rasio cepat'): 'quick_ratio',
+        ('current ratio', 'rasio lancar'): 'current_ratio',
+    }
+
+    def parse_money_value(val_str):
+        """Parse monetary values like 'Rp 1,74 Triliun' or 'Rp 128,15 Miliar'"""
+        if pd.isna(val_str) or val_str in ['', '-', 'NaN']:
+            return 0.0
+
+        val_str = str(val_str).strip()
+
+        # Remove 'Rp' prefix
+        val_str = val_str.replace('Rp', '').strip()
+
+        # Handle multipliers
+        multipliers = {
+            'triliun': 1e12, 'trilliun': 1e12, 't': 1e12,
+            'miliar': 1e9, 'milyar': 1e9, 'm': 1e6,
+            'juta': 1e6,
+            'ribu': 1e3, 'k': 1e3
+        }
+
+        val_lower = val_str.lower()
+        multiplier = 1.0
+
+        for key, mult in multipliers.items():
+            if key in val_lower:
+                multiplier = mult
+                val_str = val_lower.replace(key, '').strip()
+                break
+
+        # Clean and parse number
+        val_str = val_str.replace('.', '').replace(',', '.').strip()
+
+        try:
+            return float(val_str) * multiplier
+        except:
+            return 0.0
+
+    def parse_shares_value(val_str):
+        """Parse shares like '123,28 Miliar lembar'"""
+        if pd.isna(val_str) or val_str in ['', '-', 'NaN']:
+            return 0
+
+        val_str = str(val_str).lower().replace('lembar', '').strip()
+        return int(parse_money_value(val_str))
+
+    def parse_ratio_value(val_str):
+        """Parse ratio values like '17,10x' or '45,25%'"""
+        if pd.isna(val_str) or val_str in ['', '-', 'NaN']:
+            return 0.0
+
+        val_str = str(val_str).strip()
+
+        # Remove 'x' suffix for ratios like PER
+        val_str = val_str.replace('x', '').replace('X', '').strip()
+
+        # Check if percentage
+        is_percent = '%' in val_str
+        val_str = val_str.replace('%', '').strip()
+
+        # Clean number format (Indonesian uses comma as decimal)
+        val_str = val_str.replace('.', '').replace(',', '.').strip()
+
+        try:
+            value = float(val_str)
+            # Convert percentage to decimal for storage
+            if is_percent:
+                value = value / 100
+            return value
+        except:
+            return 0.0
+
+    def parse_per_share_value(val_str):
+        """Parse per-share values like 'Rp 469,38' or 'Rp 55'"""
+        if pd.isna(val_str) or val_str in ['', '-', 'NaN']:
+            return 0.0
+
+        val_str = str(val_str).replace('Rp', '').strip()
+        val_str = val_str.replace('.', '').replace(',', '.').strip()
+
+        try:
+            return float(val_str)
+        except:
+            return 0.0
+
+    def match_keyword(label, keywords):
+        """Check if label contains any of the keywords"""
+        label_lower = label.lower()
+        for keyword in keywords:
+            if keyword.lower() in label_lower:
+                return True
+        return False
+
+    # Parse each row
+    for i in range(min(70, len(df))):  # Check first 70 rows
+        label = str(df.iloc[i, 37]) if pd.notna(df.iloc[i, 37]) else ''
+        value = df.iloc[i, 38] if pd.notna(df.iloc[i, 38]) else ''
+
+        if not label or label == 'nan':
+            continue
+
+        label_lower = label.lower()
+
+        # Extract report date
+        if 'per ' in label_lower and ('september' in label_lower or 'desember' in label_lower or
+                                       'maret' in label_lower or 'juni' in label_lower or
+                                       '2024' in label_lower or '2025' in label_lower):
+            # Try to parse date like "Per 30 September 2025"
+            try:
+                date_match = re.search(r'(\d{1,2})\s*(januari|februari|maret|april|mei|juni|juli|agustus|september|oktober|november|desember)\s*(\d{4})', label_lower)
+                if date_match:
+                    day = int(date_match.group(1))
+                    month_name = date_match.group(2)
+                    year = int(date_match.group(3))
+                    month_map = {'januari': 1, 'februari': 2, 'maret': 3, 'april': 4, 'mei': 5, 'juni': 6,
+                                'juli': 7, 'agustus': 8, 'september': 9, 'oktober': 10, 'november': 11, 'desember': 12}
+                    month = month_map.get(month_name, 1)
+                    report_date = datetime(year, month, day).date()
+                    fund_data['report_date'] = report_date
+                    print(f"  Found report date: {report_date}")
+            except Exception as e:
+                pass
+            continue
+
+        # Match against keyword map
+        for keywords, field in keyword_map.items():
+            if match_keyword(label, keywords):
+                # Skip if already set (avoid overwriting with wrong value)
+                if field in fund_data:
+                    continue
+
+                # Parse value based on field type
+                if field == 'issued_shares':
+                    fund_data[field] = parse_shares_value(value)
+                elif field in ['market_cap', 'sales', 'assets', 'liability', 'equity', 'capex',
+                              'operating_expense', 'operating_cashflow', 'net_cashflow',
+                              'operating_profit', 'net_profit']:
+                    fund_data[field] = parse_money_value(value)
+                elif field in ['dps', 'eps', 'rps', 'bvps', 'cfps', 'ceps', 'navs']:
+                    fund_data[field] = parse_per_share_value(value)
+                elif field == 'stock_index':
+                    try:
+                        fund_data[field] = float(str(value).replace('.', '').replace(',', '.'))
+                    except:
+                        fund_data[field] = 0.0
+                else:
+                    # Ratio values (percentages and multipliers)
+                    fund_data[field] = parse_ratio_value(value)
+
+                print(f"  {field}: {fund_data[field]} (from '{label}' = '{value}')")
+                break
+
+    if fund_data:
+        print(f"Parsed {len(fund_data)} fundamental fields")
+    else:
+        print("No fundamental data found in file")
+
+    return fund_data
+
+
+def import_fundamental_data(fund_data: Dict, stock_code: str) -> int:
+    """Import fundamental data ke database"""
+    if not fund_data:
+        print("No fundamental data to import")
+        return 0
+
+    print(f"Importing fundamental data for {stock_code}...")
+
+    # Set default report date if not found
+    if 'report_date' not in fund_data:
+        fund_data['report_date'] = datetime.now().date()
+
+    insert_query = """
+        INSERT INTO stock_fundamental
+        (stock_code, report_date, issued_shares, market_cap, stock_index,
+         sales, assets, liability, equity, capex, operating_expense,
+         operating_cashflow, net_cashflow, operating_profit, net_profit,
+         dps, eps, rps, bvps, cfps, ceps, navs,
+         dividend_yield, per, psr, pbvr, pcfr, dpr,
+         gpm, opm, npm, ebitm, roe, roa,
+         der, cash_ratio, quick_ratio, current_ratio,
+         updated_at)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+        ON CONFLICT (stock_code, report_date) DO UPDATE SET
+            issued_shares = EXCLUDED.issued_shares,
+            market_cap = EXCLUDED.market_cap,
+            stock_index = EXCLUDED.stock_index,
+            sales = EXCLUDED.sales,
+            assets = EXCLUDED.assets,
+            liability = EXCLUDED.liability,
+            equity = EXCLUDED.equity,
+            capex = EXCLUDED.capex,
+            operating_expense = EXCLUDED.operating_expense,
+            operating_cashflow = EXCLUDED.operating_cashflow,
+            net_cashflow = EXCLUDED.net_cashflow,
+            operating_profit = EXCLUDED.operating_profit,
+            net_profit = EXCLUDED.net_profit,
+            dps = EXCLUDED.dps,
+            eps = EXCLUDED.eps,
+            rps = EXCLUDED.rps,
+            bvps = EXCLUDED.bvps,
+            cfps = EXCLUDED.cfps,
+            ceps = EXCLUDED.ceps,
+            navs = EXCLUDED.navs,
+            dividend_yield = EXCLUDED.dividend_yield,
+            per = EXCLUDED.per,
+            psr = EXCLUDED.psr,
+            pbvr = EXCLUDED.pbvr,
+            pcfr = EXCLUDED.pcfr,
+            dpr = EXCLUDED.dpr,
+            gpm = EXCLUDED.gpm,
+            opm = EXCLUDED.opm,
+            npm = EXCLUDED.npm,
+            ebitm = EXCLUDED.ebitm,
+            roe = EXCLUDED.roe,
+            roa = EXCLUDED.roa,
+            der = EXCLUDED.der,
+            cash_ratio = EXCLUDED.cash_ratio,
+            quick_ratio = EXCLUDED.quick_ratio,
+            current_ratio = EXCLUDED.current_ratio,
+            updated_at = NOW()
+    """
+
+    try:
+        with get_cursor() as cursor:
+            cursor.execute(insert_query, (
+                stock_code,
+                fund_data.get('report_date'),
+                fund_data.get('issued_shares', 0),
+                fund_data.get('market_cap', 0),
+                fund_data.get('stock_index', 0),
+                fund_data.get('sales', 0),
+                fund_data.get('assets', 0),
+                fund_data.get('liability', 0),
+                fund_data.get('equity', 0),
+                fund_data.get('capex', 0),
+                fund_data.get('operating_expense', 0),
+                fund_data.get('operating_cashflow', 0),
+                fund_data.get('net_cashflow', 0),
+                fund_data.get('operating_profit', 0),
+                fund_data.get('net_profit', 0),
+                fund_data.get('dps', 0),
+                fund_data.get('eps', 0),
+                fund_data.get('rps', 0),
+                fund_data.get('bvps', 0),
+                fund_data.get('cfps', 0),
+                fund_data.get('ceps', 0),
+                fund_data.get('navs', 0),
+                fund_data.get('dividend_yield', 0),
+                fund_data.get('per', 0),
+                fund_data.get('psr', 0),
+                fund_data.get('pbvr', 0),
+                fund_data.get('pcfr', 0),
+                fund_data.get('dpr', 0),
+                fund_data.get('gpm', 0),
+                fund_data.get('opm', 0),
+                fund_data.get('npm', 0),
+                fund_data.get('ebitm', 0),
+                fund_data.get('roe', 0),
+                fund_data.get('roa', 0),
+                fund_data.get('der', 0),
+                fund_data.get('cash_ratio', 0),
+                fund_data.get('quick_ratio', 0),
+                fund_data.get('current_ratio', 0),
+            ))
+            print(f"Fundamental data imported successfully for {stock_code}")
+            return 1
+    except Exception as e:
+        print(f"Fundamental import error: {e}")
+        return 0
+
+
 if __name__ == "__main__":
     import sys
 

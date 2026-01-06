@@ -1357,26 +1357,43 @@ def create_merged_level(group: List[Dict], level_type: str) -> Dict:
 # BUY SIGNAL TRACKER (Deteksi kapan sinyal BUY dimulai)
 # ============================================================
 
-def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
+def track_buy_signal(stock_code: str, lookback_days: int = 60) -> Dict:
     """
-    Track kapan sinyal BUY dimulai dan harga saat itu.
+    Track sinyal BUY/SELL berdasarkan Dynamic Threshold dan pola SIDEWAYS.
 
-    Fitur anti-FOMO:
-    - Menunjukkan tanggal sinyal BUY pertama muncul
-    - Harga saat sinyal muncul
-    - Berapa persen harga sudah naik dari sinyal
-    - Safe Zone: masih aman beli atau sudah terlalu mahal
+    ALGORITMA BARU (dengan Dynamic Threshold):
+    1. Hitung threshold dinamis dari pola historis (SIDEWAYS -> RALLY/DECLINE)
+    2. Deteksi fase pasar saat ini (SIDEWAYS, ACCUMULATION, DISTRIBUTION, RALLY, DECLINE)
+    3. Cek apakah threshold terpenuhi (hari sideways, % of issued shares)
+    4. Generate sinyal BUY/SELL jika kriteria terpenuhi
+    5. Validasi sinyal berdasarkan kondisi pasar
+
+    Threshold dinamis:
+    - min_sideways_days: durasi minimum sideways
+    - min_pct_shares: % minimum akumulasi/distribusi dari issued shares
+    - breakout_pct: 5% untuk big cap, 10% untuk small cap
 
     Returns:
-        Dict dengan info sinyal BUY dan rekomendasi
+        Dict dengan info sinyal dan rekomendasi
     """
+    # Import dynamic threshold module
+    from dynamic_threshold import (
+        calculate_dynamic_threshold,
+        get_current_market_phase,
+        get_stock_data
+    )
+
     price_df = get_price_data(stock_code)
     broker_df = get_broker_data(stock_code)
 
     if price_df.empty:
         return {'has_signal': False, 'message': 'No price data'}
 
+    if broker_df.empty:
+        return {'has_signal': False, 'message': 'No broker data'}
+
     price_df = price_df.sort_values('date').tail(lookback_days).reset_index(drop=True)
+    broker_df = broker_df.sort_values('date')
 
     # Convert Decimal to float for price columns
     for col in ['close_price', 'open_price', 'high_price', 'low_price', 'volume', 'value']:
@@ -1386,89 +1403,176 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
     current_price = float(price_df.iloc[-1]['close_price'])
     current_date = price_df.iloc[-1]['date']
 
-    # Cari trigger sinyal BUY berdasarkan kombinasi:
-    # 1. Broker sensitif mulai akumulasi
-    # 2. Foreign flow berubah positif
-    # 3. Volume meningkat dengan frekuensi turun (smart money)
+    # ============================================================
+    # STEP 1: Get Dynamic Thresholds and Current Market Phase
+    # ============================================================
+    try:
+        dynamic_thresholds = calculate_dynamic_threshold(stock_code)
+        market_phase = get_current_market_phase(stock_code)
+    except Exception as e:
+        # Fallback to basic sensitivity analysis if dynamic threshold fails
+        dynamic_thresholds = None
+        market_phase = {'phase': 'UNKNOWN', 'signal': None}
 
-    signals = []
+    # Get sensitivity data for broker info
+    sensitivity_data = calculate_broker_sensitivity_advanced(stock_code)
+    sensitive_brokers = sensitivity_data.get('brokers', [])[:5]
 
-    for idx, row in price_df.iterrows():
-        date = row['date']
-        price = float(row['close_price'])
-
-        # Check broker accumulation on this date
-        broker_on_date = broker_df[broker_df['date'] == date] if not broker_df.empty else pd.DataFrame()
-
-        signal_strength = 0
-        signal_reasons = []
-
-        # 1. Check net foreign (if available)
-        if 'net_foreign' in row and row['net_foreign'] > 0:
-            signal_strength += 1
-            signal_reasons.append('Foreign Inflow')
-
-        # 2. Check broker accumulation
-        if not broker_on_date.empty:
-            net_accum = float(broker_on_date['net_value'].sum())
-            if net_accum > 0:
-                signal_strength += 1
-                signal_reasons.append('Net Accumulation')
-
-            # Check top brokers accumulating
-            top_accum = broker_on_date.nlargest(3, 'net_value')
-            if not top_accum.empty and float(top_accum['net_value'].sum()) > 1e9:  # > 1B
-                signal_strength += 1
-                signal_reasons.append('Big Broker Buy')
-
-        # 3. Check volume spike
-        if idx > 0:
-            prev_vol = price_df.iloc[max(0, idx-5):idx]['volume'].mean()
-            if prev_vol > 0 and row['volume'] > prev_vol * 1.5:
-                signal_strength += 1
-                signal_reasons.append('Volume Spike')
-
-        if signal_strength >= 2:
-            signals.append({
-                'date': date,
-                'price': price,
-                'strength': signal_strength,
-                'reasons': signal_reasons
-            })
-
-    if not signals:
+    if not sensitive_brokers:
         return {
             'has_signal': False,
-            'message': 'Belum ada sinyal BUY yang kuat dalam 30 hari terakhir',
-            'recommendation': 'WAIT',
+            'message': 'Tidak cukup data broker sensitif untuk analisis',
             'current_price': current_price
         }
 
-    # Ambil sinyal pertama (paling awal)
-    first_signal = signals[0]
-    signal_price = float(first_signal['price'])
-    signal_date = first_signal['date']
-
-    # Hitung perubahan harga dari sinyal
-    price_change_pct = float((current_price - signal_price) / signal_price * 100)
-
-    # ============================================================
-    # ACCUMULATION/DISTRIBUTION PHASE DETECTION (Dynamic for all stocks)
-    # ============================================================
-    # Reset conditions:
-    # 1. Harga naik >10% lalu turun ke <5% → fase akumulasi berakhir
-    # 2. Saat akumulasi tapi foreign OUTFLOW kuat → beralih ke distribusi
-    # 3. Saat distribusi tapi foreign INFLOW kuat → beralih ke akumulasi
-
-    # Get highest price since signal date
-    price_since_signal = price_df[price_df['date'] >= signal_date]
-    highest_price = float(price_since_signal['high_price'].max()) if not price_since_signal.empty else signal_price
-    max_gain_pct = float((highest_price - signal_price) / signal_price * 100)
+    # Build broker info list
+    broker_info_list = []
+    for broker in sensitive_brokers:
+        broker_info_list.append({
+            'code': broker['broker_code'],
+            'lead_time': broker.get('avg_lead_time', 5),
+            'win_rate': broker.get('win_rate', 0),
+            'sensitivity': broker.get('sensitivity_score', 0)
+        })
 
     # ============================================================
-    # Detect current market phase from Foreign Flow & Broker Activity
+    # STEP 2: Check for BUY/SELL Signal from Dynamic Threshold
     # ============================================================
-    # Calculate 10-day foreign flow from broker_summary
+    signal_from_phase = market_phase.get('signal')
+    current_phase = market_phase.get('phase', 'UNKNOWN')
+
+    # Extract threshold info
+    if dynamic_thresholds:
+        accum_threshold = dynamic_thresholds.get('accumulation', {})
+        distrib_threshold = dynamic_thresholds.get('distribution', {})
+        is_big_cap = dynamic_thresholds.get('is_big_cap', False)
+        confidence = dynamic_thresholds.get('confidence', 'NO_DATA')
+        issued_shares = dynamic_thresholds.get('issued_shares', 0)
+    else:
+        accum_threshold = {'min_sideways_days': 5, 'min_pct_shares': 0.01}
+        distrib_threshold = {'min_sideways_days': 5, 'min_pct_shares': 0.01}
+        is_big_cap = False
+        confidence = 'NO_DATA'
+        issued_shares = 0
+
+    # ============================================================
+    # STEP 3: Determine signal based on market phase and thresholds
+    # ============================================================
+    has_signal = False
+    signal_type = None
+    signal_date = None
+    signal_price = None
+    streak_start_date = None
+    streak_start_price = 0
+    signal_reasons = []
+
+    # Check for BUY signal
+    if signal_from_phase and signal_from_phase.get('type') in ['BUY', 'BUY_PENDING']:
+        sideways_days = market_phase.get('sideways_days', 0)
+        sideways_start = market_phase.get('sideways_start')
+        broker_activity = market_phase.get('broker_activity', {})
+
+        if signal_from_phase['type'] == 'BUY':
+            has_signal = True
+            signal_type = 'BUY'
+            signal_date = sideways_start
+            signal_price = market_phase.get('sideways_low', current_price)
+            streak_start_date = sideways_start
+            streak_start_price = signal_price
+
+            pct_accumulated = broker_activity.get('pct_of_shares', 0)
+            brokers_accum = broker_activity.get('brokers_accumulating', 0)
+
+            signal_reasons = [
+                f'Sideways {sideways_days} hari (threshold: {accum_threshold.get("min_sideways_days", 5)})',
+                f'Akumulasi {pct_accumulated:.4f}% shares (threshold: {accum_threshold.get("min_pct_shares", 0.01):.4f}%)',
+                f'{brokers_accum} broker sensitif akumulasi',
+                f'Target breakout: Rp {signal_from_phase.get("breakout_target", 0):,.0f}'
+            ]
+        else:  # BUY_PENDING
+            has_signal = False
+            signal_type = 'BUY_PENDING'
+            signal_reasons = [
+                f'Menunggu threshold terpenuhi',
+                f'Hari: {sideways_days}/{accum_threshold.get("min_sideways_days", 5)}',
+                f'% Shares: masih menunggu'
+            ]
+
+    # Check for SELL signal
+    elif signal_from_phase and signal_from_phase.get('type') in ['SELL', 'SELL_PENDING']:
+        sideways_days = market_phase.get('sideways_days', 0)
+        sideways_start = market_phase.get('sideways_start')
+        broker_activity = market_phase.get('broker_activity', {})
+
+        if signal_from_phase['type'] == 'SELL':
+            has_signal = True
+            signal_type = 'SELL'
+            signal_date = sideways_start
+            signal_price = market_phase.get('sideways_high', current_price)
+            streak_start_date = sideways_start
+            streak_start_price = signal_price
+
+            pct_distributed = abs(broker_activity.get('pct_of_shares', 0))
+            brokers_distrib = broker_activity.get('brokers_distributing', 0)
+
+            signal_reasons = [
+                f'Sideways {sideways_days} hari (threshold: {distrib_threshold.get("min_sideways_days", 5)})',
+                f'Distribusi {pct_distributed:.4f}% shares (threshold: {distrib_threshold.get("min_pct_shares", 0.01):.4f}%)',
+                f'{brokers_distrib} broker sensitif distribusi',
+                f'Target breakdown: Rp {signal_from_phase.get("breakdown_target", 0):,.0f}'
+            ]
+        else:  # SELL_PENDING
+            has_signal = False
+            signal_type = 'SELL_PENDING'
+            signal_reasons = [
+                f'Distribusi terdeteksi, menunggu konfirmasi',
+                f'Hari: {sideways_days}/{distrib_threshold.get("min_sideways_days", 5)}'
+            ]
+
+    # No signal from phase - check current phase status
+    else:
+        if current_phase == 'RALLY':
+            signal_reasons = [f'Fase RALLY aktif (+{market_phase.get("price_change_10d", 0):.1f}% dalam 10 hari)']
+        elif current_phase == 'DECLINE':
+            signal_reasons = [f'Fase DECLINE aktif ({market_phase.get("price_change_10d", 0):.1f}% dalam 10 hari)']
+        elif current_phase == 'ACCUMULATION':
+            signal_reasons = ['Akumulasi terdeteksi, menunggu threshold terpenuhi']
+        elif current_phase == 'DISTRIBUTION':
+            signal_reasons = ['Distribusi terdeteksi, menunggu threshold terpenuhi']
+        else:
+            signal_reasons = [f'Fase: {current_phase}']
+
+    # ============================================================
+    # STEP 4: Calculate price changes if signal exists
+    # ============================================================
+    if signal_price and signal_price > 0:
+        price_change_pct = float((current_price - signal_price) / signal_price * 100)
+    else:
+        price_change_pct = 0
+        signal_price = current_price
+
+    if streak_start_price and streak_start_price > 0:
+        price_from_start_pct = float((current_price - streak_start_price) / streak_start_price * 100)
+    else:
+        price_from_start_pct = 0
+        streak_start_price = current_price
+        streak_start_date = current_date
+
+    # ============================================================
+    # STEP 5: Calculate additional metrics for phase tracking
+    # ============================================================
+    # Get highest price since signal date (if signal exists)
+    if signal_date:
+        # Convert signal_date to pandas Timestamp for comparison
+        signal_date_ts = pd.Timestamp(signal_date)
+        price_since_signal = price_df[price_df['date'] >= signal_date_ts]
+        highest_price = float(price_since_signal['high_price'].max()) if not price_since_signal.empty else signal_price
+        max_gain_pct = float((highest_price - signal_price) / signal_price * 100) if signal_price > 0 else 0
+    else:
+        highest_price = current_price
+        max_gain_pct = 0
+
+    # Calculate 10-day foreign flow
     last_10_dates = price_df.tail(10)['date'].tolist()
     broker_df_copy = broker_df.copy()
     broker_df_copy['is_foreign'] = broker_df_copy['broker_code'].isin(FOREIGN_BROKER_CODES)
@@ -1479,8 +1583,9 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
     ]
     foreign_flow_10d = float(foreign_10d['net_value'].sum()) if not foreign_10d.empty else 0
     foreign_lot_10d = float(foreign_10d['net_lot'].sum()) if not foreign_10d.empty else 0
+    foreign_flow_billion = foreign_flow_10d / 1e9
 
-    # Calculate broker activity (top brokers buy vs sell)
+    # Broker activity ratio
     recent_broker = broker_df_copy[broker_df_copy['date'].isin(last_10_dates)]
     if not recent_broker.empty:
         broker_net = recent_broker.groupby('broker_code')['net_value'].sum()
@@ -1489,153 +1594,143 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
         broker_ratio = top_buyers / top_sellers if top_sellers > 0 else (2.0 if top_buyers > 0 else 1.0)
     else:
         broker_ratio = 1.0
-        top_buyers = 0
-        top_sellers = 0
-
-    # Determine current market phase based on foreign flow
-    # Strong OUTFLOW = Distribution, Strong INFLOW = Accumulation
-    foreign_flow_billion = foreign_flow_10d / 1e9
-
-    if foreign_flow_billion < -20:  # Strong outflow > 20B
-        current_market_phase = 'STRONG_DISTRIBUTION'
-    elif foreign_flow_billion < -5:  # Moderate outflow > 5B
-        current_market_phase = 'DISTRIBUTION'
-    elif foreign_flow_billion > 20:  # Strong inflow > 20B
-        current_market_phase = 'STRONG_ACCUMULATION'
-    elif foreign_flow_billion > 5:  # Moderate inflow > 5B
-        current_market_phase = 'ACCUMULATION'
-    else:
-        current_market_phase = 'NEUTRAL'
 
     # ============================================================
-    # Phase Status Determination with Reset Logic
+    # STEP 6: Zone determination based on signal type
     # ============================================================
-    accumulation_phase_ended = False
-    distribution_phase_ended = False
-    phase_status = 'ACTIVE'
+    phase_status = current_phase
     phase_message = ''
     phase_reason = ''
 
-    # CONDITION 1: Price-based reset (existing logic)
-    if max_gain_pct >= 10:
-        if price_change_pct < 5:
-            accumulation_phase_ended = True
+    # For BUY signals
+    if signal_type == 'BUY':
+        if max_gain_pct >= 10 and price_change_pct < 5:
             phase_status = 'ENDED'
             phase_reason = 'PRICE_REVERSAL'
-            phase_message = f'Fase berakhir (harga). Pernah naik {max_gain_pct:.1f}%, sekarang {price_change_pct:+.1f}%.'
-        else:
+            phase_message = f'Fase berakhir. Pernah naik {max_gain_pct:.1f}%, sekarang {price_change_pct:+.1f}%.'
+        elif max_gain_pct >= 10:
             phase_status = 'MARKUP'
             phase_message = f'Fase markup. Harga +{max_gain_pct:.1f}% dari sinyal.'
+        else:
+            phase_message = f'Akumulasi aktif. Foreign: {foreign_flow_billion:+.1f}B.'
 
-    # CONDITION 2: Distribution detected while expecting accumulation
-    elif current_market_phase in ['DISTRIBUTION', 'STRONG_DISTRIBUTION']:
-        accumulation_phase_ended = True
-        phase_status = 'DISTRIBUTION'
-        phase_reason = 'FOREIGN_OUTFLOW'
-        phase_message = f'Fase DISTRIBUSI terdeteksi! Foreign outflow {foreign_flow_billion:.1f}B ({foreign_lot_10d:,.0f} lot).'
+    # For SELL signals
+    elif signal_type == 'SELL':
+        phase_message = f'Distribusi aktif. Foreign outflow: {foreign_flow_billion:.1f}B.'
 
-    # CONDITION 3: Strong accumulation detected
-    elif current_market_phase in ['ACCUMULATION', 'STRONG_ACCUMULATION']:
-        phase_status = 'ACCUMULATING'
-        phase_message = f'Fase akumulasi aktif. Foreign inflow +{foreign_flow_billion:.1f}B.'
-
-    # CONDITION 4: Neutral - use broker ratio as tiebreaker
+    # No signal - use current phase
     else:
-        if broker_ratio >= 1.3:
-            phase_status = 'ACCUMULATING'
-            phase_message = f'Fase akumulasi (broker ratio {broker_ratio:.2f}). Foreign: {foreign_flow_billion:+.1f}B.'
-        elif broker_ratio <= 0.7:
-            phase_status = 'DISTRIBUTION'
-            phase_reason = 'BROKER_SELLING'
-            phase_message = f'Fase distribusi (broker ratio {broker_ratio:.2f}). Foreign: {foreign_flow_billion:+.1f}B.'
+        if current_phase == 'RALLY':
+            phase_message = f'Fase RALLY aktif.'
+        elif current_phase == 'DECLINE':
+            phase_message = f'Fase DECLINE aktif.'
+        elif current_phase == 'ACCUMULATION':
+            phase_message = f'Akumulasi terdeteksi, menunggu konfirmasi.'
+        elif current_phase == 'DISTRIBUTION':
+            phase_message = f'Distribusi terdeteksi.'
         else:
-            phase_status = 'SIDEWAYS'
-            phase_message = f'Fase sideways/netral. Foreign: {foreign_flow_billion:+.1f}B, ratio: {broker_ratio:.2f}.'
+            phase_message = f'Fase: {current_phase}. Foreign: {foreign_flow_billion:+.1f}B.'
 
-    # Tentukan zone berdasarkan arah pergerakan harga DAN fase market
-    # CASE 0: Phase ENDED (price reversal atau distribution detected)
-    # CASE 1: Harga TURUN dari sinyal (price_change_pct < 0)
-    # CASE 2: Harga NAIK dari sinyal (price_change_pct >= 0)
-
-    # CASE 0a: Phase ended due to PRICE REVERSAL (rose >10%, fell back)
-    if phase_reason == 'PRICE_REVERSAL':
-        zone = 'PHASE ENDED'
-        # Color based on max gain achieved - celebrate success!
-        if max_gain_pct >= 15:
-            zone_color = 'success'  # Great gain achieved
-        elif max_gain_pct >= 10:
-            zone_color = 'info'     # Good gain
-        else:
-            zone_color = 'warning'  # Modest gain
-        zone_desc = f'Fase BERAKHIR (harga). Pernah naik {max_gain_pct:.1f}% lalu turun. Tunggu sinyal baru!'
-        recommendation = 'WAIT NEW SIGNAL'
-    # CASE 0b: Distribution detected due to FOREIGN OUTFLOW
-    elif phase_reason == 'FOREIGN_OUTFLOW':
-        zone = 'DISTRIBUTION'
+    # Zone determination
+    if signal_type == 'SELL':
+        zone = 'SELL SIGNAL'
         zone_color = 'danger'
-        zone_desc = f'DISTRIBUSI terdeteksi! Foreign outflow {foreign_flow_billion:.1f}B. Sinyal tidak valid!'
+        zone_desc = 'Sinyal SELL aktif! Broker sensitif distribusi.'
         recommendation = 'SELL/AVOID'
-    # CASE 0c: Distribution detected due to BROKER SELLING
-    elif phase_reason == 'BROKER_SELLING':
-        zone = 'DISTRIBUTION'
+    elif signal_type == 'SELL_PENDING':
+        zone = 'SELL PENDING'
         zone_color = 'warning'
-        zone_desc = f'Distribusi (broker selling). Ratio {broker_ratio:.2f}. Hati-hati!'
+        zone_desc = 'Distribusi terdeteksi, menunggu konfirmasi.'
         recommendation = 'REVIEW'
+    elif not has_signal and signal_type == 'BUY_PENDING':
+        zone = 'BUY PENDING'
+        zone_color = 'info'
+        zone_desc = 'Akumulasi terdeteksi, menunggu threshold terpenuhi.'
+        recommendation = 'WAIT'
+    elif not has_signal:
+        zone = 'NO SIGNAL'
+        zone_color = 'secondary'
+        zone_desc = f'Tidak ada sinyal aktif. Fase: {current_phase}.'
+        recommendation = 'WAIT'
+    elif phase_reason == 'PRICE_REVERSAL':
+        zone = 'PHASE ENDED'
+        zone_color = 'success' if max_gain_pct >= 15 else 'info' if max_gain_pct >= 10 else 'warning'
+        zone_desc = f'Fase BERAKHIR. Pernah naik {max_gain_pct:.1f}%. Tunggu sinyal baru!'
+        recommendation = 'WAIT NEW SIGNAL'
+        has_signal = False
     elif price_change_pct < -10:
-        # Harga turun banyak dari sinyal = SIGNAL FAILED atau DEEP DISCOUNT
         zone = 'SIGNAL FAILED'
         zone_color = 'danger'
-        zone_desc = f'Harga turun {abs(price_change_pct):.1f}% dari sinyal! Sinyal mungkin gagal. Review ulang sebelum beli.'
+        zone_desc = f'Harga turun {abs(price_change_pct):.1f}% dari sinyal! Review ulang.'
         recommendation = 'REVIEW'
     elif price_change_pct < -5:
-        # Harga turun cukup banyak = DISCOUNTED tapi hati-hati
         zone = 'DISCOUNTED'
         zone_color = 'warning'
-        zone_desc = f'Harga turun {abs(price_change_pct):.1f}% dari sinyal. Bisa jadi diskon atau sinyal mulai lemah.'
+        zone_desc = f'Harga turun {abs(price_change_pct):.1f}% dari sinyal.'
         recommendation = 'SCALE IN CAREFULLY'
     elif price_change_pct < 0:
-        # Harga turun sedikit = BETTER ENTRY
         zone = 'BETTER ENTRY'
         zone_color = 'success'
-        zone_desc = f'Harga turun {abs(price_change_pct):.1f}% dari sinyal. Entry lebih baik dari sinyal awal!'
+        zone_desc = f'Entry lebih baik! Harga {abs(price_change_pct):.1f}% di bawah sinyal.'
         recommendation = 'BUY'
     elif price_change_pct <= 3:
-        # Harga naik sedikit = SAFE
         zone = 'SAFE'
         zone_color = 'success'
-        zone_desc = 'Masih aman untuk beli, harga dekat dengan sinyal awal'
+        zone_desc = 'Masih aman untuk beli.'
         recommendation = 'BUY'
     elif price_change_pct <= 7:
         zone = 'MODERATE'
         zone_color = 'info'
-        zone_desc = 'Masih bisa beli dengan cicilan, jangan all-in'
+        zone_desc = 'Bisa beli dengan cicilan.'
         recommendation = 'SCALE IN'
     elif price_change_pct <= 12:
         zone = 'CAUTION'
         zone_color = 'warning'
-        zone_desc = 'Harga sudah naik cukup jauh, pertimbangkan wait pullback'
+        zone_desc = 'Harga sudah naik, pertimbangkan wait pullback.'
         recommendation = 'WAIT PULLBACK'
     else:
         zone = 'FOMO ALERT'
         zone_color = 'danger'
-        zone_desc = f'Harga sudah naik {price_change_pct:.1f}% dari sinyal! Jangan FOMO!'
+        zone_desc = f'Harga sudah naik {price_change_pct:.1f}%! Jangan FOMO!'
         recommendation = 'DO NOT CHASE'
 
-    # Hitung target entry yang aman (relatif terhadap sinyal)
-    safe_entry_price = signal_price * 1.05  # Max 5% di atas sinyal
-    ideal_entry_price = signal_price * 1.02  # Ideal 2% di atas sinyal
-    # Jika harga sekarang di bawah sinyal, current price sudah aman
+    # Safe entry calculation
+    safe_entry_price = signal_price * 1.05 if signal_price > 0 else current_price * 1.05
+    ideal_entry_price = signal_price * 1.02 if signal_price > 0 else current_price * 1.02
     is_entry_safe = current_price <= safe_entry_price
 
+    # ============================================================
+    # STEP 7: Build return dictionary
+    # ============================================================
+    # Format signal date for display
+    signal_date_str = signal_date.strftime('%d %b %Y') if signal_date else 'N/A'
+    streak_start_str = streak_start_date.strftime('%d %b %Y') if streak_start_date else 'N/A'
+
+    # Get sideways days from market phase
+    sideways_days = market_phase.get('sideways_days', 0)
+    min_sideways_days = accum_threshold.get('min_sideways_days', 5) if signal_type in ['BUY', 'BUY_PENDING'] else distrib_threshold.get('min_sideways_days', 5)
+
+    # Get broker activity data from market phase
+    broker_activity = market_phase.get('broker_activity', {})
+    total_net_lot = broker_activity.get('total_net_lot', 0)
+    broker_stats = broker_activity.get('broker_stats', {})
+
     return {
-        'has_signal': True,
+        'has_signal': has_signal,
+        'signal_type': signal_type,  # BUY, SELL, BUY_PENDING, SELL_PENDING, or None
+        'signal_invalidated': phase_reason == 'PRICE_REVERSAL',
+        'invalidation_reason': phase_message if phase_reason == 'PRICE_REVERSAL' else None,
+        'message': phase_message if not has_signal else None,
         'signal_date': signal_date,
         'signal_price': signal_price,
-        'signal_strength': first_signal['strength'],
-        'signal_reasons': first_signal['reasons'],
+        'streak_start_date': streak_start_date,
+        'streak_start_price': streak_start_price,
+        'sideways_days': sideways_days,
+        'signal_reasons': signal_reasons,
         'current_price': current_price,
         'current_date': current_date,
         'price_change_pct': price_change_pct,
+        'price_from_start_pct': price_from_start_pct,
         'zone': zone,
         'zone_color': zone_color,
         'zone_desc': zone_desc,
@@ -1645,31 +1740,43 @@ def track_buy_signal(stock_code: str, lookback_days: int = 30) -> Dict:
             'max_price': safe_entry_price,
             'is_safe': is_entry_safe
         },
-        # Accumulation/Distribution phase tracking (dynamic for all stocks)
+        'sensitive_brokers': broker_info_list,
+        'broker_activity': {
+            'total_net_lot': total_net_lot,
+            'broker_stats': broker_stats,
+            'brokers_accumulating': broker_activity.get('brokers_accumulating', 0),
+            'brokers_distributing': broker_activity.get('brokers_distributing', 0),
+            'pct_of_shares': broker_activity.get('pct_of_shares', 0)
+        },
+        'dynamic_threshold': {
+            'accumulation': accum_threshold,
+            'distribution': distrib_threshold,
+            'is_big_cap': is_big_cap,
+            'confidence': confidence,
+            'issued_shares': issued_shares
+        },
+        'signal_threshold_days': min_sideways_days,
         'phase_tracking': {
-            'status': phase_status,  # ACCUMULATING, MARKUP, DISTRIBUTION, SIDEWAYS, or ENDED
+            'status': phase_status,
             'highest_price': highest_price,
             'max_gain_pct': max_gain_pct,
-            'phase_ended': accumulation_phase_ended,
+            'phase_ended': phase_reason == 'PRICE_REVERSAL',
             'message': phase_message,
             'reason': phase_reason,
             'foreign_flow_10d': foreign_flow_billion,
             'foreign_lot_10d': foreign_lot_10d,
             'broker_ratio': broker_ratio,
-            'market_phase': current_market_phase
+            'market_phase': current_phase
         },
-        'all_signals': signals,
         'interpretation': {
-            'summary': f"Sinyal BUY muncul pada {signal_date.strftime('%d %b %Y')} di harga Rp {signal_price:,.0f}",
-            'current_status': f"Harga sekarang Rp {current_price:,.0f} ({price_change_pct:+.1f}% dari sinyal)",
-            'action': zone_desc
+            'summary': f"Sinyal {signal_type or 'N/A'} pada {signal_date_str} @ Rp {signal_price:,.0f}" if has_signal else f"Tidak ada sinyal aktif. Fase: {current_phase}",
+            'accumulation_info': f"Broker sensitif {'akumulasi' if signal_type == 'BUY' else 'distribusi' if signal_type == 'SELL' else 'aktif'} sejak {streak_start_str}",
+            'current_status': f"Harga sekarang Rp {current_price:,.0f} ({price_change_pct:+.1f}% dari sinyal)" if has_signal else f"Harga sekarang Rp {current_price:,.0f}",
+            'action': zone_desc,
+            'threshold_info': f"Sideways: {sideways_days}/{min_sideways_days} hari, Confidence: {confidence}"
         }
     }
 
-
-# ============================================================
-# A. BROKER SENSITIVITY ANALYSIS
-# ============================================================
 
 def calculate_broker_sensitivity_advanced(stock_code: str = 'CDIA', max_brokers: int = 40) -> Dict:
     """
