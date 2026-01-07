@@ -7208,7 +7208,7 @@ def create_analysis_page(stock_code='CDIA'):
 
 
 def create_enhanced_alerts_list(alerts):
-    """Create enhanced alerts list with priority indicators and broker type info"""
+    """Create enhanced alerts list with priority indicators and broker type info - Mobile Responsive"""
     if not alerts:
         return dbc.Alert("No active alerts", color="secondary")
 
@@ -7226,43 +7226,44 @@ def create_enhanced_alerts_list(alerts):
 
         if broker_code:
             broker_type = get_broker_type(broker_code)
-            broker_color = get_broker_color(broker_code)
 
-            # Map broker type to label and color
+            # Map broker type to label
             type_labels = {
-                'FOREIGN': ('ASING', '#dc3545'),
-                'BUMN': ('BUMN', '#28a745'),
-                'LOCAL': ('LOKAL', '#6f42c1')
+                'FOREIGN': 'ASING',
+                'BUMN': 'BUMN',
+                'LOCAL': 'LOKAL'
             }
-            type_label, type_bg_color = type_labels.get(broker_type, ('LOKAL', '#6f42c1'))
+            type_label = type_labels.get(broker_type, 'LOKAL')
 
             broker_badge = html.Span([
                 html.Span(
                     broker_code,
-                    className=f"broker-badge broker-badge-{broker_type.lower()} me-1"
+                    className=f"broker-badge broker-badge-{broker_type.lower()} me-1",
+                    style={'fontSize': '0.7rem', 'padding': '2px 6px'}
                 ),
                 html.Span(
                     type_label,
-                    className=f"broker-badge broker-badge-{broker_type.lower()} me-2",
-                    style={'opacity': '0.85', 'fontSize': '0.7rem'}
+                    className=f"broker-badge broker-badge-{broker_type.lower()}",
+                    style={'opacity': '0.85', 'fontSize': '0.65rem', 'padding': '2px 4px'}
                 )
-            ])
+            ], className="d-block d-md-inline mt-1 mt-md-0")
 
+        # Mobile-friendly layout: stack vertically on mobile, horizontal on desktop
         alert_items.append(
             dbc.Alert([
-                dbc.Row([
-                    dbc.Col([
-                        dbc.Badge(alert.get('priority', 'N/A'), color=priority_color, className="me-2"),
-                        dbc.Badge(alert.get('type', '').replace('_', ' '), color="light", text_color="dark", className="me-2"),
-                        broker_badge if broker_badge else None,
-                    ], width=4),
-                    dbc.Col([
-                        html.Strong(alert.get('message', '')),
-                        html.Br(),
-                        html.Small(alert.get('detail', ''), className="text-muted")
-                    ], width=8)
+                # Badges row - wrap on mobile
+                html.Div([
+                    dbc.Badge(alert.get('priority', 'N/A'), color=priority_color, className="me-1 mb-1", style={'fontSize': '0.7rem'}),
+                    dbc.Badge(alert.get('type', '').replace('_', ' '), color="light", text_color="dark", className="me-1 mb-1", style={'fontSize': '0.65rem'}),
+                    broker_badge if broker_badge else None,
+                ], className="d-flex flex-wrap align-items-center mb-2"),
+                # Message
+                html.Div([
+                    html.Strong(alert.get('message', ''), style={'fontSize': '0.85rem'}),
+                    html.Br(),
+                    html.Small(alert.get('detail', ''), className="text-muted", style={'fontSize': '0.75rem'})
                 ])
-            ], color=priority_color, className="mb-2 py-2")
+            ], color=priority_color, className="mb-2 py-2 px-2")
         )
 
     return html.Div(alert_items)
