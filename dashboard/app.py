@@ -2879,8 +2879,9 @@ def create_validation_card(stock_code: str):
             pct = (abs(net_lot) / max_val * 100) if max_val > 0 else 0
             color = "success" if is_buy else "danger"
             bg_color = "#28a745" if is_buy else "#dc3545"
+            broker_code = b.get('broker_code', 'N/A')
             bars.append(html.Div([
-                html.Span(b.get('broker_code', 'N/A'), className="fw-bold", style={"width": "35px", "display": "inline-block", "flexShrink": "0"}),
+                html.Span([colored_broker(broker_code, with_badge=True)], style={"width": "55px", "display": "inline-block", "flexShrink": "0"}),
                 html.Div([
                     html.Div(style={"width": f"{max(pct, 5)}%", "height": "18px", "backgroundColor": bg_color, "borderRadius": "3px", "minWidth": "5px"})
                 ], style={"flex": "1", "backgroundColor": "rgba(255,255,255,0.1)", "borderRadius": "3px", "margin": "0 8px"}),
@@ -3430,10 +3431,10 @@ def create_validation_card(stock_code: str):
                             html.Strong("Top Persistent Brokers:", className="d-block mb-2 text-muted"),
                             html.Div([
                                 html.Div([
-                                    html.Span(pb.get('broker', 'N/A'), className="fw-bold me-2"),
-                                    html.Span(f"{pb.get('max_accum_streak', 0)} hari", className="text-info small"),
+                                    colored_broker(pb.get('broker', 'N/A'), with_badge=True),
+                                    html.Span(f" {pb.get('max_accum_streak', 0)} hari", className="text-info small ms-2"),
                                     html.Span(f" (+{pb.get('total_net_lot', 0):,.0f} lot)", className="text-success small" if pb.get('total_net_lot', 0) > 0 else "text-danger small"),
-                                ], className="mb-1") for pb in persistent_brokers[:3]
+                                ], className="mb-1 d-flex align-items-center") for pb in persistent_brokers[:3]
                             ] if persistent_brokers else [html.Small("Tidak ada data", className="text-muted")])
                         ], md=8),
                     ])
