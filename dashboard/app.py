@@ -6896,7 +6896,7 @@ def create_analysis_page(stock_code='CDIA'):
                             dbc.Col([
                                 html.Div([
                                     html.Small("ROE", className="text-muted d-block"),
-                                    html.H4(f"{fundamental.get('roe', 0):.1f}%" if fundamental.get('has_data') else "N/A", className="mb-0 text-info"),
+                                    html.H4(f"{fundamental.get('roe', 0)*100:.1f}%" if fundamental.get('has_data') else "N/A", className="mb-0 text-info"),
                                 ], className="text-center")
                             ], width=4),
                         ], className="mb-2"),
