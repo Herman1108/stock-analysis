@@ -58,7 +58,7 @@ from parser import read_excel_data, import_price_data, import_broker_data, read_
 from signal_validation import (
     get_comprehensive_validation, get_company_profile, get_daily_flow_timeline,
     get_market_status, get_risk_events, get_all_broker_details, DEFAULT_PARAMS,
-    get_unified_analysis_summary
+    get_unified_analysis_summary, calculate_volume_price_multi_horizon
 )
 
 # Helper function to create colored broker code span
@@ -924,35 +924,90 @@ def detect_market_phase(stock_code: str) -> dict:
 
 
 def create_phase_analysis_card(stock_code: str, current_price: float):
-    """Create the Phase Analysis UI card"""
-    phase_data = detect_market_phase(stock_code)
+    """
+    Create the Phase Analysis UI card - USES get_comprehensive_validation
+    to be consistent with Accumulation page (30 days analysis)
+    """
+    # Use get_comprehensive_validation for consistency with Accumulation page
+    validation = get_comprehensive_validation(stock_code, 30)
 
-    # Phase colors and icons
+    if validation.get('error'):
+        return dbc.Card([
+            dbc.CardHeader([
+                html.H5([
+                    html.I(className="fas fa-chart-line me-2"),
+                    "Phase Analysis (30 Hari Terakhir)"
+                ], className="mb-0")
+            ]),
+            dbc.CardBody([
+                html.P(validation['error'], className="text-warning")
+            ])
+        ])
+
+    # Extract data from validation (same source as Accumulation page)
+    summary = validation.get('summary', {})
+    confidence = validation.get('confidence', {})
+    validations = validation.get('validations', {})
+
+    # Overall signal: AKUMULASI, DISTRIBUSI, NETRAL
+    overall_signal = summary.get('overall_signal', 'NETRAL')
+    pass_rate = confidence.get('pass_rate', 0)
+
+    # Map signal to phase for display
     phase_styles = {
-        'ACCUMULATION': {'color': '#17a2b8', 'icon': 'fa-layer-group', 'label': 'ACCUMULATION'},
-        'MARKUP': {'color': '#28a745', 'icon': 'fa-arrow-trend-up', 'label': 'MARKUP / RALLY'},
-        'DISTRIBUTION': {'color': '#ffc107', 'icon': 'fa-hand-holding-dollar', 'label': 'DISTRIBUTION'},
-        'MARKDOWN': {'color': '#dc3545', 'icon': 'fa-arrow-trend-down', 'label': 'MARKDOWN / DECLINE'},
-        'UNKNOWN': {'color': '#6c757d', 'icon': 'fa-question', 'label': 'UNKNOWN'}
+        'AKUMULASI': {'color': '#17a2b8', 'icon': 'fa-layer-group', 'label': 'ACCUMULATION'},
+        'DISTRIBUSI': {'color': '#ffc107', 'icon': 'fa-hand-holding-dollar', 'label': 'DISTRIBUTION'},
+        'NETRAL': {'color': '#6c757d', 'icon': 'fa-balance-scale', 'label': 'NEUTRAL'}
     }
 
-    phase = phase_data['phase']
-    style = phase_styles.get(phase, phase_styles['UNKNOWN'])
+    style = phase_styles.get(overall_signal, phase_styles['NETRAL'])
 
-    # Create signal list
-    signal_items = []
-    for signal_text, signal_phase in phase_data['signals']:
-        signal_color = phase_styles.get(signal_phase, {}).get('color', '#6c757d')
-        signal_items.append(
-            html.Li([
-                html.I(className="fas fa-circle me-2", style={"color": signal_color, "fontSize": "8px"}),
-                signal_text
-            ], className="mb-1")
+    # Count signals from each validation
+    accum_signals = 0
+    distrib_signals = 0
+    for v in validations.values():
+        sig = v.get('signal', '')
+        if sig == 'AKUMULASI':
+            accum_signals += 1
+        elif sig == 'DISTRIBUSI':
+            distrib_signals += 1
+
+    # Validation checklist with signal indicator
+    check_mapping = [
+        ('cpr', 'Sideway Valid (CPR)'),
+        ('uvdv', 'Volume Absorption'),
+        ('broker_influence', 'Broker Influence'),
+        ('persistence', 'Persistence Cukup'),
+        ('elasticity', 'Elastisitas Mendukung'),
+        ('rotation', 'Multi-Broker Selaras'),
+    ]
+
+    checklist_items = []
+    for key, label in check_mapping:
+        v = validations.get(key, {})
+        passed = v.get('passed', False)
+        signal = v.get('signal', 'NETRAL')
+        explanation = v.get('explanation', '')
+
+        # Status icon
+        status_icon = "✓" if passed else "✗"
+        status_color = "text-success" if passed else "text-danger"
+
+        # Signal badge
+        if signal == 'AKUMULASI':
+            signal_badge = html.Span("A", className="badge bg-info ms-2", style={"fontSize": "10px"})
+        elif signal == 'DISTRIBUSI':
+            signal_badge = html.Span("D", className="badge bg-warning ms-2", style={"fontSize": "10px"})
+        else:
+            signal_badge = html.Span("N", className="badge bg-secondary ms-2", style={"fontSize": "10px"})
+
+        checklist_items.append(
+            html.Div([
+                html.Span(status_icon, className=f"{status_color} me-2 fw-bold"),
+                html.Span(label, className="small"),
+                signal_badge
+            ], className="mb-1", title=explanation)
         )
-
-    # Broker flow summary
-    broker_flow = phase_data['broker_flow']
-    foreign_flow = phase_data['foreign_flow']
 
     return dbc.Card([
         dbc.CardHeader([
@@ -962,68 +1017,65 @@ def create_phase_analysis_card(stock_code: str, current_price: float):
             ], className="mb-0")
         ]),
         dbc.CardBody([
-            # Current Phase Indicator
+            # Current Phase Indicator - using validation signal
             html.Div([
                 html.Div([
-                    html.I(className=f"fas {style['icon']} me-2 phase-{phase.lower()}", style={"fontSize": "24px"}),
-                    html.Span(style['label'], className=f"fw-bold phase-{phase.lower()}", style={"fontSize": "20px"})
+                    html.I(className=f"fas {style['icon']} me-2", style={"fontSize": "24px", "color": style['color']}),
+                    html.Span(style['label'], className="fw-bold", style={"fontSize": "20px", "color": style['color']})
                 ]),
                 html.Div([
-                    html.Small(f"Confidence: {phase_data['confidence']}%", className="text-muted")
+                    html.Small(f"Confidence: {pass_rate:.0f}% ({confidence.get('passed', 0)}/6 validasi)", className="text-muted")
                 ])
             ], className="text-center mb-3 p-3 rounded info-box", style={
                 "borderRadius": "10px",
                 "border": f"2px solid {style['color']}"
             }),
 
-            # Flow Summary
+            # Signal Breakdown - more intuitive
             dbc.Row([
                 dbc.Col([
                     html.Div([
-                        html.Small("Broker Flow", className="text-muted d-block"),
+                        html.Small("Sinyal Akumulasi", className="text-muted d-block"),
                         html.Span(
-                            f"{broker_flow['net_buy_days']} Buy / {broker_flow['net_sell_days']} Sell days",
-                            className="fw-bold"
+                            f"{accum_signals} validasi",
+                            className="fw-bold text-info"
                         ),
                         html.Br(),
-                        html.Small(
-                            f"Net: {broker_flow['total_net_lot']:+,.0f} lot",
-                            className="text-success" if broker_flow['total_net_lot'] > 0 else "text-danger"
-                        )
+                        html.Small("menunjukkan akumulasi", className="text-muted")
                     ], className="text-center p-2 rounded metric-box")
                 ], md=6),
                 dbc.Col([
                     html.Div([
-                        html.Small("Foreign Flow", className="text-muted d-block"),
+                        html.Small("Sinyal Distribusi", className="text-muted d-block"),
                         html.Span(
-                            foreign_flow['trend'],
-                            className=f"fw-bold {'text-success' if foreign_flow['trend'] == 'INFLOW' else 'text-danger' if foreign_flow['trend'] == 'OUTFLOW' else 'text-muted'}"
+                            f"{distrib_signals} validasi",
+                            className="fw-bold text-warning"
                         ),
                         html.Br(),
-                        html.Small(
-                            f"Net: {foreign_flow['total_net_lot']:+,.0f} lot",
-                            className="text-success" if foreign_flow['total_net_lot'] > 0 else "text-danger"
-                        )
+                        html.Small("menunjukkan distribusi", className="text-muted")
                     ], className="text-center p-2 rounded metric-box")
                 ], md=6),
             ], className="mb-3"),
 
-            # Signals
+            # Validation Checklist with signal badges
             html.Hr(),
-            html.H6("Sinyal Terdeteksi:", className="mb-2"),
-            html.Ul(signal_items if signal_items else [
-                html.Li("Tidak ada sinyal kuat", className="text-muted")
-            ], className="small mb-3", style={"paddingLeft": "20px"}),
+            html.H6("Detail Validasi (30 Hari):", className="mb-2"),
+            html.Div(checklist_items, className="mb-3"),
+            html.Small([
+                html.Span("A", className="badge bg-info me-1"), "= Akumulasi  ",
+                html.Span("D", className="badge bg-warning me-1"), "= Distribusi  ",
+                html.Span("N", className="badge bg-secondary me-1"), "= Netral"
+            ], className="text-muted"),
 
             # Phase explanation
             html.Hr(),
             html.Div([
                 html.H6("Cara Baca:", className="text-info mb-2"),
                 html.Ul([
-                    html.Li([html.Strong("ACCUMULATION: ", style={"color": "#17a2b8"}), "Smart money sedang beli, harga sideways di bottom"]),
-                    html.Li([html.Strong("MARKUP: ", style={"color": "#28a745"}), "Harga uptrend, momentum bullish"]),
-                    html.Li([html.Strong("DISTRIBUTION: ", style={"color": "#ffc107"}), "Smart money sedang jual, harga sideways di top"]),
-                    html.Li([html.Strong("MARKDOWN: ", style={"color": "#dc3545"}), "Harga downtrend, momentum bearish"]),
+                    html.Li("Fase ditentukan dari MAYORITAS sinyal validasi"),
+                    html.Li([html.Strong("ACCUMULATION: ", style={"color": "#17a2b8"}), "Lebih banyak validasi menunjukkan akumulasi"]),
+                    html.Li([html.Strong("DISTRIBUTION: ", style={"color": "#ffc107"}), "Lebih banyak validasi menunjukkan distribusi"]),
+                    html.Li([html.Strong("NEUTRAL: ", style={"color": "#6c757d"}), "Sinyal seimbang, tidak ada dominasi"]),
                 ], className="small")
             ])
         ])
@@ -2669,6 +2721,12 @@ def create_validation_card(stock_code: str):
         market_status = get_market_status(stock_code, 30)
         risk_events = get_risk_events(stock_code)
         all_brokers = get_all_broker_details(stock_code, 30)
+
+        # Multi-horizon Volume vs Price analysis
+        price_df = get_price_data(stock_code)
+        vol_price_multi = calculate_volume_price_multi_horizon(price_df) if not price_df.empty else {
+            'status': 'NO_DATA', 'significance': 'INSUFFICIENT', 'horizons': {}, 'conclusion': 'Data tidak tersedia'
+        }
     except Exception as e:
         return dbc.Card([
             dbc.CardHeader(html.H5("Signal Validation", className="mb-0")),
@@ -3183,41 +3241,140 @@ def create_validation_card(stock_code: str):
                 ])
             ], className="mb-3", color="dark", outline=True),
 
-            # === 5. VOLUME VS PRICE RANGE ===
+            # === 5. VOLUME VS PRICE RANGE (MULTI-HORIZON) ===
             dbc.Card([
                 dbc.CardHeader([
-                    html.H6([html.I(className="fas fa-balance-scale me-2"), "Volume vs Price Range (Absorption Proof)"], className="mb-0 text-info d-inline"),
-                    html.Small(" - Apakah ada yang menyerap volume?", className="text-muted ms-2")
+                    html.H6([html.I(className="fas fa-balance-scale me-2"), "Volume vs Price (Multi-Horizon Analysis)"], className="mb-0 text-info d-inline"),
+                    html.Small(" - Absorption detection dengan validasi multi-waktu", className="text-muted ms-2")
                 ]),
                 dbc.CardBody([
                     html.Small([
                         html.I(className="fas fa-lightbulb me-1 text-warning"),
-                        "Jika volume naik tapi harga tidak bergerak banyak = ada pihak yang menyerap (absorption). Ini tanda akumulasi/distribusi tersembunyi."
+                        "Volume dinilai signifikan jika peningkatan bertahan minimal 3-5 hari tanpa diikuti pelebaran range harga. "
+                        "Lonjakan volume satu hari belum tentu akumulasi - sistem mencari konsistensi, bukan kebetulan."
                     ], className="text-muted d-block mb-3 fst-italic"),
-                    dbc.Row([
-                        dbc.Col([
-                            html.Div([
-                                html.Span("Volume Change ", className="text-muted small d-block"),
-                                html.Span(f"{vol_change:+.0f}%", className=f"text-{'success' if vol_change > 0 else 'danger'} fw-bold fs-4"),
-                            ], className="text-center p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"})
-                        ], md=4),
-                        dbc.Col([
-                            html.Div([
-                                html.Span("Price Change ", className="text-muted small d-block"),
-                                html.Span(f"{price_change:+.1f}%", className=f"text-{'success' if price_change > 0 else 'danger'} fw-bold fs-4"),
-                            ], className="text-center p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"})
-                        ], md=4),
-                        dbc.Col([
-                            html.Div([
-                                dbc.Badge(
-                                    "Absorption Detected" if vol_change > 10 and abs(price_change) < 5 else "Not Detected",
-                                    color="success" if vol_change > 10 and abs(price_change) < 5 else "secondary",
-                                    className="px-3 py-2"
+
+                    # Significance Badge
+                    html.Div([
+                        dbc.Badge(
+                            vol_price_multi.get('significance', 'NONE'),
+                            color="success" if vol_price_multi.get('significance') == 'SIGNIFICANT' else
+                                  "info" if vol_price_multi.get('significance') == 'MODERATE' else
+                                  "warning" if vol_price_multi.get('significance') == 'EARLY' else "secondary",
+                            className="px-3 py-2 fs-6"
+                        ),
+                    ], className="text-center mb-3"),
+
+                    # Multi-Horizon Breakdown Table
+                    html.Table([
+                        html.Thead([
+                            html.Tr([
+                                html.Th("Horizon", className="text-center", style={"width": "20%"}),
+                                html.Th("Volume Δ", className="text-center", style={"width": "20%"}),
+                                html.Th("Price Δ", className="text-center", style={"width": "20%"}),
+                                html.Th("Range", className="text-center", style={"width": "20%"}),
+                                html.Th("Absorption?", className="text-center", style={"width": "20%"}),
+                            ])
+                        ]),
+                        html.Tbody([
+                            # 1 Day (Micro)
+                            html.Tr([
+                                html.Td([html.Strong("1 Hari"), html.Br(), html.Small("(Micro)", className="text-muted")], className="text-center"),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('volume_change_pct', 0):+.0f}%"
+                                    if vol_price_multi.get('horizons', {}).get('1d') else "-",
+                                    className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('1d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"
                                 ),
-                                html.Small("Vol naik + Harga diam = Ada yg serap" if vol_change > 10 and abs(price_change) < 5 else "", className="d-block text-success mt-1 small")
-                            ], className="text-center p-2")
-                        ], md=4),
-                    ])
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('price_change_pct', 0):+.1f}%"
+                                    if vol_price_multi.get('horizons', {}).get('1d') else "-",
+                                    className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('1d', {}).get('price_change_pct', 0) > 0 else 'danger'}"
+                                ),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('price_range_pct', 0):.1f}%"
+                                    if vol_price_multi.get('horizons', {}).get('1d') else "-",
+                                    className="text-center"
+                                ),
+                                html.Td(
+                                    dbc.Badge("Ya", color="success") if vol_price_multi.get('horizons', {}).get('1d', {}).get('is_absorption') else
+                                    dbc.Badge("Tidak", color="secondary"),
+                                    className="text-center"
+                                ),
+                            ], style={"backgroundColor": "rgba(255,193,7,0.1)" if vol_price_multi.get('micro_absorption') else "transparent"}),
+
+                            # 5 Day (Core) - MOST IMPORTANT
+                            html.Tr([
+                                html.Td([html.Strong("5 Hari", className="text-warning"), html.Br(), html.Small("(Core)", className="text-warning")], className="text-center"),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('volume_change_pct', 0):+.0f}%"
+                                    if vol_price_multi.get('horizons', {}).get('5d') else "-",
+                                    className=f"text-center fw-bold text-{'success' if vol_price_multi.get('horizons', {}).get('5d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"
+                                ),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('price_change_pct', 0):+.1f}%"
+                                    if vol_price_multi.get('horizons', {}).get('5d') else "-",
+                                    className=f"text-center fw-bold text-{'success' if vol_price_multi.get('horizons', {}).get('5d', {}).get('price_change_pct', 0) > 0 else 'danger'}"
+                                ),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('price_range_pct', 0):.1f}%"
+                                    if vol_price_multi.get('horizons', {}).get('5d') else "-",
+                                    className="text-center fw-bold"
+                                ),
+                                html.Td(
+                                    dbc.Badge("Ya", color="success") if vol_price_multi.get('horizons', {}).get('5d', {}).get('is_absorption') else
+                                    dbc.Badge("Tidak", color="secondary"),
+                                    className="text-center"
+                                ),
+                            ], style={"backgroundColor": "rgba(23,162,184,0.15)" if vol_price_multi.get('core_absorption') else "rgba(255,193,7,0.05)", "borderLeft": "3px solid #ffc107"}),
+
+                            # 10 Day (Structural)
+                            html.Tr([
+                                html.Td([html.Strong("10 Hari"), html.Br(), html.Small("(Structural)", className="text-muted")], className="text-center"),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('volume_change_pct', 0):+.0f}%"
+                                    if vol_price_multi.get('horizons', {}).get('10d') else "-",
+                                    className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('10d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"
+                                ),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('price_change_pct', 0):+.1f}%"
+                                    if vol_price_multi.get('horizons', {}).get('10d') else "-",
+                                    className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('10d', {}).get('price_change_pct', 0) > 0 else 'danger'}"
+                                ),
+                                html.Td(
+                                    f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('price_range_pct', 0):.1f}%"
+                                    if vol_price_multi.get('horizons', {}).get('10d') else "-",
+                                    className="text-center"
+                                ),
+                                html.Td(
+                                    dbc.Badge("Ya", color="success") if vol_price_multi.get('horizons', {}).get('10d', {}).get('is_absorption') else
+                                    dbc.Badge("Tidak", color="secondary"),
+                                    className="text-center"
+                                ),
+                            ], style={"backgroundColor": "rgba(40,167,69,0.1)" if vol_price_multi.get('structural_absorption') else "transparent"}),
+                        ])
+                    ], className="table table-sm table-dark", style={"fontSize": "12px"}),
+
+                    # Legend
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        "Volume Δ = perubahan volume vs periode sebelumnya | ",
+                        "Price Δ = perubahan harga close-to-close | ",
+                        "Range = high-low sebagai % dari mid price"
+                    ], className="text-muted d-block mb-3"),
+
+                    # KESIMPULAN
+                    html.Hr(className="my-3"),
+                    html.Div([
+                        html.Strong([html.I(className="fas fa-clipboard-check me-2"), "Kesimpulan: "], className="text-info"),
+                        html.Span(
+                            vol_price_multi.get('conclusion', 'Tidak ada data'),
+                            className="fw-bold " + (
+                                "text-success" if vol_price_multi.get('significance') in ['SIGNIFICANT', 'MODERATE'] else
+                                "text-warning" if vol_price_multi.get('significance') == 'EARLY' else
+                                "text-info"
+                            )
+                        )
+                    ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"})
                 ])
             ], className="mb-3", color="dark", outline=True),
 
@@ -6610,6 +6767,12 @@ def create_analysis_page(stock_code='CDIA'):
 
         current_price = sr.get('current_price', 0) or accum.get('current_price', 0)
 
+        # Multi-horizon Volume vs Price analysis
+        price_df = get_price_data(stock_code)
+        vol_price_multi = calculate_volume_price_multi_horizon(price_df) if not price_df.empty else {
+            'status': 'NO_DATA', 'significance': 'INSUFFICIENT', 'horizons': {}, 'conclusion': 'Data tidak tersedia'
+        }
+
     except Exception as e:
         return html.Div([
             dbc.Alert(f"Error loading analysis for {stock_code}: {str(e)}", color="danger"),
@@ -6911,7 +7074,93 @@ def create_analysis_page(stock_code='CDIA'):
             ])
         ], className="mb-4", color="dark", outline=True),
 
-        # === 5. DECISION GUIDE (Panduan Keputusan) ===
+        # === 5. VOLUME VS PRICE (Multi-Horizon Summary) ===
+        dbc.Card([
+            dbc.CardHeader([
+                html.H5([html.I(className="fas fa-balance-scale me-2"), "Volume vs Price Analysis"], className="mb-0 d-inline"),
+                dbc.Badge(
+                    vol_price_multi.get('significance', 'NONE'),
+                    color="success" if vol_price_multi.get('significance') == 'SIGNIFICANT' else
+                          "info" if vol_price_multi.get('significance') == 'MODERATE' else
+                          "warning" if vol_price_multi.get('significance') == 'EARLY' else "secondary",
+                    className="ms-2"
+                ),
+            ]),
+            dbc.CardBody([
+                # Formula Explanation
+                html.Div([
+                    html.H6([html.I(className="fas fa-flask me-2"), "Formula Analisis:"], className="text-info mb-2"),
+                    html.Div([
+                        html.Code("ABSORPTION = (Volume↑ > 10%) AND (Price_Range < 8%)", className="d-block mb-1"),
+                        html.Code("SIGNIFICANT = Core(5d) + Micro(1d) Absorption", className="d-block mb-1"),
+                        html.Code("MODERATE = Core(5d) Absorption only", className="d-block mb-1"),
+                        html.Code("EARLY = Micro(1d) Absorption only (belum terkonfirmasi)", className="d-block"),
+                    ], className="p-2 rounded small", style={"backgroundColor": "rgba(255,255,255,0.05)", "fontFamily": "monospace"})
+                ], className="mb-3"),
+
+                # Horizon Summary Table
+                html.Table([
+                    html.Thead([
+                        html.Tr([
+                            html.Th("Horizon", className="text-center"),
+                            html.Th("Vol Δ", className="text-center"),
+                            html.Th("Price Δ", className="text-center"),
+                            html.Th("Range", className="text-center"),
+                            html.Th("Status", className="text-center"),
+                        ])
+                    ]),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td("1 Hari (Micro)", className="text-center"),
+                            html.Td(f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('volume_change_pct', 0):+.0f}%" if vol_price_multi.get('horizons', {}).get('1d') else "-",
+                                   className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('1d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"),
+                            html.Td(f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('price_change_pct', 0):+.1f}%" if vol_price_multi.get('horizons', {}).get('1d') else "-", className="text-center"),
+                            html.Td(f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('price_range_pct', 0):.1f}%" if vol_price_multi.get('horizons', {}).get('1d') else "-", className="text-center"),
+                            html.Td(dbc.Badge("Absorption" if vol_price_multi.get('micro_absorption') else "-", color="success" if vol_price_multi.get('micro_absorption') else "secondary"), className="text-center"),
+                        ]),
+                        html.Tr([
+                            html.Td(html.Strong("5 Hari (Core)", className="text-warning"), className="text-center"),
+                            html.Td(html.Strong(f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('volume_change_pct', 0):+.0f}%" if vol_price_multi.get('horizons', {}).get('5d') else "-"),
+                                   className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('5d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"),
+                            html.Td(html.Strong(f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('price_change_pct', 0):+.1f}%" if vol_price_multi.get('horizons', {}).get('5d') else "-"), className="text-center"),
+                            html.Td(html.Strong(f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('price_range_pct', 0):.1f}%" if vol_price_multi.get('horizons', {}).get('5d') else "-"), className="text-center"),
+                            html.Td(dbc.Badge("Absorption" if vol_price_multi.get('core_absorption') else "-", color="success" if vol_price_multi.get('core_absorption') else "secondary"), className="text-center"),
+                        ], style={"backgroundColor": "rgba(255,193,7,0.1)"}),
+                        html.Tr([
+                            html.Td("10 Hari (Structural)", className="text-center"),
+                            html.Td(f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('volume_change_pct', 0):+.0f}%" if vol_price_multi.get('horizons', {}).get('10d') else "-",
+                                   className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('10d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"),
+                            html.Td(f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('price_change_pct', 0):+.1f}%" if vol_price_multi.get('horizons', {}).get('10d') else "-", className="text-center"),
+                            html.Td(f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('price_range_pct', 0):.1f}%" if vol_price_multi.get('horizons', {}).get('10d') else "-", className="text-center"),
+                            html.Td(dbc.Badge("Absorption" if vol_price_multi.get('structural_absorption') else "-", color="success" if vol_price_multi.get('structural_absorption') else "secondary"), className="text-center"),
+                        ]),
+                    ])
+                ], className="table table-sm table-dark mb-3", style={"fontSize": "12px"}),
+
+                # Conclusion
+                html.Div([
+                    html.Strong([html.I(className="fas fa-clipboard-check me-2"), "Kesimpulan: "], className="text-info"),
+                    html.Span(
+                        vol_price_multi.get('conclusion', 'Data tidak tersedia'),
+                        className="fw-bold " + (
+                            "text-success" if vol_price_multi.get('significance') in ['SIGNIFICANT', 'MODERATE'] else
+                            "text-warning" if vol_price_multi.get('significance') == 'EARLY' else
+                            "text-muted"
+                        )
+                    )
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
+
+                # Explanation
+                html.Hr(className="my-3"),
+                html.Small([
+                    html.I(className="fas fa-info-circle me-1"),
+                    "Volume dinilai signifikan jika peningkatan bertahan minimal 3-5 hari tanpa pelebaran range harga. ",
+                    "Lonjakan volume 1 hari belum tentu akumulasi - sistem mencari konsistensi."
+                ], className="text-muted fst-italic")
+            ])
+        ], className="mb-4", color="dark", outline=True),
+
+        # === 6. DECISION GUIDE (Panduan Keputusan) ===
         dbc.Card([
             dbc.CardHeader([
                 html.H5([html.I(className="fas fa-compass me-2"), "Panduan Keputusan Trading"], className="mb-0"),
@@ -8318,16 +8567,8 @@ def create_position_page(stock_code='CDIA'):
                     ])
                 ], className="mb-4"),
 
-                # Phase Analysis
+                # Phase Analysis (consistent with Accumulation page)
                 create_phase_analysis_card(stock_code, current_price),
-
-                # Accumulation Score (Backtest Formula)
-                html.Div(className="mt-4"),
-                create_accumulation_score_card(stock_code),
-
-                # Distribution Score (Backtest Formula)
-                html.Div(className="mt-4"),
-                create_distribution_score_card(stock_code)
             ], md=7),
 
             # Right column - Support/Resistance & Ownership

@@ -714,6 +714,138 @@ def calculate_elasticity(df: pd.DataFrame) -> dict:
 
 
 # ============================================================
+# MULTI-HORIZON VOLUME VS PRICE ANALYSIS
+# ============================================================
+def calculate_volume_price_multi_horizon(df: pd.DataFrame) -> dict:
+    """
+    Analisis multi-horizon untuk Volume vs Price:
+    - Micro (1 hari): Deteksi kejadian
+    - Core (5 hari): Validasi niat - WAJIB
+    - Structural (10 hari): Konfirmasi fase
+
+    Absorption detected when:
+    - Volume meningkat TAPI price range tetap sempit
+    """
+    if len(df) < 10:
+        return {
+            'status': 'NO_DATA',
+            'significance': 'INSUFFICIENT',
+            'horizons': {},
+            'conclusion': 'Data tidak cukup untuk analisis multi-horizon'
+        }
+
+    df = df.sort_values('date').copy()
+
+    def calc_horizon(data, window, prev_window=None):
+        """Calculate metrics for a specific time horizon"""
+        if len(data) < window:
+            return None
+
+        recent = data.tail(window)
+
+        # Volume change
+        avg_vol_recent = recent['volume'].mean()
+
+        if prev_window and len(data) >= window + prev_window:
+            prev_data = data.iloc[-(window + prev_window):-window]
+            avg_vol_prev = prev_data['volume'].mean() if len(prev_data) > 0 else avg_vol_recent
+        else:
+            # Use earlier data as baseline
+            earlier = data.iloc[:window] if len(data) > window else data.iloc[:len(data)//2]
+            avg_vol_prev = earlier['volume'].mean() if len(earlier) > 0 else avg_vol_recent
+
+        vol_change_pct = ((avg_vol_recent - avg_vol_prev) / avg_vol_prev * 100) if avg_vol_prev > 0 else 0
+
+        # Price range (high-low as % of mid price)
+        high = recent['high_price'].max()
+        low = recent['low_price'].min()
+        mid = (high + low) / 2
+        price_range_pct = ((high - low) / mid * 100) if mid > 0 else 0
+
+        # Price change (close to close)
+        first_close = recent.iloc[0]['close_price']
+        last_close = recent.iloc[-1]['close_price']
+        price_change_pct = ((last_close - first_close) / first_close * 100) if first_close > 0 else 0
+
+        # Average daily range for comparison
+        daily_ranges = ((recent['high_price'] - recent['low_price']) / recent['low_price'] * 100)
+        avg_daily_range = daily_ranges.mean()
+
+        # Absorption detection: volume up + range narrow
+        is_absorption = vol_change_pct > 10 and price_range_pct < 8
+
+        return {
+            'volume_change_pct': round(vol_change_pct, 1),
+            'price_change_pct': round(price_change_pct, 2),
+            'price_range_pct': round(price_range_pct, 2),
+            'avg_daily_range': round(avg_daily_range, 2),
+            'is_absorption': is_absorption
+        }
+
+    # Calculate for each horizon
+    horizons = {
+        '1d': calc_horizon(df, 1, 5),   # Micro: 1 day vs 5 day avg
+        '5d': calc_horizon(df, 5, 5),   # Core: 5 day vs prev 5 day
+        '10d': calc_horizon(df, 10, 10) # Structural: 10 day vs prev 10 day
+    }
+
+    # Determine significance
+    micro_absorption = horizons.get('1d', {}).get('is_absorption', False) if horizons.get('1d') else False
+    core_absorption = horizons.get('5d', {}).get('is_absorption', False) if horizons.get('5d') else False
+    structural_absorption = horizons.get('10d', {}).get('is_absorption', False) if horizons.get('10d') else False
+
+    # Significance classification
+    if core_absorption and micro_absorption:
+        significance = 'SIGNIFICANT'
+        status = 'ABSORPTION_CONFIRMED'
+    elif core_absorption:
+        significance = 'MODERATE'
+        status = 'ABSORPTION_BUILDING'
+    elif micro_absorption:
+        significance = 'EARLY'
+        status = 'ABSORPTION_EARLY'
+    else:
+        significance = 'NONE'
+        status = 'NO_ABSORPTION'
+
+    # Generate conclusion
+    if significance == 'SIGNIFICANT':
+        conclusion = "ABSORPTION SIGNIFIKAN - Volume meningkat konsisten 1-5 hari tanpa pelebaran range. Ada akumulasi/distribusi terstruktur."
+    elif significance == 'MODERATE':
+        conclusion = "ABSORPTION MODERAT - Volume meningkat dalam 5 hari dengan range terkendali. Validasi niat mulai terbentuk."
+    elif significance == 'EARLY':
+        conclusion = "ABSORPTION AWAL - Volume spike 1 hari terdeteksi, BELUM terkonfirmasi. Butuh validasi 3-5 hari."
+    else:
+        # Determine actual market condition
+        vol_5d = horizons.get('5d', {}).get('volume_change_pct', 0) if horizons.get('5d') else 0
+        price_5d = horizons.get('5d', {}).get('price_change_pct', 0) if horizons.get('5d') else 0
+        range_5d = horizons.get('5d', {}).get('price_range_pct', 0) if horizons.get('5d') else 0
+
+        if vol_5d > 10 and price_5d > 5:
+            conclusion = "RALLY/MARKUP - Volume dan harga naik bersamaan. Buying pressure dominan."
+        elif vol_5d > 10 and price_5d < -5:
+            conclusion = "DISTRIBUTION - Volume tinggi dengan harga turun. Selling pressure dominan."
+        elif vol_5d <= 10 and abs(price_5d) <= 5:
+            conclusion = "KONSOLIDASI - Volume dan harga stabil. Menunggu breakout/breakdown."
+        elif price_5d > 5:
+            conclusion = "WEAK RALLY - Harga naik tanpa dukungan volume. Waspada pullback."
+        elif price_5d < -5:
+            conclusion = "WEAK SELLING - Harga turun tanpa volume tinggi. Potensi reversal."
+        else:
+            conclusion = "NETRAL - Tidak ada pola signifikan dalam 5 hari terakhir."
+
+    return {
+        'status': status,
+        'significance': significance,
+        'horizons': horizons,
+        'conclusion': conclusion,
+        'micro_absorption': micro_absorption,
+        'core_absorption': core_absorption,
+        'structural_absorption': structural_absorption
+    }
+
+
+# ============================================================
 # INDIKATOR 7: Broker Rotation
 # ============================================================
 def calculate_rotation(broker_df: pd.DataFrame, params: dict = None) -> dict:
