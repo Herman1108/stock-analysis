@@ -27,6 +27,7 @@ import pandas as pd
 import numpy as np
 from datetime import timedelta
 from database import execute_query
+from composite_analyzer import analyze_support_resistance
 
 
 # ============================================================
@@ -1536,45 +1537,33 @@ def get_unified_analysis_summary(stock_code: str) -> dict:
     except:
         fundamental = {'has_data': False, 'valuation': 'N/A', 'valuation_color': 'secondary'}
 
-    # 3. Get Support & Resistance data
+    # 3. Get Support & Resistance data (using multi-method analysis for consistency with S/R submenu)
     support_resistance = {}
     try:
-        query = """
-            SELECT date, high_price, low_price, close_price, volume
-            FROM stock_daily
-            WHERE stock_code = %s
-            ORDER BY date DESC LIMIT 60
-        """
-        result = execute_query(query, (stock_code,))
-        if result:
-            prices = pd.DataFrame(result)
-            current_price = prices.iloc[0]['close_price']
+        sr_analysis = analyze_support_resistance(stock_code)
+        if sr_analysis and sr_analysis.get('current_price'):
+            current_price = sr_analysis['current_price']
+            key_support = sr_analysis.get('key_support', current_price * 0.95)
+            key_resistance = sr_analysis.get('key_resistance', current_price * 1.05)
+            interpretation = sr_analysis.get('interpretation', {})
 
-            # Calculate key levels
-            high_20d = prices.head(20)['high_price'].max()
-            low_20d = prices.head(20)['low_price'].min()
-            high_52w = prices['high_price'].max()
-            low_52w = prices['low_price'].min()
-
-            # Distance from levels
-            dist_from_support = ((current_price - low_20d) / low_20d * 100) if low_20d > 0 else 0
-            dist_from_resistance = ((high_20d - current_price) / current_price * 100) if current_price > 0 else 0
+            dist_from_support = interpretation.get('support_distance_pct', 0)
+            dist_from_resistance = interpretation.get('resistance_distance_pct', 0)
 
             support_resistance = {
                 'current_price': current_price,
-                'support_20d': low_20d,
-                'resistance_20d': high_20d,
-                'high_52w': high_52w,
-                'low_52w': low_52w,
+                'support_20d': key_support,  # Using multi-method key support
+                'resistance_20d': key_resistance,  # Using multi-method key resistance
                 'dist_from_support': dist_from_support,
                 'dist_from_resistance': dist_from_resistance,
                 'position': 'NEAR_SUPPORT' if dist_from_support < 5 else 'NEAR_RESISTANCE' if dist_from_resistance < 5 else 'MIDDLE',
-                'has_data': True
+                'has_data': True,
+                'sr_analysis': sr_analysis  # Include full analysis for reference
             }
         else:
             support_resistance = {'has_data': False}
-    except:
-        support_resistance = {'has_data': False}
+    except Exception as e:
+        support_resistance = {'has_data': False, 'error': str(e)}
 
     # 4. Build Key Points for Decision
     key_points = []
