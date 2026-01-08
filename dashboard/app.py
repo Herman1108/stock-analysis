@@ -3004,27 +3004,13 @@ def create_discussion_page(stock_code: str = None):
             ], className="text-muted")
         ], color="info", className="mb-3"),
 
-        # Stock Filter
-        dbc.Row([
-            dbc.Col([
-                dbc.InputGroup([
-                    dbc.InputGroupText(html.I(className="fas fa-filter")),
-                    dbc.Select(
-                        id="forum-stock-filter",
-                        options=[{"label": "Semua Saham", "value": ""}] +
-                                [{"label": s, "value": s} for s in get_available_stocks()],
-                        value=stock_code or "",
-                        style={"maxWidth": "200px"}
-                    ),
-                ], size="sm")
-            ], md=4),
-            dbc.Col([
-                dbc.Button([
-                    html.I(className="fas fa-plus me-2"),
-                    "Buat Thread Baru"
-                ], id="new-thread-btn", color="primary", size="sm")
-            ], md=8, className="text-end"),
-        ], className="mb-4"),
+        # Action button
+        html.Div([
+            dbc.Button([
+                html.I(className="fas fa-plus me-2"),
+                "Buat Thread Baru"
+            ], id="new-thread-btn", color="primary", size="sm")
+        ], className="mb-4 text-end"),
 
         # New Thread Form (hidden by default)
         dbc.Collapse([
@@ -3034,21 +3020,8 @@ def create_discussion_page(stock_code: str = None):
                     "Buat Thread Baru"
                 ]),
                 dbc.CardBody([
-                    dbc.Row([
-                        dbc.Col([
-                            dbc.Label("Nama (akan ditampilkan)", className="small"),
-                            dbc.Input(id="thread-author", placeholder="Nama Anda", size="sm"),
-                        ], md=6),
-                        dbc.Col([
-                            dbc.Label("Kode Saham (opsional)", className="small"),
-                            dbc.Select(
-                                id="thread-stock",
-                                options=[{"label": "Umum (tidak spesifik)", "value": ""}] +
-                                        [{"label": s, "value": s} for s in get_available_stocks()],
-                                value="",
-                            ),
-                        ], md=6),
-                    ], className="mb-3"),
+                    dbc.Label("Nama (akan ditampilkan)", className="small"),
+                    dbc.Input(id="thread-author", placeholder="Nama Anda", size="sm", className="mb-3"),
                     dbc.Label("Judul Thread", className="small"),
                     dbc.Input(id="thread-title", placeholder="Judul diskusi...", className="mb-3"),
                     dbc.Label("Isi Thread", className="small"),
@@ -10978,7 +10951,7 @@ def display_page(pathname, selected_stock):
     elif pathname == '/upload':
         return create_upload_page()
     elif pathname == '/discussion':
-        return create_discussion_page()
+        return create_discussion_page(selected_stock)
     elif pathname == '/movement':
         return create_broker_movement_page(selected_stock)
     elif pathname == '/sensitive':
@@ -11336,7 +11309,7 @@ def toggle_admin_section(n_clicks, is_open):
     [State("thread-author", "value"),
      State("thread-title", "value"),
      State("thread-content", "value"),
-     State("thread-stock", "value"),
+     State("stock-selector", "value"),  # Use main stock selector
      State("admin-password", "value"),
      State("admin-options", "value")],
     prevent_initial_call=True
@@ -11418,16 +11391,6 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
         return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update
 
 
-# Filter threads by stock
-@app.callback(
-    Output("url", "pathname", allow_duplicate=True),
-    [Input("forum-stock-filter", "value")],
-    prevent_initial_call=True
-)
-def filter_forum_by_stock(stock_code):
-    if stock_code:
-        return f"/discussion?stock={stock_code}"
-    return "/discussion"
 
 
 # ============================================================
