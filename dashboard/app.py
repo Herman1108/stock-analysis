@@ -5733,26 +5733,27 @@ def calculate_broker_streak_history(stock_code, broker_codes, days=30):
     """
     Calculate historical streak data for selected brokers.
     Returns daily streak values (positive = accumulation, negative = distribution)
+    Also includes net_lot for Stockbit-style units.
     """
     broker_df = get_broker_data(stock_code)
     if broker_df.empty:
-        return pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame()
 
     # Filter by date range
     end_date = broker_df['date'].max()
     start_date = end_date - pd.Timedelta(days=days)
-    broker_df = broker_df[broker_df['date'] >= start_date]
+    filtered_df = broker_df[broker_df['date'] >= start_date]
 
-    if broker_df.empty:
-        return pd.DataFrame()
+    if filtered_df.empty:
+        return pd.DataFrame(), pd.DataFrame()
 
     # Get all unique dates
-    all_dates = sorted(broker_df['date'].unique())
+    all_dates = sorted(filtered_df['date'].unique())
 
     streak_history = []
 
     for broker in broker_codes:
-        b_data = broker_df[broker_df['broker_code'] == broker].sort_values('date')
+        b_data = filtered_df[filtered_df['broker_code'] == broker].sort_values('date')
 
         if b_data.empty:
             continue
@@ -5769,8 +5770,11 @@ def calculate_broker_streak_history(stock_code, broker_codes, days=30):
                 current_accum_streak = 0
                 current_dist_streak = 0
                 streak_value = 0
+                net_lot = 0
+                net_value = 0
             else:
                 net_value = day_data['net_value'].iloc[0]
+                net_lot = day_data['net_lot'].iloc[0] if 'net_lot' in day_data.columns else 0
 
                 if net_value > 0:
                     # Accumulation
@@ -5792,17 +5796,25 @@ def calculate_broker_streak_history(stock_code, broker_codes, days=30):
                 'date': date,
                 'broker_code': broker,
                 'streak': streak_value,
-                'net_value': day_data['net_value'].iloc[0] if not day_data.empty else 0
+                'net_lot': net_lot,
+                'net_value': net_value
             })
 
-    return pd.DataFrame(streak_history)
+    # Calculate ALL brokers total for comparison
+    all_brokers_daily = filtered_df.groupby('date').agg({
+        'net_lot': 'sum',
+        'net_value': 'sum'
+    }).reset_index()
+
+    return pd.DataFrame(streak_history), all_brokers_daily
 
 
 def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30):
     """
-    Create interactive area chart showing accumulation/distribution streak history
-    for brokers from Accumulation Streak and Distribution Warning lists.
-    Includes total net line showing combined net value.
+    Create interactive area chart showing accumulation/distribution streak history.
+    Uses LOT units (like Stockbit). Shows 2 total net lines:
+    - Total Net ALL brokers (tebal)
+    - Total Net Selected brokers (tipis)
     """
     try:
         # Get streak brokers if none selected
@@ -5813,8 +5825,8 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
         if not selected_brokers:
             return html.Div("Tidak ada broker dengan streak aktif", className="text-muted text-center py-3")
 
-        # Calculate streak history
-        streak_df = calculate_broker_streak_history(stock_code, selected_brokers, days)
+        # Calculate streak history - returns (selected_df, all_brokers_df)
+        streak_df, all_brokers_df = calculate_broker_streak_history(stock_code, selected_brokers, days)
 
         if streak_df.empty:
             return html.Div("Tidak ada data streak", className="text-muted text-center py-3")
@@ -5822,20 +5834,25 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
         # Create figure with secondary y-axis for total net
         fig = make_subplots(specs=[[{"secondary_y": True}]])
 
-        # Color palette
-        colors_positive = ['rgba(0, 255, 136, 0.5)', 'rgba(0, 212, 255, 0.5)', 'rgba(255, 230, 109, 0.5)',
-                          'rgba(78, 205, 196, 0.5)', 'rgba(149, 225, 211, 0.5)']
-        colors_negative = ['rgba(255, 107, 107, 0.5)', 'rgba(255, 159, 64, 0.5)', 'rgba(255, 99, 132, 0.5)',
-                          'rgba(255, 182, 193, 0.5)', 'rgba(255, 140, 0, 0.5)']
+        # Color palette for brokers
+        colors_positive = ['rgba(0, 255, 136, 0.4)', 'rgba(0, 212, 255, 0.4)', 'rgba(255, 230, 109, 0.4)',
+                          'rgba(78, 205, 196, 0.4)', 'rgba(149, 225, 211, 0.4)']
+        colors_negative = ['rgba(255, 107, 107, 0.4)', 'rgba(255, 159, 64, 0.4)', 'rgba(255, 99, 132, 0.4)',
+                          'rgba(255, 182, 193, 0.4)', 'rgba(255, 140, 0, 0.4)']
         line_colors = ['#00ff88', '#00d4ff', '#ffe66d', '#4ecdc4', '#95e1d3']
 
-        # Calculate total net per day (sum of all broker net_values)
-        total_net_df = streak_df.groupby('date').agg({
-            'net_value': 'sum',
-            'streak': 'sum'  # Sum of streaks
-        }).reset_index()
-        total_net_df['cumulative_net'] = total_net_df['net_value'].cumsum()
+        # Calculate SELECTED brokers total net (LOT)
+        selected_net_df = streak_df.groupby('date').agg({
+            'net_lot': 'sum',
+            'streak': 'sum'
+        }).reset_index().sort_values('date')
+        selected_net_df['cumulative_lot'] = selected_net_df['net_lot'].cumsum()
 
+        # Calculate ALL brokers cumulative (LOT)
+        all_brokers_df = all_brokers_df.sort_values('date')
+        all_brokers_df['cumulative_lot'] = all_brokers_df['net_lot'].cumsum()
+
+        # Add broker streak areas
         for i, broker in enumerate(selected_brokers):
             broker_data = streak_df[streak_df['broker_code'] == broker].sort_values('date')
 
@@ -5855,83 +5872,140 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
                 line=dict(width=1.5, color=line_colors[i % len(line_colors)]),
                 fill='tozeroy',
                 fillcolor=colors_positive[i % len(colors_positive)],
-                hovertemplate=f'{broker}<br>Akumulasi: %{{y}} hari<extra></extra>'
+                hovertemplate=f'{broker}<br>Streak Beli: %{{y}} hari<extra></extra>'
             ), secondary_y=False)
 
             # Add negative area (distribution)
             fig.add_trace(go.Scatter(
                 x=broker_data['date'],
                 y=negative_streak,
-                name=f'{broker} (Dist)',
+                name=f'{broker} (Jual)',
                 mode='lines',
-                line=dict(width=1.5, color=colors_negative[i % len(colors_negative)].replace('0.5', '0.8')),
+                line=dict(width=1.5, color=colors_negative[i % len(colors_negative)].replace('0.4', '0.7')),
                 fill='tozeroy',
                 fillcolor=colors_negative[i % len(colors_negative)],
                 showlegend=False,
-                hovertemplate=f'{broker}<br>Distribusi: %{{y}} hari<extra></extra>'
+                hovertemplate=f'{broker}<br>Streak Jual: %{{y}} hari<extra></extra>'
             ), secondary_y=False)
 
-        # Add Total Net Line (cumulative) on secondary y-axis
+        # Add Total Net ALL brokers (THICK white line)
         fig.add_trace(go.Scatter(
-            x=total_net_df['date'],
-            y=total_net_df['cumulative_net'] / 1e9,  # Convert to billions
-            name='Total Net (B)',
-            mode='lines+markers',
-            line=dict(width=3, color='white', dash='solid'),
-            marker=dict(size=4, color='white'),
-            hovertemplate='Total Net: %{y:.2f}B<extra></extra>'
+            x=all_brokers_df['date'],
+            y=all_brokers_df['cumulative_lot'] / 1e6,  # Convert to million lots
+            name='📊 Net ALL (Juta Lot)',
+            mode='lines',
+            line=dict(width=4, color='white', dash='solid'),
+            hovertemplate='Net ALL Broker: %{y:,.2f} Juta Lot<extra></extra>'
         ), secondary_y=True)
 
-        # Add zero line
+        # Add Total Net SELECTED brokers (THIN yellow line)
+        fig.add_trace(go.Scatter(
+            x=selected_net_df['date'],
+            y=selected_net_df['cumulative_lot'] / 1e6,  # Convert to million lots
+            name='⭐ Net Selected (Juta Lot)',
+            mode='lines+markers',
+            line=dict(width=2, color='#ffe66d', dash='dot'),
+            marker=dict(size=4, color='#ffe66d'),
+            hovertemplate='Net Selected: %{y:,.2f} Juta Lot<extra></extra>'
+        ), secondary_y=True)
+
+        # Add zero line for streak axis
         fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, secondary_y=False)
 
         # Update layout
         fig.update_layout(
             template='plotly_dark',
-            height=380,
-            margin=dict(l=10, r=50, t=30, b=30),
+            height=420,
+            margin=dict(l=60, r=70, t=40, b=50),
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
                 y=1.02,
-                xanchor="right",
-                x=1,
-                font=dict(size=9)
+                xanchor="center",
+                x=0.5,
+                font=dict(size=9),
+                bgcolor='rgba(0,0,0,0.5)'
             ),
-            hovermode='x unified'
+            hovermode='x unified',
+            title=dict(
+                text=f"<b>Streak History & Net Flow ({days} Hari)</b>",
+                font=dict(size=12, color='#aaa'),
+                x=0.5
+            )
         )
 
-        # Update axes
+        # Update LEFT Y-axis (Streak)
         fig.update_yaxes(
-            title_text="Streak (hari)",
-            title_font=dict(size=10),
+            title_text="<b>Streak</b><br><sup>Hari berturut-turut beli(+)/jual(-)</sup>",
+            title_font=dict(size=10, color='#00ff88'),
+            tickfont=dict(color='#00ff88'),
             zeroline=True,
             zerolinecolor='gray',
             zerolinewidth=1,
+            gridcolor='rgba(255,255,255,0.1)',
             secondary_y=False
         )
+
+        # Update RIGHT Y-axis (Net Lot)
         fig.update_yaxes(
-            title_text="Net (Milyar)",
+            title_text="<b>Net Lot Kumulatif</b><br><sup>Dalam Juta Lot</sup>",
             title_font=dict(size=10, color='white'),
             tickfont=dict(color='white'),
+            tickformat=',.1f',
+            gridcolor='rgba(255,255,255,0.05)',
             secondary_y=True
         )
-        fig.update_xaxes(title_text="", tickformat="%d %b")
 
-        # Summary stats
-        latest_total = total_net_df['cumulative_net'].iloc[-1] if not total_net_df.empty else 0
-        total_signal = "AKUMULASI" if latest_total > 0 else "DISTRIBUSI" if latest_total < 0 else "NETRAL"
-        signal_color = "success" if latest_total > 0 else "danger" if latest_total < 0 else "secondary"
+        # Update X-axis
+        fig.update_xaxes(
+            title_text="<b>Tanggal</b>",
+            title_font=dict(size=10, color='#aaa'),
+            tickformat="%d %b",
+            gridcolor='rgba(255,255,255,0.1)'
+        )
+
+        # Calculate summary stats
+        latest_selected = selected_net_df['cumulative_lot'].iloc[-1] if not selected_net_df.empty else 0
+        latest_all = all_brokers_df['cumulative_lot'].iloc[-1] if not all_brokers_df.empty else 0
+
+        selected_signal = "AKUMULASI" if latest_selected > 0 else "DISTRIBUSI" if latest_selected < 0 else "NETRAL"
+        all_signal = "AKUMULASI" if latest_all > 0 else "DISTRIBUSI" if latest_all < 0 else "NETRAL"
+        selected_color = "success" if latest_selected > 0 else "danger" if latest_selected < 0 else "secondary"
+        all_color = "success" if latest_all > 0 else "danger" if latest_all < 0 else "secondary"
 
         return html.Div([
             dcc.Graph(figure=fig, config={'displayModeBar': False}),
+            # Summary Section
+            html.Div([
+                dbc.Row([
+                    dbc.Col([
+                        html.Small([
+                            html.Strong("📊 ALL Broker: "),
+                            html.Span(f"{all_signal} ", className=f"badge bg-{all_color} me-1"),
+                            html.Span(f"{latest_all/1e6:+,.2f} Juta Lot", className=f"text-{all_color}")
+                        ])
+                    ], width=6),
+                    dbc.Col([
+                        html.Small([
+                            html.Strong("⭐ Selected ({0}): ".format(len(selected_brokers))),
+                            html.Span(f"{selected_signal} ", className=f"badge bg-{selected_color} me-1"),
+                            html.Span(f"{latest_selected/1e6:+,.2f} Juta Lot", className=f"text-{selected_color}")
+                        ])
+                    ], width=6),
+                ], className="text-center")
+            ], className="mt-2 p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
+            # Legend explanation
             html.Div([
                 html.Small([
-                    html.Strong("Summary: "),
-                    html.Span(f"{total_signal} ", className=f"badge bg-{signal_color} me-1"),
-                    f"Total Net: Rp {latest_total/1e9:+.2f}B dari {len(selected_brokers)} broker"
-                ], className="text-muted")
-            ], className="text-center mt-1")
+                    html.I(className="fas fa-info-circle me-1 text-info"),
+                    html.Strong("Keterangan: "),
+                    "Area warna = streak per broker (atas=beli, bawah=jual). ",
+                    html.Span("Garis putih tebal", style={"color": "white", "fontWeight": "bold"}),
+                    " = Net Lot semua broker. ",
+                    html.Span("Garis kuning putus-putus", style={"color": "#ffe66d"}),
+                    " = Net Lot broker yang dipilih."
+                ], className="text-muted", style={"fontSize": "10px"})
+            ], className="mt-1")
         ])
 
     except Exception as e:
