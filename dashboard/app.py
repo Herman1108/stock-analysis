@@ -5039,61 +5039,75 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                 type_flow[broker_type] = 0
             type_flow[broker_type] += row['net_value']
 
+        # Subtitles for sentiment (Indonesian)
+        foreign_subtitle = "Netral dibanding kemarin" if abs(foreign_today - foreign_yesterday) < 0.5 else (
+            "Lebih tinggi dari kemarin" if foreign_today > foreign_yesterday else "Lebih rendah dari kemarin"
+        )
+        accum_subtitle = "Belum ada dominasi" if 45 <= accum_ratio <= 55 else (
+            "Pembeli mendominasi" if accum_ratio > 55 else "Penjual mendominasi"
+        )
+        streak_subtitle = "Belum ada tren beli/jual beruntun" if foreign_streak == 0 else (
+            f"Tren {'beli' if 'INFLOW' in foreign_signal else 'jual'} {foreign_streak} hari berturut"
+        )
+
         return dbc.Card([
             dbc.CardHeader([
                 html.I(className="fas fa-chart-pie me-2"),
-                html.Span("Market Sentiment Today", className="fw-bold")
+                html.Span("Sentimen Pasar Hari Ini", className="fw-bold")
             ]),
             dbc.CardBody([
-                # Top row: 3 metric cards with tooltips
+                # Top row: 3 metric cards with Indonesian labels
                 dbc.Row([
+                    # 1. Aliran Dana Asing
                     dbc.Col([
                         html.Div([
                             html.Small([
-                                html.Span("Foreign Flow", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'},
+                                html.I(className="fas fa-globe me-1"),
+                                html.Span("Aliran Dana Asing", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'},
                                          title=TERM_DEFINITIONS.get('foreign_flow', '')),
-                                html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
                             ], className="text-muted"),
                             html.H4([
                                 f"{foreign_today:+.1f}B ",
-                                html.Span("🟢" if foreign_today > 0 else "🔴", style={"fontSize": "16px"})
+                                html.Span("🟢" if foreign_today > 0 else ("🔴" if foreign_today < 0 else "⚪"), style={"fontSize": "16px"})
                             ], className="mb-0"),
-                            html.Small(f"vs {foreign_yesterday:+.1f}B yesterday", className="text-muted")
+                            html.Small(foreign_subtitle, className="text-muted", style={"fontSize": "10px"})
                         ], className="text-center p-2 rounded metric-box")
                     ], width=4),
+
+                    # 2. Rasio Beli vs Jual
                     dbc.Col([
                         html.Div([
                             html.Small([
-                                html.Span("Accum Ratio", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'},
+                                html.I(className="fas fa-balance-scale me-1"),
+                                html.Span("Rasio Beli vs Jual", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'},
                                          title=TERM_DEFINITIONS.get('accum_ratio', '')),
-                                html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
                             ], className="text-muted"),
                             html.H4([
-                                f"{accum_ratio:.0f}% Buy",
-                            ], className=f"mb-0 text-{'success' if accum_ratio > 55 else ('danger' if accum_ratio < 45 else 'warning')}"),
-                            html.Small(f"{100-accum_ratio:.0f}% Sell", className="text-muted")
+                                f"{accum_ratio:.0f}% Buy | {100-accum_ratio:.0f}% Sell",
+                            ], className=f"mb-0 text-{'success' if accum_ratio > 55 else ('danger' if accum_ratio < 45 else 'warning')}", style={"fontSize": "14px"}),
+                            html.Small(accum_subtitle, className="text-muted", style={"fontSize": "10px"})
                         ], className="text-center p-2 rounded metric-box")
                     ], width=4),
+
+                    # 3. Konsistensi Asing
                     dbc.Col([
                         html.Div([
                             html.Small([
-                                html.Span("Foreign Streak", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'},
+                                html.I(className="fas fa-sync-alt me-1"),
+                                html.Span("Konsistensi Asing", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'},
                                          title=TERM_DEFINITIONS.get('foreign_streak', '')),
-                                html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
                             ], className="text-muted"),
                             html.H4([
-                                f"{foreign_streak} days ",
-                                html.Span(foreign_signal[:3] if foreign_signal else "NEU",
-                                         className=f"badge bg-{'success' if 'INFLOW' in foreign_signal else ('danger' if 'OUTFLOW' in foreign_signal else 'secondary')}")
+                                f"{foreign_streak} hari ",
                             ], className="mb-0"),
-                            html.Small("consecutive", className="text-muted")
+                            html.Small(streak_subtitle, className="text-muted", style={"fontSize": "10px"})
                         ], className="text-center p-2 rounded metric-box")
                     ], width=4),
                 ], className="mb-3"),
 
-                # Weekly trend mini chart
+                # Weekly trend mini chart (Indonesian)
                 html.Div([
-                    html.Small("Weekly Trend: ", className="text-muted me-2"),
+                    html.Small("Tren Mingguan: ", className="text-muted me-2"),
                     *[html.Span([
                         html.Span(f"{d['net']:+.1f}B ",
                                  className=f"text-{'success' if d['net'] > 0 else 'danger'} me-2",
@@ -5103,9 +5117,9 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                              className=f"fw-bold text-{'success' if weekly_total > 0 else 'danger'}")
                 ], className="mb-2", style={"fontSize": "11px"}),
 
-                # By broker type
+                # By broker type (Indonesian)
                 html.Div([
-                    html.Small("By Type: ", className="text-muted me-2"),
+                    html.Small("Per Tipe Broker: ", className="text-muted me-2"),
                     html.Span([
                         html.I(className="fas fa-square me-1", style={"color": BROKER_COLORS.get('FOREIGN', '#dc3545'), "fontSize": "8px"}),
                         f"Asing: {type_flow.get('FOREIGN', 0)/1e9:+.1f}B "
@@ -5119,32 +5133,6 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
                         f"Lokal: {type_flow.get('LOCAL', 0)/1e9:+.1f}B"
                     ], style={"fontSize": "11px"}),
                 ]),
-
-                html.Hr(className="my-2"),
-
-                # Penjelasan Section
-                html.Div([
-                    html.Small([
-                        html.I(className="fas fa-info-circle me-1"),
-                        html.Strong("Cara Baca: ")
-                    ], className="text-info"),
-                    html.Br(),
-                    html.Small([
-                        html.Strong("• Foreign Flow: "), "Net beli/jual investor asing hari ini. ",
-                        html.Span("Positif (+) = asing masuk (bullish), ", className="text-success"),
-                        html.Span("Negatif (-) = asing keluar (bearish)", className="text-danger"),
-                        html.Br(),
-                        html.Strong("• Accum Ratio: "), "Perbandingan total pembelian vs penjualan semua broker. ",
-                        ">55% Buy = sentiment beli kuat, <45% = sentiment jual",
-                        html.Br(),
-                        html.Strong("• Foreign Streak: "), "Berapa hari berturut-turut asing konsisten beli/jual. ",
-                        "Streak panjang = trend kuat",
-                        html.Br(),
-                        html.Strong("• Weekly Trend: "), "Net flow 5 hari terakhir. Lihat apakah trend naik/turun",
-                        html.Br(),
-                        html.Strong("• By Type: "), "Siapa yang mendominasi? Asing biasanya punya riset lebih dalam"
-                    ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded info-box")
             ])
         ], className="mb-3")
     except Exception as e:
@@ -5246,66 +5234,87 @@ def create_key_metrics_compact(stock_code='CDIA'):
             phase_color = "secondary"
             phase_desc = "Belum ada arah jelas"
 
+        # Phase descriptions (Indonesian - FINAL COPYWRITING)
+        phase_desc_detail = {
+            'AKUMULASI': 'Arah belum jelas, perlu konfirmasi',
+            'MARKUP': 'Fase kenaikan harga aktif',
+            'DISTRIBUSI': 'Fase pelepasan saham',
+            'SIDEWAYS': 'Arah belum jelas, perlu konfirmasi'
+        }.get(market_phase, 'Analisis fase pasar')
+
+        # Accum phase description
+        accum_desc = "Range terlalu lebar / data belum valid" if not accum_in else f"Range {accum_range:.1f}% selama {accum_days} hari"
+
+        # Smart money description
+        smart_desc = "Belum ada akumulasi signifikan" if smart_score < 50 else ("Ada tanda akumulasi besar" if smart_score >= 60 else "Tanda awal akumulasi")
+
+        # Foreign direction description
+        foreign_dir = "positif ringan" if 0 < foreign_score <= 20 else ("positif kuat" if foreign_score > 20 else ("negatif ringan" if -20 <= foreign_score < 0 else ("negatif kuat" if foreign_score < -20 else "netral")))
+
         return dbc.Card([
             dbc.CardHeader([
                 html.I(className="fas fa-bullseye me-2 text-warning"),
                 html.Span("Signal Drivers", className="fw-bold text-warning"),
-                html.Small(" - Penggerak Keputusan", className="text-muted ms-2")
             ], className="bg-transparent"),
             dbc.CardBody([
-                # === PRIMARY SIGNAL DRIVERS ===
+                # === PRIMARY (menentukan aksi) ===
                 html.Div([
                     html.Small([
                         html.I(className="fas fa-star me-1 text-warning"),
-                        "PRIMARY - Langsung Mempengaruhi Keputusan"
+                        "PRIMARY (menentukan aksi):"
                     ], className="text-warning fw-bold", style={"fontSize": "10px"})
                 ], className="mb-2"),
 
                 dbc.Row([
+                    # 1. Struktur Pasar Jangka Pendek (7 Hari)
                     dbc.Col([
                         primary_metric_card(
-                            "Market Phase",
+                            "Struktur Pasar (7 Hari)",
                             market_phase,
-                            phase_desc,
+                            phase_desc_detail,
                             phase_color,
                             tooltip_key="market_phase",
-                            icon="fa-chart-line"
+                            icon="fa-compass"
                         )
                     ], md=4, className="mb-2"),
+
+                    # 2. Fase Akumulasi
                     dbc.Col([
                         primary_metric_card(
-                            "Accum Phase",
+                            "Fase Akumulasi",
                             "AKTIF" if accum_in else "TIDAK",
-                            f"Range {accum_range:.1f}% | {accum_days} hari",
+                            accum_desc,
                             "success" if accum_in else "secondary",
                             tooltip_key="accum_phase",
-                            icon="fa-compress-arrows-alt"
+                            icon="fa-layer-group"
                         )
                     ], md=4, className="mb-2"),
+
+                    # 3. Dana Besar
                     dbc.Col([
                         primary_metric_card(
-                            "Smart Money",
+                            "Dana Besar",
                             f"{smart_score:.0f}",
-                            f"{'Terdeteksi' if smart_detected == 'YES' else 'Tidak ada'} akumulasi besar",
+                            smart_desc,
                             "success" if smart_score > 60 else ("warning" if smart_score > 40 else "secondary"),
                             tooltip_key="smart_money",
-                            icon="fa-user-tie"
+                            icon="fa-coins"
                         )
                     ], md=4, className="mb-2"),
                 ], className="mb-3"),
 
-                # === SECONDARY SUPPORTING METRICS ===
+                # === SUPPORTING (konfirmasi konteks) ===
                 html.Div([
                     html.Small([
                         html.I(className="fas fa-layer-group me-1 text-info"),
-                        "SUPPORTING - Konteks & Konfirmasi"
+                        "SUPPORTING (konfirmasi konteks):"
                     ], className="text-info", style={"fontSize": "10px"})
                 ], className="mb-2"),
 
                 dbc.Row([
                     dbc.Col([
                         secondary_metric_card(
-                            "Broker Sens.",
+                            "Sensitivitas Broker",
                             f"{sens_score:.0f}%",
                             html.Span(["Top: ", colored_broker(top_brokers[0], with_badge=True)] if top_brokers else "N/A"),
                             "info" if sens_score > 50 else "secondary",
@@ -5314,26 +5323,26 @@ def create_key_metrics_compact(stock_code='CDIA'):
                     ], width=3),
                     dbc.Col([
                         secondary_metric_card(
-                            "Foreign",
+                            "Arah Asing",
                             f"{foreign_score:+.0f}",
-                            foreign_signal[:8] if foreign_signal else "N/A",
+                            foreign_dir,
                             "success" if foreign_score > 0 else ("danger" if foreign_score < 0 else "secondary"),
                             tooltip_key="foreign_flow"
                         )
                     ], width=3),
                     dbc.Col([
                         secondary_metric_card(
-                            "RVOL",
+                            "Volume (RVOL)",
                             f"{rvol:.1f}x",
-                            "Vol tinggi" if rvol > 1.2 else ("Normal" if rvol > 0.8 else "Vol rendah"),
+                            "tinggi" if rvol > 1.2 else ("normal" if rvol > 0.8 else "rendah"),
                             "success" if rvol > 1.2 else ("warning" if rvol > 0.8 else "secondary"),
                             tooltip_key="rvol"
                         )
                     ], width=3),
                     dbc.Col([
                         secondary_metric_card(
-                            "S/R",
-                            f"-{support_pct:.0f}%",
+                            "Support/Resist",
+                            f"-{support_pct:.0f}% ke S",
                             f"+{resist_pct:.0f}% ke R",
                             "info"
                         )
@@ -5342,14 +5351,13 @@ def create_key_metrics_compact(stock_code='CDIA'):
 
                 html.Hr(className="my-2"),
 
-                # Quick Guide
+                # Quick Guide (WAJIB ADA)
                 html.Div([
                     html.Small([
                         html.I(className="fas fa-lightbulb me-1 text-warning"),
                         html.Strong("Quick Guide: "),
-                        "PRIMARY menentukan aksi (beli/jual/tunggu). ",
-                        "SUPPORTING mengkonfirmasi dan memberikan konteks. ",
-                        "Jika PRIMARY bullish tapi SUPPORTING bearish, tunggu konfirmasi."
+                        "PRIMARY menentukan aksi (Buy / Wait). ",
+                        "SUPPORTING membantu membaca konteks & risiko."
                     ], className="text-muted", style={"fontSize": "9px"})
                 ], className="p-2 rounded", style={"backgroundColor": "rgba(255,193,7,0.1)"})
             ])
@@ -8207,57 +8215,44 @@ def create_one_line_insight(stock_code: str) -> html.Div:
     """
     Generate a one-line insight bar for quick market context.
     This appears at the top of dashboard for immediate understanding.
+    FINAL COPYWRITING: Simple, non-technical, for busy users.
     """
     try:
         # Get unified analysis for insight
         unified = get_unified_analysis_summary(stock_code)
         accum = unified.get('accumulation', {})
         decision = unified.get('decision', {})
-        sr = unified.get('support_resistance', {})
 
         summary = accum.get('summary', {})
         confidence = accum.get('confidence', {})
         overall_signal = summary.get('overall_signal', 'NETRAL')
         conf_level = confidence.get('level', 'LOW')
-        pass_rate = confidence.get('pass_rate', 0)
-
-        current_price = sr.get('current_price', 0)
         action = decision.get('action', 'WAIT')
 
-        # Generate contextual insight
+        # Generate contextual insight - SIMPLE, NON-TECHNICAL
         if overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
-            insight = f"🟢 {stock_code} menunjukkan pola akumulasi kuat ({pass_rate:.0f}% validasi lolos). Perhatikan zona entry."
+            insight = f"🟢 {stock_code} menunjukkan pola pembelian bertahap yang kuat. Peluang masuk mulai terbuka."
             color = "success"
             icon = "fas fa-arrow-trend-up"
         elif overall_signal == 'AKUMULASI':
-            insight = f"🟡 {stock_code} menunjukkan sinyal akumulasi awal. Pantau konsistensi broker flow."
+            insight = f"🟡 {stock_code} mulai menunjukkan tanda-tanda pembelian. Pantau perkembangan selanjutnya."
             color = "info"
             icon = "fas fa-chart-line"
         elif overall_signal == 'DISTRIBUSI' and conf_level in ['HIGH', 'VERY_HIGH']:
-            insight = f"🔴 {stock_code} dalam fase distribusi kuat ({pass_rate:.0f}% validasi). Hati-hati posisi beli baru."
+            insight = f"🔴 {stock_code} sedang dalam tekanan jual. Hindari pembelian baru untuk sementara."
             color = "danger"
             icon = "fas fa-arrow-trend-down"
         elif overall_signal == 'DISTRIBUSI':
-            insight = f"🟠 {stock_code} menunjukkan sinyal distribusi. Pertimbangkan pengurangan posisi."
+            insight = f"🟠 {stock_code} menunjukkan tanda pelepasan saham. Pertimbangkan untuk mengurangi posisi."
             color = "warning"
             icon = "fas fa-exclamation-triangle"
         else:
-            insight = f"⏳ {stock_code} dalam fase netral. Tidak ada sinyal kuat - observasi dulu."
+            insight = f"⏳ {stock_code} dalam fase netral. Belum ada sinyal kuat. Fokus observasi dan tunggu konfirmasi lanjutan."
             color = "secondary"
             icon = "fas fa-clock"
 
-        # Add action hint
-        action_hints = {
-            'ENTRY': " → Peluang entry di zona support.",
-            'ADD': " → Layak tambah posisi.",
-            'HOLD': " → Tahan posisi yang ada.",
-            'EXIT': " → Pertimbangkan profit taking.",
-            'WAIT': " → Tunggu konfirmasi lebih lanjut."
-        }
-        insight += action_hints.get(action, "")
-
     except Exception as e:
-        insight = f"📊 Sistem sedang menganalisis {stock_code}. Silakan tunggu..."
+        insight = f"📊 Sedang menganalisis {stock_code}. Silakan tunggu sebentar..."
         color = "secondary"
         icon = "fas fa-spinner fa-spin"
 
@@ -8265,7 +8260,7 @@ def create_one_line_insight(stock_code: str) -> html.Div:
         dbc.Alert([
             html.Div([
                 html.I(className=f"{icon} me-2"),
-                html.Strong("Insight: ", className="me-1"),
+                html.Strong("Insight Hari Ini: ", className="me-1"),
                 html.Span(insight),
             ], className="d-flex align-items-center flex-wrap")
         ], color=color, className="mb-3 py-2", style={
@@ -8337,14 +8332,16 @@ def create_dashboard_page(stock_code='CDIA'):
         # === WHY THIS SIGNAL? - Checklist Validasi ===
         create_why_signal_checklist(stock_code, validation_result),
 
-        # Broker Detail
+        # Broker Detail (Indonesian - FINAL COPYWRITING)
         dbc.Card([
             dbc.CardHeader([
-                "Broker Detail - ",
+                html.I(className="fas fa-user-tie me-2"),
+                "Detail Aktivitas Broker - ",
                 dcc.Dropdown(
                     id='broker-select',
                     options=[],
                     value=None,
+                    placeholder="Pilih broker...",
                     style={'width': '150px', 'display': 'inline-block', 'color': 'black'},
                     clearable=False
                 )
@@ -8776,17 +8773,23 @@ def create_uptrend_table(periods):
 # ============================================================
 
 def create_summary_cards(stock_code='CDIA'):
+    """
+    Snapshot Market - 4 kotak kecil
+    FINAL COPYWRITING: Indonesian labels, clear subtitles.
+    """
     price_df = get_price_data(stock_code)
     broker_df = get_broker_data(stock_code)
 
     if price_df.empty:
-        return dbc.Alert(f"No price data for {stock_code}", color="warning")
+        return dbc.Alert(f"Tidak ada data harga untuk {stock_code}", color="warning")
 
     latest_price = price_df['close_price'].iloc[-1] if not price_df.empty else 0
     prev_price = price_df['close_price'].iloc[-2] if len(price_df) > 1 else latest_price
     price_change = ((latest_price - prev_price) / prev_price * 100) if prev_price > 0 else 0
 
     phase = find_current_market_phase(price_df)
+    phase_name = phase['phase'].upper()
+    range_pct = phase['details'].get('range_percent', 0)
     alerts = check_accumulation_alerts(broker_df, stock_code) if not broker_df.empty else []
 
     latest_date = broker_df['date'].max() if not broker_df.empty else None
@@ -8794,29 +8797,55 @@ def create_summary_cards(stock_code='CDIA'):
     top_acc_name = top_acc['broker_code'].iloc[0] if not top_acc.empty else '-'
     top_acc_val = top_acc['net_value'].iloc[0] / 1e9 if not top_acc.empty else 0
 
-    # Responsive card style: smaller font on mobile
-    card_header_style = {"fontSize": "12px", "padding": "8px"}
+    # Phase subtitle (Indonesian)
+    phase_subtitle = {
+        'UPTREND': 'Tren besar sedang menguat',
+        'DOWNTREND': 'Tren besar masih melemah',
+        'SIDEWAYS': 'Belum ada arah yang jelas',
+        'ACCUMULATION': 'Fase pengumpulan saham'
+    }.get(phase_name, 'Analisis fase pasar')
+
+    # Alert subtitle based on count
+    alert_subtitle = "Indikasi awal akumulasi" if len(alerts) > 0 else "Tidak ada sinyal aktif"
+
+    # Responsive card style
+    card_header_style = {"fontSize": "11px", "padding": "8px"}
     card_body_style = {"padding": "10px"}
-    value_class = "h5 mb-1"  # Smaller than h3 for mobile-friendly
+    value_class = "h5 mb-1"
     subtitle_class = "small mb-0 text-muted"
 
     return dbc.Row([
+        # 1. Harga Saat Ini
         dbc.Col(dbc.Card([
-            dbc.CardHeader(f"{stock_code} Price", style=card_header_style),
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-line me-1"),
+                "Harga Saat Ini"
+            ], style=card_header_style),
             dbc.CardBody([
                 html.Div(f"Rp {latest_price:,.0f}", className=value_class),
-                html.P(f"{price_change:+.2f}%", className=f"{subtitle_class} text-{'success' if price_change >= 0 else 'danger'}")
+                html.P(f"({price_change:+.2f}%)", className=f"{subtitle_class} text-{'success' if price_change >= 0 else 'danger'}")
             ], style=card_body_style)
         ], color="dark", outline=True), xs=6, md=3, className="mb-2"),
+
+        # 2. Market Phase (30 Hari)
         dbc.Col(dbc.Card([
-            dbc.CardHeader("Market Phase", style=card_header_style),
+            dbc.CardHeader([
+                html.I(className="fas fa-compass me-1"),
+                "Market Phase (30 Hari)"
+            ], style=card_header_style),
             dbc.CardBody([
-                html.Div(phase['phase'].upper(), className=value_class),
-                html.P(f"Range: {phase['details'].get('range_percent', 0):.1f}%", className=subtitle_class)
+                html.Div(phase_name, className=value_class),
+                html.P(phase_subtitle, className=subtitle_class, style={"fontSize": "10px"}),
+                html.P(f"Range: {range_pct:.1f}%", className=subtitle_class)
             ], style=card_body_style)
         ], color="dark", outline=True), xs=6, md=3, className="mb-2"),
+
+        # 3. Akumulator Terbesar
         dbc.Col(dbc.Card([
-            dbc.CardHeader("Top Accumulator", style=card_header_style),
+            dbc.CardHeader([
+                html.I(className="fas fa-user-tie me-1"),
+                "Akumulator Terbesar"
+            ], style=card_header_style),
             dbc.CardBody([
                 html.Div([
                     html.Span(
@@ -8828,11 +8857,16 @@ def create_summary_cards(stock_code='CDIA'):
                 html.P(f"Net: Rp {top_acc_val:.1f}B", className=subtitle_class)
             ], style=card_body_style)
         ], color="dark", outline=True), xs=6, md=3, className="mb-2"),
+
+        # 4. Sinyal Aktif
         dbc.Col(dbc.Card([
-            dbc.CardHeader("Active Alerts", style=card_header_style),
+            dbc.CardHeader([
+                html.I(className="fas fa-bell me-1"),
+                "Sinyal Aktif"
+            ], style=card_header_style),
             dbc.CardBody([
                 html.Div(f"{len(alerts)}", className=value_class),
-                html.P("Accumulation signals", className=subtitle_class)
+                html.P(alert_subtitle, className=subtitle_class, style={"fontSize": "10px"})
             ], style=card_body_style)
         ], color="warning" if alerts else "dark", outline=True), xs=6, md=3, className="mb-2"),
     ], className="mb-3")
@@ -9581,7 +9615,7 @@ def refresh_dashboard(n_clicks, stock_code):
 @app.callback(Output("broker-detail-container", "children"), [Input("broker-select", "value"), Input('stock-selector', 'value')])
 def update_broker_detail(broker_code, stock_code):
     if not broker_code:
-        return html.Div("Select a broker")
+        return html.Div("Pilih broker untuk melihat pola beli/jual", className="text-muted")
     if not stock_code:
         stocks = get_available_stocks()
         stock_code = stocks[0] if stocks else 'PANI'
