@@ -14,7 +14,7 @@ sys.path.insert(0, app_dir)
 sys.path.insert(0, dashboard_dir)
 
 import dash
-from dash import dcc, html, dash_table, callback, Input, Output, State, no_update
+from dash import dcc, html, dash_table, callback, Input, Output, State, no_update, ALL
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -2991,6 +2991,18 @@ def create_thread_card(thread: dict) -> dbc.Card:
         html.Div([
             html.Small("🔒 Thread ini dikunci oleh Admin", className="text-muted fst-italic")
         ], className="mt-2") if is_frozen else None,
+
+        # Admin controls (edit/delete)
+        html.Div([
+            html.Hr(className="my-2"),
+            html.Small("Admin: ", className="text-muted me-2"),
+            dbc.Button([html.I(className="fas fa-edit me-1"), "Edit"],
+                      id={"type": "edit-thread", "index": thread['id']},
+                      color="info", size="sm", outline=True, className="me-1"),
+            dbc.Button([html.I(className="fas fa-trash me-1"), "Delete"],
+                      id={"type": "delete-thread", "index": thread['id']},
+                      color="danger", size="sm", outline=True),
+        ], className="mt-2", id={"type": "admin-controls", "index": thread['id']}),
     ]
 
     # Collapse wrapper for provokatif posts
@@ -3152,6 +3164,40 @@ def create_discussion_page(stock_code: str = None):
 
         # Hidden store for thread data
         dcc.Store(id="forum-data-store"),
+        dcc.Store(id="selected-thread-id"),
+
+        # Edit Thread Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Edit Thread")),
+            dbc.ModalBody([
+                dbc.Label("Admin Password", className="small text-warning"),
+                dbc.Input(id="edit-admin-password", type="password", placeholder="Password admin...", className="mb-3"),
+                dbc.Label("Judul", className="small"),
+                dbc.Input(id="edit-thread-title", placeholder="Judul thread...", className="mb-3"),
+                dbc.Label("Isi Thread", className="small"),
+                dbc.Textarea(id="edit-thread-content", rows=5, className="mb-3"),
+                html.Div(id="edit-feedback"),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button("Batal", id="cancel-edit-btn", color="secondary", className="me-2"),
+                dbc.Button("Simpan", id="save-edit-btn", color="primary"),
+            ])
+        ], id="edit-thread-modal", is_open=False, size="lg"),
+
+        # Delete Confirmation Modal
+        dbc.Modal([
+            dbc.ModalHeader(dbc.ModalTitle("Hapus Thread")),
+            dbc.ModalBody([
+                html.P("Apakah Anda yakin ingin menghapus thread ini?", className="text-danger"),
+                dbc.Label("Admin Password", className="small text-warning"),
+                dbc.Input(id="delete-admin-password", type="password", placeholder="Password admin...", className="mb-3"),
+                html.Div(id="delete-feedback"),
+            ]),
+            dbc.ModalFooter([
+                dbc.Button("Batal", id="cancel-delete-btn", color="secondary", className="me-2"),
+                dbc.Button("Hapus", id="confirm-delete-btn", color="danger"),
+            ])
+        ], id="delete-thread-modal", is_open=False),
     ])
 
 
@@ -11758,6 +11804,146 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
         return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update
 
 
+# ============================================================
+# ADMIN: EDIT THREAD
+# ============================================================
+
+# Open edit modal and load thread data
+@app.callback(
+    [Output("edit-thread-modal", "is_open"),
+     Output("edit-thread-title", "value"),
+     Output("edit-thread-content", "value"),
+     Output("selected-thread-id", "data"),
+     Output("edit-feedback", "children")],
+    [Input({"type": "edit-thread", "index": ALL}, "n_clicks"),
+     Input("cancel-edit-btn", "n_clicks"),
+     Input("save-edit-btn", "n_clicks")],
+    [State("edit-thread-modal", "is_open"),
+     State("edit-admin-password", "value"),
+     State("edit-thread-title", "value"),
+     State("edit-thread-content", "value"),
+     State("selected-thread-id", "data"),
+     State("stock-selector", "value")],
+    prevent_initial_call=True
+)
+def handle_edit_thread(edit_clicks, cancel_click, save_click, is_open, password, title, content, thread_id, stock_code):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return is_open, "", "", None, ""
+
+    trigger = ctx.triggered[0]['prop_id']
+
+    # Cancel button
+    if "cancel-edit-btn" in trigger:
+        return False, "", "", None, ""
+
+    # Save button
+    if "save-edit-btn" in trigger:
+        if password != ADMIN_PASSWORD:
+            return True, title, content, thread_id, dbc.Alert("Password salah!", color="danger")
+        if not title or not content:
+            return True, title, content, thread_id, dbc.Alert("Judul dan isi tidak boleh kosong!", color="warning")
+
+        try:
+            query = "UPDATE forum_threads SET title = %s, content = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s"
+            execute_query(query, (title, content, thread_id), fetch=False)
+            return False, "", "", None, ""
+        except Exception as e:
+            return True, title, content, thread_id, dbc.Alert(f"Error: {str(e)}", color="danger")
+
+    # Edit button clicked - open modal and load data
+    if "edit-thread" in trigger:
+        # Find which button was clicked
+        for i, clicks in enumerate(edit_clicks):
+            if clicks:
+                # Get the thread ID from the pattern
+                prop_id = ctx.triggered[0]['prop_id']
+                import json
+                button_id = json.loads(prop_id.split('.')[0])
+                thread_id = button_id['index']
+
+                # Load thread data
+                query = "SELECT title, content FROM forum_threads WHERE id = %s"
+                result = execute_query(query, (thread_id,), use_cache=False)
+                if result:
+                    return True, result[0]['title'], result[0]['content'], thread_id, ""
+        return is_open, "", "", None, ""
+
+    return is_open, "", "", None, ""
+
+
+# ============================================================
+# ADMIN: DELETE THREAD
+# ============================================================
+
+# Open delete modal
+@app.callback(
+    [Output("delete-thread-modal", "is_open"),
+     Output("selected-thread-id", "data", allow_duplicate=True),
+     Output("delete-feedback", "children")],
+    [Input({"type": "delete-thread", "index": ALL}, "n_clicks"),
+     Input("cancel-delete-btn", "n_clicks"),
+     Input("confirm-delete-btn", "n_clicks")],
+    [State("delete-thread-modal", "is_open"),
+     State("delete-admin-password", "value"),
+     State("selected-thread-id", "data"),
+     State("stock-selector", "value")],
+    prevent_initial_call=True
+)
+def handle_delete_thread(delete_clicks, cancel_click, confirm_click, is_open, password, thread_id, stock_code):
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        return is_open, thread_id, ""
+
+    trigger = ctx.triggered[0]['prop_id']
+
+    # Cancel button
+    if "cancel-delete-btn" in trigger:
+        return False, None, ""
+
+    # Confirm delete button
+    if "confirm-delete-btn" in trigger:
+        if password != ADMIN_PASSWORD:
+            return True, thread_id, dbc.Alert("Password salah!", color="danger")
+
+        try:
+            query = "DELETE FROM forum_threads WHERE id = %s"
+            execute_query(query, (thread_id,), fetch=False)
+            return False, None, ""
+        except Exception as e:
+            return True, thread_id, dbc.Alert(f"Error: {str(e)}", color="danger")
+
+    # Delete button clicked - open modal
+    if "delete-thread" in trigger:
+        for i, clicks in enumerate(delete_clicks):
+            if clicks:
+                prop_id = ctx.triggered[0]['prop_id']
+                import json
+                button_id = json.loads(prop_id.split('.')[0])
+                thread_id = button_id['index']
+                return True, thread_id, ""
+        return is_open, thread_id, ""
+
+    return is_open, thread_id, ""
+
+
+# Refresh threads after edit/delete
+@app.callback(
+    Output("community-threads-container", "children", allow_duplicate=True),
+    [Input("edit-thread-modal", "is_open"),
+     Input("delete-thread-modal", "is_open")],
+    [State("stock-selector", "value")],
+    prevent_initial_call=True
+)
+def refresh_threads_after_admin_action(edit_open, delete_open, stock_code):
+    # Only refresh when modals are closed (action completed)
+    if not edit_open and not delete_open:
+        threads = get_forum_threads(stock_code)
+        community_threads = [t for t in threads if not (t['is_pinned'] and t['author_type'] == 'admin')]
+        return [create_thread_card(t) for t in community_threads] if community_threads else [
+            dbc.Alert("Belum ada diskusi. Jadilah yang pertama!", color="secondary")
+        ]
+    return dash.no_update
 
 
 # ============================================================
