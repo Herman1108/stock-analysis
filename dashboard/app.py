@@ -5801,21 +5801,17 @@ def calculate_broker_streak_history(stock_code, broker_codes, days=30):
 def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30):
     """
     Create interactive area chart showing accumulation/distribution streak history
-    for sensitive brokers.
+    for brokers from Accumulation Streak and Distribution Warning lists.
+    Includes total net line showing combined net value.
     """
     try:
-        # Get sensitive brokers if none selected
-        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
-        all_sensitive = []
-        if broker_sens and broker_sens.get('brokers'):
-            all_sensitive = [b['broker_code'] for b in broker_sens['brokers'][:10]]
-
-        if not all_sensitive:
-            return html.Div("Tidak ada data broker sensitif", className="text-muted text-center py-3")
-
-        # Default to top 3 if no selection
+        # Get streak brokers if none selected
         if not selected_brokers:
-            selected_brokers = all_sensitive[:3]
+            streak_brokers = get_streak_brokers(stock_code)
+            selected_brokers = streak_brokers['accum'][:3] if streak_brokers['accum'] else streak_brokers['all'][:3]
+
+        if not selected_brokers:
+            return html.Div("Tidak ada broker dengan streak aktif", className="text-muted text-center py-3")
 
         # Calculate streak history
         streak_df = calculate_broker_streak_history(stock_code, selected_brokers, days)
@@ -5823,15 +5819,22 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
         if streak_df.empty:
             return html.Div("Tidak ada data streak", className="text-muted text-center py-3")
 
-        # Create figure
-        fig = go.Figure()
+        # Create figure with secondary y-axis for total net
+        fig = make_subplots(specs=[[{"secondary_y": True}]])
 
         # Color palette
-        colors_positive = ['rgba(0, 255, 136, 0.6)', 'rgba(0, 212, 255, 0.6)', 'rgba(255, 230, 109, 0.6)',
-                          'rgba(78, 205, 196, 0.6)', 'rgba(149, 225, 211, 0.6)']
-        colors_negative = ['rgba(255, 107, 107, 0.6)', 'rgba(255, 159, 64, 0.6)', 'rgba(255, 99, 132, 0.6)',
-                          'rgba(255, 182, 193, 0.6)', 'rgba(255, 140, 0, 0.6)']
+        colors_positive = ['rgba(0, 255, 136, 0.5)', 'rgba(0, 212, 255, 0.5)', 'rgba(255, 230, 109, 0.5)',
+                          'rgba(78, 205, 196, 0.5)', 'rgba(149, 225, 211, 0.5)']
+        colors_negative = ['rgba(255, 107, 107, 0.5)', 'rgba(255, 159, 64, 0.5)', 'rgba(255, 99, 132, 0.5)',
+                          'rgba(255, 182, 193, 0.5)', 'rgba(255, 140, 0, 0.5)']
         line_colors = ['#00ff88', '#00d4ff', '#ffe66d', '#4ecdc4', '#95e1d3']
+
+        # Calculate total net per day (sum of all broker net_values)
+        total_net_df = streak_df.groupby('date').agg({
+            'net_value': 'sum',
+            'streak': 'sum'  # Sum of streaks
+        }).reset_index()
+        total_net_df['cumulative_net'] = total_net_df['net_value'].cumsum()
 
         for i, broker in enumerate(selected_brokers):
             broker_data = streak_df[streak_df['broker_code'] == broker].sort_values('date')
@@ -5847,88 +5850,197 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
             fig.add_trace(go.Scatter(
                 x=broker_data['date'],
                 y=positive_streak,
-                name=f'{broker} Akumulasi',
+                name=f'{broker}',
                 mode='lines',
-                line=dict(width=2, color=line_colors[i % len(line_colors)]),
+                line=dict(width=1.5, color=line_colors[i % len(line_colors)]),
                 fill='tozeroy',
                 fillcolor=colors_positive[i % len(colors_positive)],
-                stackgroup=f'positive_{broker}',
                 hovertemplate=f'{broker}<br>Akumulasi: %{{y}} hari<extra></extra>'
-            ))
+            ), secondary_y=False)
 
             # Add negative area (distribution)
             fig.add_trace(go.Scatter(
                 x=broker_data['date'],
                 y=negative_streak,
-                name=f'{broker} Distribusi',
+                name=f'{broker} (Dist)',
                 mode='lines',
-                line=dict(width=2, color=colors_negative[i % len(colors_negative)].replace('0.6', '1')),
+                line=dict(width=1.5, color=colors_negative[i % len(colors_negative)].replace('0.5', '0.8')),
                 fill='tozeroy',
                 fillcolor=colors_negative[i % len(colors_negative)],
-                stackgroup=f'negative_{broker}',
                 showlegend=False,
                 hovertemplate=f'{broker}<br>Distribusi: %{{y}} hari<extra></extra>'
-            ))
+            ), secondary_y=False)
+
+        # Add Total Net Line (cumulative) on secondary y-axis
+        fig.add_trace(go.Scatter(
+            x=total_net_df['date'],
+            y=total_net_df['cumulative_net'] / 1e9,  # Convert to billions
+            name='Total Net (B)',
+            mode='lines+markers',
+            line=dict(width=3, color='white', dash='solid'),
+            marker=dict(size=4, color='white'),
+            hovertemplate='Total Net: %{y:.2f}B<extra></extra>'
+        ), secondary_y=True)
 
         # Add zero line
-        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5, secondary_y=False)
 
         # Update layout
         fig.update_layout(
             template='plotly_dark',
-            height=350,
-            margin=dict(l=10, r=10, t=30, b=30),
+            height=380,
+            margin=dict(l=10, r=50, t=30, b=30),
             legend=dict(
                 orientation="h",
                 yanchor="bottom",
                 y=1.02,
                 xanchor="right",
                 x=1,
-                font=dict(size=10)
+                font=dict(size=9)
             ),
-            hovermode='x unified',
-            yaxis=dict(
-                title="Streak (hari)",
-                title_font=dict(size=10),
-                zeroline=True,
-                zerolinecolor='gray',
-                zerolinewidth=1
-            ),
-            xaxis=dict(
-                title="",
-                tickformat="%d %b"
-            )
+            hovermode='x unified'
         )
 
-        return dcc.Graph(figure=fig, config={'displayModeBar': False})
+        # Update axes
+        fig.update_yaxes(
+            title_text="Streak (hari)",
+            title_font=dict(size=10),
+            zeroline=True,
+            zerolinecolor='gray',
+            zerolinewidth=1,
+            secondary_y=False
+        )
+        fig.update_yaxes(
+            title_text="Net (Milyar)",
+            title_font=dict(size=10, color='white'),
+            tickfont=dict(color='white'),
+            secondary_y=True
+        )
+        fig.update_xaxes(title_text="", tickformat="%d %b")
+
+        # Summary stats
+        latest_total = total_net_df['cumulative_net'].iloc[-1] if not total_net_df.empty else 0
+        total_signal = "AKUMULASI" if latest_total > 0 else "DISTRIBUSI" if latest_total < 0 else "NETRAL"
+        signal_color = "success" if latest_total > 0 else "danger" if latest_total < 0 else "secondary"
+
+        return html.Div([
+            dcc.Graph(figure=fig, config={'displayModeBar': False}),
+            html.Div([
+                html.Small([
+                    html.Strong("Summary: "),
+                    html.Span(f"{total_signal} ", className=f"badge bg-{signal_color} me-1"),
+                    f"Total Net: Rp {latest_total/1e9:+.2f}B dari {len(selected_brokers)} broker"
+                ], className="text-muted")
+            ], className="text-center mt-1")
+        ])
 
     except Exception as e:
         return html.Div(f"Error: {str(e)}", className="text-danger text-center py-3")
 
 
+def get_streak_brokers(stock_code='CDIA'):
+    """
+    Get brokers from Accumulation Streak and Distribution Warning lists.
+    Returns dict with 'accum' and 'dist' broker lists.
+    """
+    broker_df = get_broker_data(stock_code)
+    if broker_df.empty:
+        return {'accum': [], 'dist': [], 'all': []}
+
+    # Calculate streaks for all brokers
+    brokers = broker_df['broker_code'].unique()
+    broker_streaks = []
+
+    for broker in brokers:
+        b_data = broker_df[broker_df['broker_code'] == broker].sort_values('date', ascending=False)
+
+        accum_streak = 0
+        dist_streak = 0
+        total_net = b_data['net_value'].sum()
+
+        for _, row in b_data.iterrows():
+            if row['net_value'] > 0:
+                if dist_streak == 0:
+                    accum_streak += 1
+                else:
+                    break
+            elif row['net_value'] < 0:
+                if accum_streak == 0:
+                    dist_streak += 1
+                else:
+                    break
+            else:
+                break
+
+        broker_streaks.append({
+            'broker': broker,
+            'accum_streak': accum_streak,
+            'dist_streak': dist_streak,
+            'total_net': total_net
+        })
+
+    # Top accumulation streaks (>= 2 days)
+    accum_watch = [b for b in broker_streaks if b['accum_streak'] >= 2]
+    accum_watch.sort(key=lambda x: (x['accum_streak'], x['total_net']), reverse=True)
+    accum_brokers = [b['broker'] for b in accum_watch[:5]]
+
+    # Top distribution warning (>= 2 days)
+    dist_watch = [b for b in broker_streaks if b['dist_streak'] >= 2]
+    dist_watch.sort(key=lambda x: (x['dist_streak'], abs(x['total_net'])), reverse=True)
+    dist_brokers = [b['broker'] for b in dist_watch[:5]]
+
+    # Combined unique list
+    all_brokers = list(dict.fromkeys(accum_brokers + dist_brokers))
+
+    return {
+        'accum': accum_brokers,
+        'dist': dist_brokers,
+        'all': all_brokers
+    }
+
+
 def create_broker_streak_section(stock_code='CDIA'):
     """
     Create the complete broker streak section with dropdown and chart.
+    Uses brokers from Accumulation Streak and Distribution Warning lists.
     """
     try:
-        # Get sensitive brokers for dropdown
-        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
-        all_sensitive = []
-        if broker_sens and broker_sens.get('brokers'):
-            all_sensitive = [b['broker_code'] for b in broker_sens['brokers'][:10]]
+        # Get brokers from accumulation and distribution streak lists
+        streak_brokers = get_streak_brokers(stock_code)
+        accum_brokers = streak_brokers['accum']
+        dist_brokers = streak_brokers['dist']
+        all_brokers = streak_brokers['all']
 
-        if not all_sensitive:
-            return html.Div()
+        if not all_brokers:
+            return html.Div([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-chart-area me-2 text-info"),
+                        html.Strong("Streak History", className="text-info"),
+                    ], className="bg-transparent border-info"),
+                    dbc.CardBody([
+                        html.P("Tidak ada broker dengan streak >= 2 hari", className="text-muted text-center")
+                    ])
+                ], className="mb-3", style={"borderColor": "var(--bs-info)"})
+            ])
 
-        # Create dropdown options
-        dropdown_options = [{'label': broker, 'value': broker} for broker in all_sensitive]
-        default_selected = all_sensitive[:3]
+        # Create dropdown options with labels showing streak type
+        dropdown_options = []
+        for broker in accum_brokers:
+            dropdown_options.append({'label': f'🟢 {broker} (Akumulasi)', 'value': broker})
+        for broker in dist_brokers:
+            if broker not in accum_brokers:  # Avoid duplicates
+                dropdown_options.append({'label': f'🔴 {broker} (Distribusi)', 'value': broker})
+
+        # Default: select all accum brokers (max 5)
+        default_selected = accum_brokers[:5] if accum_brokers else all_brokers[:3]
 
         return dbc.Card([
             dbc.CardHeader([
                 html.Div([
                     html.I(className="fas fa-chart-area me-2 text-info"),
-                    html.Strong("Streak History - Broker Sensitif", className="text-info"),
+                    html.Strong("Streak History - Broker Aktif", className="text-info"),
+                    html.Small(f" ({len(accum_brokers)} akumulasi, {len(dist_brokers)} distribusi)", className="text-muted ms-2")
                 ], className="d-flex align-items-center")
             ], className="bg-transparent border-info"),
             dbc.CardBody([
@@ -5959,15 +6071,15 @@ def create_broker_streak_section(stock_code='CDIA'):
                     html.Small([
                         html.I(className="fas fa-info-circle me-1 text-info"),
                         html.Strong("Cara Membaca: "),
-                        "Area hijau ke atas = streak akumulasi (broker beli berturut-turut). ",
-                        "Area merah ke bawah = streak distribusi (broker jual berturut-turut). ",
-                        "Semakin tinggi/dalam area, semakin panjang streak."
+                        "Area hijau ke atas = streak akumulasi. ",
+                        "Area merah ke bawah = streak distribusi. ",
+                        html.Span("Garis putih = Total Net (semua broker yang dipilih).", className="text-white fw-bold")
                     ], className="text-muted", style={"fontSize": "10px"}),
                     html.Br(),
                     html.Small([
                         html.I(className="fas fa-lightbulb me-1 text-warning"),
                         html.Strong("Insight: "),
-                        "Perhatikan broker yang konsisten akumulasi (streak panjang) - ini menunjukkan conviction kuat."
+                        "Total Net positif = lebih banyak akumulasi. Total Net negatif = lebih banyak distribusi."
                     ], className="text-muted", style={"fontSize": "10px"})
                 ], className="mt-2")
             ])
