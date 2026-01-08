@@ -516,6 +516,70 @@ PWA_INDEX_STRING = '''
             body.light-mode .dropdown-item:hover {
                 background-color: #e9ecef !important;
             }
+
+            /* Forum Mobile Responsive */
+            .forum-content {
+                word-wrap: break-word;
+                overflow-wrap: break-word;
+                word-break: break-word;
+                white-space: pre-wrap;
+                max-width: 100%;
+            }
+
+            /* Mobile breakpoint */
+            @media (max-width: 768px) {
+                .card-body {
+                    padding: 0.75rem !important;
+                }
+                .card-title {
+                    font-size: 1rem !important;
+                }
+                .forum-content {
+                    font-size: 0.85rem !important;
+                    line-height: 1.5 !important;
+                }
+                /* Hide long separator lines on mobile */
+                .forum-content br + br {
+                    display: none;
+                }
+                /* Better badge sizing on mobile */
+                .badge {
+                    font-size: 0.65rem !important;
+                    padding: 0.25rem 0.4rem !important;
+                }
+                /* Smaller buttons on mobile */
+                .btn-sm {
+                    font-size: 0.75rem !important;
+                    padding: 0.2rem 0.4rem !important;
+                }
+                /* Thread card adjustments */
+                .thread-meta {
+                    font-size: 0.7rem !important;
+                }
+                /* Hide some elements on mobile for cleaner look */
+                .d-none-mobile {
+                    display: none !important;
+                }
+            }
+
+            /* Extra small screens */
+            @media (max-width: 480px) {
+                .card-body {
+                    padding: 0.5rem !important;
+                }
+                .forum-content {
+                    font-size: 0.8rem !important;
+                }
+                h4, .h4 {
+                    font-size: 1.1rem !important;
+                }
+                h5, .h5 {
+                    font-size: 1rem !important;
+                }
+                h6, .h6 {
+                    font-size: 0.9rem !important;
+                }
+            }
         </style>
     </head>
     <body>
@@ -2979,11 +3043,11 @@ def create_thread_card(thread: dict) -> dbc.Card:
             # Preview (always shown)
             html.Div([
                 html.P(content_full[:500] + "..." if is_long_content else content_full,
-                      className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
+                      className="mb-2 small forum-content"),
             ], id={"type": "thread-preview", "index": thread['id']}),
             # Full content (hidden by default for long posts)
             dbc.Collapse([
-                html.P(content_full, className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
+                html.P(content_full, className="mb-2 small forum-content"),
             ], id={"type": "thread-full", "index": thread['id']}, is_open=False) if is_long_content else None,
             # Expand button
             dbc.Button([
@@ -3005,11 +3069,11 @@ def create_thread_card(thread: dict) -> dbc.Card:
         # Footer
         html.Div([
             html.Small([
-                html.Span(f"👤 {thread['author_name']}", className="me-3"),
-                html.Span(f"🕐 {time_str}", className="me-3 text-muted"),
-                html.Span(f"💬 {thread['comment_count']}", className="me-3"),
-                html.Span(f"👁 {thread['view_count']}", className="me-3 text-muted"),
-            ]),
+                html.Span(f"👤 {thread['author_name']}", className="me-2"),
+                html.Span(f"🕐 {time_str}", className="me-2 text-muted d-none-mobile"),
+                html.Span(f"💬 {thread['comment_count']}", className="me-2"),
+                html.Span(f"👁 {thread['view_count']}", className="me-2 text-muted d-none-mobile"),
+            ], className="thread-meta"),
             # Score & Reactions
             html.Div([
                 dbc.Badge(f"Score: {score:+d}", color=score_color, className="me-2"),
