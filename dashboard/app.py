@@ -2858,20 +2858,27 @@ def get_profanity_words():
 
 def check_profanity(text: str) -> dict:
     """Check text for profanity - returns level and matched words"""
+    import re
     text_lower = text.lower()
     words = get_profanity_words()
 
-    # Check level 1 (hard block)
+    def is_whole_word_match(text, word):
+        """Check if word appears as whole word, not part of another word"""
+        # Use word boundary regex for accurate matching
+        pattern = r'\b' + re.escape(word) + r'\b'
+        return bool(re.search(pattern, text))
+
+    # Check level 1 (hard block) - whole word only
     for word in words[1]:
-        if word in text_lower:
+        if is_whole_word_match(text_lower, word):
             return {'level': 1, 'word': word, 'action': 'block'}
 
-    # Check level 2 (provokatif)
+    # Check level 2 (provokatif) - can be substring for phrases
     for word in words[2]:
         if word in text_lower:
             return {'level': 2, 'word': word, 'action': 'flag'}
 
-    # Check level 3 (warning)
+    # Check level 3 (warning) - can be substring for phrases
     for word in words[3]:
         if word in text_lower:
             return {'level': 3, 'word': word, 'action': 'warning'}
@@ -2887,7 +2894,7 @@ def get_forum_threads(stock_code: str = None, limit: int = 50):
             ORDER BY is_pinned DESC, score DESC, created_at DESC
             LIMIT %s
         """
-        results = execute_query(query, (stock_code, limit))
+        results = execute_query(query, (stock_code, limit), use_cache=False)  # No cache for real-time forum
     else:
         query = """
             SELECT * FROM forum_threads
@@ -2895,7 +2902,7 @@ def get_forum_threads(stock_code: str = None, limit: int = 50):
             ORDER BY is_pinned DESC, score DESC, created_at DESC
             LIMIT %s
         """
-        results = execute_query(query, (limit,))
+        results = execute_query(query, (limit,), use_cache=False)  # No cache for real-time forum
     return results or []
 
 def get_thread_comments(thread_id: int):
