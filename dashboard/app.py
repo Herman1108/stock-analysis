@@ -12109,98 +12109,54 @@ def refresh_threads_after_admin_action(edit_open, delete_open, stock_code):
 # FORUM COMMENTS
 # ============================================================
 
-# Toggle comments visibility
+# Toggle comments visibility - using MATCH for reliability
 @app.callback(
-    Output({"type": "comments-collapse", "index": ALL}, "is_open"),
-    [Input({"type": "toggle-comments", "index": ALL}, "n_clicks")],
-    [State({"type": "comments-collapse", "index": ALL}, "is_open")],
+    Output({"type": "comments-collapse", "index": MATCH}, "is_open"),
+    [Input({"type": "toggle-comments", "index": MATCH}, "n_clicks")],
+    [State({"type": "comments-collapse", "index": MATCH}, "is_open")],
     prevent_initial_call=True
 )
-def toggle_comments(n_clicks_list, is_open_list):
-    ctx = dash.callback_context
-    if not ctx.triggered or not any(n for n in n_clicks_list if n):
-        return [dash.no_update] * len(is_open_list)
-
-    # Find which button was clicked
-    trigger = ctx.triggered[0]['prop_id']
-    import json
-    button_info = json.loads(trigger.split('.')[0])
-    clicked_index = button_info['index']
-
-    # Toggle only the clicked one
-    new_states = []
-    for i, is_open in enumerate(is_open_list):
-        # Check if this corresponds to the clicked button
-        if trigger.startswith(f'{{"index":{clicked_index}'):
-            new_states.append(not is_open if is_open is not None else True)
-        else:
-            new_states.append(is_open if is_open is not None else False)
-
-    return new_states
+def toggle_comments(n_clicks, is_open):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+    return not is_open if is_open is not None else True
 
 
-# Submit new comment
+# Submit new comment - using MATCH for reliability
 @app.callback(
-    [Output({"type": "comments-list", "index": ALL}, "children"),
-     Output({"type": "comment-feedback", "index": ALL}, "children"),
-     Output({"type": "comment-author", "index": ALL}, "value"),
-     Output({"type": "comment-content", "index": ALL}, "value")],
-    [Input({"type": "submit-comment", "index": ALL}, "n_clicks")],
-    [State({"type": "comment-author", "index": ALL}, "value"),
-     State({"type": "comment-content", "index": ALL}, "value")],
+    [Output({"type": "comments-list", "index": MATCH}, "children"),
+     Output({"type": "comment-feedback", "index": MATCH}, "children"),
+     Output({"type": "comment-author", "index": MATCH}, "value"),
+     Output({"type": "comment-content", "index": MATCH}, "value")],
+    [Input({"type": "submit-comment", "index": MATCH}, "n_clicks")],
+    [State({"type": "comment-author", "index": MATCH}, "value"),
+     State({"type": "comment-content", "index": MATCH}, "value"),
+     State({"type": "submit-comment", "index": MATCH}, "id")],
     prevent_initial_call=True
 )
-def submit_comment(n_clicks_list, author_list, content_list):
-    ctx = dash.callback_context
-    if not ctx.triggered or not any(n for n in n_clicks_list if n):
-        return [dash.no_update] * 4
+def submit_comment(n_clicks, author, content, button_id):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
 
-    # Find which button was clicked
-    trigger = ctx.triggered[0]['prop_id']
-    import json
-    button_info = json.loads(trigger.split('.')[0])
-    thread_id = button_info['index']
-
-    # Find the index in the lists
-    clicked_idx = None
-    for i, n in enumerate(n_clicks_list):
-        if n and trigger.startswith(f'{{"index":{thread_id}'):
-            clicked_idx = i
-            break
-
-    if clicked_idx is None:
-        return [dash.no_update] * 4
-
-    author = author_list[clicked_idx] if clicked_idx < len(author_list) else None
-    content = content_list[clicked_idx] if clicked_idx < len(content_list) else None
-
-    # Prepare output lists
-    comments_output = [dash.no_update] * len(n_clicks_list)
-    feedback_output = [dash.no_update] * len(n_clicks_list)
-    author_output = [dash.no_update] * len(n_clicks_list)
-    content_output = [dash.no_update] * len(n_clicks_list)
+    thread_id = button_id['index']
 
     # Validate inputs
     if not author or not content:
-        feedback_output[clicked_idx] = dbc.Alert("Nama dan komentar harus diisi!", color="warning", className="py-1 px-2 mb-0 small")
-        return comments_output, feedback_output, author_output, content_output
+        return dash.no_update, dbc.Alert("Nama dan komentar harus diisi!", color="warning", className="py-1 px-2 mb-0 small"), dash.no_update, dash.no_update
 
     if len(content) < 3:
-        feedback_output[clicked_idx] = dbc.Alert("Komentar terlalu pendek!", color="warning", className="py-1 px-2 mb-0 small")
-        return comments_output, feedback_output, author_output, content_output
+        return dash.no_update, dbc.Alert("Komentar terlalu pendek!", color="warning", className="py-1 px-2 mb-0 small"), dash.no_update, dash.no_update
 
-    # Block admin-like names in comments (no password field available)
+    # Block admin-like names in comments
     import re
     admin_name_pattern = re.compile(r'(admin|administrator|moderator|mod|pengelola|official)', re.IGNORECASE)
     if admin_name_pattern.search(author):
-        feedback_output[clicked_idx] = dbc.Alert("Nama 'admin/moderator' tidak diperbolehkan!", color="danger", className="py-1 px-2 mb-0 small")
-        return comments_output, feedback_output, author_output, content_output
+        return dash.no_update, dbc.Alert("Nama 'admin/moderator' tidak diperbolehkan!", color="danger", className="py-1 px-2 mb-0 small"), dash.no_update, dash.no_update
 
     # Check profanity
     content_check = check_profanity(content)
     if content_check['level'] == 1:
-        feedback_output[clicked_idx] = dbc.Alert("Komentar mengandung kata tidak pantas!", color="danger", className="py-1 px-2 mb-0 small")
-        return comments_output, feedback_output, author_output, content_output
+        return dash.no_update, dbc.Alert("Komentar mengandung kata tidak pantas!", color="danger", className="py-1 px-2 mb-0 small"), dash.no_update, dash.no_update
 
     try:
         # Insert comment
@@ -12216,19 +12172,19 @@ def submit_comment(n_clicks_list, author_list, content_list):
 
         # Get updated comments list
         comments = get_thread_comments(thread_id)
-        comments_output[clicked_idx] = [create_comment_card(c) for c in comments] if comments else [
+        comments_children = [create_comment_card(c) for c in comments] if comments else [
             html.Small("Belum ada komentar.", className="text-muted")
         ]
 
-        # Clear form and show success
-        feedback_output[clicked_idx] = dbc.Alert("Komentar berhasil ditambahkan!", color="success", className="py-1 px-2 mb-0 small")
-        author_output[clicked_idx] = ""
-        content_output[clicked_idx] = ""
+        return (
+            comments_children,
+            dbc.Alert("Komentar berhasil ditambahkan!", color="success", className="py-1 px-2 mb-0 small"),
+            "",  # Clear author
+            ""   # Clear content
+        )
 
     except Exception as e:
-        feedback_output[clicked_idx] = dbc.Alert(f"Error: {str(e)}", color="danger", className="py-1 px-2 mb-0 small")
-
-    return comments_output, feedback_output, author_output, content_output
+        return dash.no_update, dbc.Alert(f"Error: {str(e)}", color="danger", className="py-1 px-2 mb-0 small"), dash.no_update, dash.no_update
 
 
 # ============================================================
