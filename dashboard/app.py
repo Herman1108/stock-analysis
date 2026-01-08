@@ -518,12 +518,18 @@ PWA_INDEX_STRING = '''
             }
 
             /* Forum Mobile Responsive */
-            .forum-content {
+            .forum-content,
+            pre.forum-content {
                 word-wrap: break-word !important;
                 overflow-wrap: break-word !important;
                 word-break: break-word !important;
                 white-space: pre-wrap !important;
                 max-width: 100% !important;
+                font-family: inherit !important;
+                background: transparent !important;
+                border: none !important;
+                padding: 0 !important;
+                margin: 0 !important;
             }
 
             /* Mobile breakpoint */
@@ -534,14 +540,11 @@ PWA_INDEX_STRING = '''
                 .card-title {
                     font-size: 1rem !important;
                 }
-                .forum-content {
+                .forum-content,
+                pre.forum-content {
                     font-size: 0.85rem !important;
                     line-height: 1.5 !important;
                     white-space: pre-wrap !important;
-                }
-                /* Hide long separator lines on mobile */
-                .forum-content br + br {
-                    display: none;
                 }
                 /* Better badge sizing on mobile */
                 .badge {
@@ -568,7 +571,8 @@ PWA_INDEX_STRING = '''
                 .card-body {
                     padding: 0.5rem !important;
                 }
-                .forum-content {
+                .forum-content,
+                pre.forum-content {
                     font-size: 0.8rem !important;
                     white-space: pre-wrap !important;
                 }
