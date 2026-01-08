@@ -5820,6 +5820,7 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
     - Total Net ALL brokers (tebal)
     - Total Net Selected brokers (tipis)
     """
+    print(f"[CHART FUNC] create_broker_streak_chart ENTERED! stock={stock_code}, brokers={selected_brokers}", flush=True)
     try:
         # Get streak brokers if none selected
         if not selected_brokers:
@@ -5852,15 +5853,18 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
         }).reset_index().sort_values('date')
         selected_net_df['cumulative_lot'] = selected_net_df['net_lot'].cumsum()
 
-        # Debug: Log broker list
-        print(f"[STREAK CHART] Using streak_df for selected: {selected_brokers}")
+        # Debug: Log broker list and data verification - FLUSH to see immediately
+        streak_brokers_in_df = streak_df['broker_code'].unique().tolist() if not streak_df.empty else []
+        print(f"[STREAK DEBUG] === CALLBACK TRIGGERED ===", flush=True)
+        print(f"[STREAK DEBUG] selected_brokers param: {selected_brokers}", flush=True)
+        print(f"[STREAK DEBUG] brokers in streak_df: {streak_brokers_in_df}", flush=True)
+        print(f"[STREAK DEBUG] streak_df rows: {len(streak_df)}, selected_net_df rows: {len(selected_net_df)}", flush=True)
+        if not selected_net_df.empty:
+            print(f"[STREAK DEBUG] selected_net_df cumulative: {selected_net_df['cumulative_lot'].iloc[-1]}", flush=True)
 
         # Calculate ALL brokers cumulative (LOT)
         all_brokers_df = all_brokers_df.sort_values('date')
         all_brokers_df['cumulative_lot'] = all_brokers_df['net_lot'].cumsum()
-
-        # Debug: print selected brokers info
-        print(f"[STREAK CHART] Selected: {selected_brokers}, Cumulative: {selected_net_df['cumulative_lot'].iloc[-1] if not selected_net_df.empty else 0}")
 
         # Add broker streak areas
         for i, broker in enumerate(selected_brokers):
@@ -6779,7 +6783,19 @@ def create_broker_movement_page(stock_code='CDIA'):
                 f"Broker Movement - {stock_code}"
             ], className="mb-0 d-inline-block me-3"),
             create_dashboard_submenu_nav('movement', stock_code),
-        ], className="d-flex align-items-center flex-wrap mb-4"),
+        ], className="d-flex align-items-center flex-wrap mb-2"),
+
+        # 📌 INTRO TEXT - Explain purpose of this page
+        html.Div([
+            html.P([
+                html.I(className="fas fa-info-circle me-2 text-info"),
+                "Menu ini fokus mendeteksi ",
+                html.Strong("perubahan perilaku broker besar", className="text-warning"),
+                ". Bukan siapa paling banyak beli, tapi ",
+                html.Strong("siapa mulai berubah arah", className="text-info"),
+                "."
+            ], className="mb-0 small")
+        ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)", "borderLeft": "3px solid var(--bs-info)"}),
 
         # Broker Movement Alert Container
         html.Div(id="movement-alert-container", children=create_broker_movement_alert(stock_code)),
@@ -6999,6 +7015,11 @@ def create_sensitive_broker_page(stock_code='CDIA'):
     if broker_sens and broker_sens.get('brokers'):
         top_5_codes = [b['broker_code'] for b in broker_sens['brokers'][:5]]
 
+    # Get market phase for context warning
+    validation_result = get_comprehensive_validation(stock_code, 30)
+    overall_signal = validation_result.get('summary', {}).get('overall_signal', 'NETRAL')
+    is_distribution = overall_signal == 'DISTRIBUSI'
+
     return html.Div([
         # Page Header with submenu navigation
         html.Div([
@@ -7007,7 +7028,41 @@ def create_sensitive_broker_page(stock_code='CDIA'):
                 f"Sensitive Broker - {stock_code}"
             ], className="mb-0 d-inline-block me-3"),
             create_dashboard_submenu_nav('sensitive', stock_code),
-        ], className="d-flex align-items-center flex-wrap mb-4"),
+        ], className="d-flex align-items-center flex-wrap mb-2"),
+
+        # ⚠️ GLOBAL WARNING - Context Dependent
+        dbc.Alert([
+            html.Div([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                html.Strong("Perhatian: ", className="me-1"),
+                "Broker sensitif hanya valid jika ",
+                html.Strong("sejalan dengan fase pasar", className="text-warning"),
+                ". ",
+                html.Span(
+                    "Pada fase DISTRIBUTION, sinyal akumulasi broker lebih sering gagal.",
+                    className="text-danger fw-bold"
+                ) if is_distribution else html.Span(
+                    "Fase saat ini mendukung penggunaan sinyal broker sensitif.",
+                    className="text-success"
+                ),
+            ], className="mb-2"),
+            html.Hr(className="my-2", style={"opacity": "0.3"}),
+            html.Div([
+                html.Small([
+                    html.Strong("🎯 Cara Pakai Sinyal Broker Sensitif:", className="d-block mb-1"),
+                    html.Span("1. Fokus broker ", className="me-1"),
+                    html.Span("AKUMULASI", className="badge bg-success me-1"),
+                    html.Span("+ Progress ", className="me-1"),
+                    html.Span("READY", className="badge bg-info me-2"),
+                    html.Br(),
+                    html.Span("2. ", className="me-1"),
+                    html.Span("Abaikan jika Market Phase masih DISTRIBUTION", className="text-warning"),
+                    html.Br(),
+                    html.Span("3. Ideal dipakai saat fase ", className="me-1"),
+                    html.Span("SIDEWAYS → BREAKOUT", className="text-info fw-bold"),
+                ], style={"fontSize": "11px"})
+            ])
+        ], color="warning" if is_distribution else "info", className="mb-3", style={"borderLeft": "4px solid"}),
 
         # Broker Sensitivity Pattern Container
         html.Div(id="sensitive-pattern-container", children=create_broker_sensitivity_pattern(stock_code)),
@@ -8746,6 +8801,229 @@ def create_broker_consistency_table(df):
 # PAGE: DASHBOARD (Dynamic)
 # ============================================================
 
+def create_broker_dominan_card(stock_code: str) -> html.Div:
+    """
+    Create card showing dominant broker activity by type (Foreign/Local/BUMN)
+    Helps user understand WHO is driving the distribution/accumulation
+    """
+    try:
+        broker_df = get_broker_data(stock_code)
+        if broker_df.empty:
+            return html.Div()
+
+        # Get latest date
+        latest_date = broker_df['date'].max()
+        today_df = broker_df[broker_df['date'] == latest_date].copy()
+
+        if today_df.empty:
+            return html.Div()
+
+        # Add broker type
+        today_df['broker_type'] = today_df['broker_code'].apply(get_broker_type)
+
+        # Aggregate by type
+        type_summary = today_df.groupby('broker_type').agg({
+            'net_val': 'sum',
+            'net_lot': 'sum',
+            'broker_code': 'count'
+        }).reset_index()
+        type_summary.columns = ['type', 'net_val', 'net_lot', 'count']
+
+        # Get top sellers by type
+        foreign_net = type_summary[type_summary['type'] == 'FOREIGN']['net_val'].sum() if 'FOREIGN' in type_summary['type'].values else 0
+        local_net = type_summary[type_summary['type'] == 'LOCAL']['net_val'].sum() if 'LOCAL' in type_summary['type'].values else 0
+        bumn_net = type_summary[type_summary['type'] == 'BUMN']['net_val'].sum() if 'BUMN' in type_summary['type'].values else 0
+
+        # Get top 2 brokers for each selling type
+        top_foreign_sellers = today_df[(today_df['broker_type'] == 'FOREIGN') & (today_df['net_val'] < 0)].nsmallest(2, 'net_val')['broker_code'].tolist()
+        top_local_sellers = today_df[(today_df['broker_type'] == 'LOCAL') & (today_df['net_val'] < 0)].nsmallest(2, 'net_val')['broker_code'].tolist()
+
+        # Build display elements
+        elements = []
+
+        # Foreign status
+        if foreign_net < -100000000:  # > 100M sell
+            foreign_text = f"🔴 Asing ({', '.join(top_foreign_sellers) if top_foreign_sellers else 'N/A'}) → Net Sell Besar"
+            foreign_class = "text-danger"
+        elif foreign_net > 100000000:
+            foreign_text = "🟢 Asing → Net Buy"
+            foreign_class = "text-success"
+        else:
+            foreign_text = "⚪ Asing → Netral"
+            foreign_class = "text-muted"
+
+        elements.append(html.Div(foreign_text, className=f"small {foreign_class}"))
+
+        # Local status
+        if local_net < -100000000:
+            local_text = "🟡 Lokal → belum menahan harga"
+            local_class = "text-warning"
+        elif local_net > 100000000:
+            local_text = "🟢 Lokal → menahan harga"
+            local_class = "text-success"
+        else:
+            local_text = "⚪ Lokal → Netral"
+            local_class = "text-muted"
+
+        elements.append(html.Div(local_text, className=f"small {local_class}"))
+
+        # Conclusion
+        if foreign_net < -100000000 and local_net < 0:
+            conclusion = "👉 Distribusi bukan ritel, tapi institusi"
+            conclusion_class = "text-danger fw-bold"
+        elif foreign_net > 100000000:
+            conclusion = "👉 Asing sedang akumulasi"
+            conclusion_class = "text-success fw-bold"
+        else:
+            conclusion = "👉 Tidak ada dominasi jelas"
+            conclusion_class = "text-muted"
+
+        elements.append(html.Div(conclusion, className=f"small mt-1 {conclusion_class}"))
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-users me-2 text-warning"),
+                html.Strong("Broker Dominan Hari Ini", className="text-warning")
+            ], className="bg-transparent border-warning py-2"),
+            dbc.CardBody(elements, className="py-2")
+        ], className="mb-3", style={"border": "1px solid var(--bs-warning)"})
+
+    except Exception as e:
+        return html.Div()
+
+
+def create_sensitive_broker_notice(stock_code: str, overall_signal: str) -> html.Div:
+    """
+    Create notice explaining when/why sensitive broker signals are being ignored
+    Builds trust by showing the system is 'thinking'
+    """
+    try:
+        if overall_signal == 'DISTRIBUSI':
+            return html.Div([
+                dbc.Alert([
+                    html.Div([
+                        html.I(className="fas fa-robot me-2"),
+                        html.Strong("Catatan Sistem: ", className="text-warning"),
+                        html.Span("Sinyal Sensitive Broker ", className="me-1"),
+                        html.Strong("diabaikan", className="text-danger"),
+                        html.Span(" karena fase pasar masih DISTRIBUTION. "),
+                        html.Small("(Efektivitas historis rendah di fase ini)", className="text-muted")
+                    ])
+                ], color="dark", className="mb-3 py-2", style={"borderLeft": "3px solid var(--bs-warning)"})
+            ])
+        elif overall_signal == 'AKUMULASI':
+            return html.Div([
+                dbc.Alert([
+                    html.Div([
+                        html.I(className="fas fa-robot me-2"),
+                        html.Strong("Catatan Sistem: ", className="text-success"),
+                        html.Span("Sinyal Sensitive Broker "),
+                        html.Strong("aktif dipertimbangkan", className="text-success"),
+                        html.Span(" - fase pasar mendukung. "),
+                        html.Small("(Efektivitas historis tinggi saat akumulasi)", className="text-muted")
+                    ])
+                ], color="dark", className="mb-3 py-2", style={"borderLeft": "3px solid var(--bs-success)"})
+            ])
+        else:
+            return html.Div()  # No notice for neutral
+
+    except Exception as e:
+        return html.Div()
+
+
+def create_position_context_card(stock_code: str) -> html.Div:
+    """
+    Create card showing position/cost basis context from Position submenu
+    Links Position analysis to Dashboard
+    """
+    try:
+        # Get position data
+        position_df = calculate_broker_current_position(stock_code)
+        if position_df.empty:
+            position_df = calculate_broker_position_from_daily(stock_code, days=90)
+
+        if position_df.empty:
+            return html.Div()
+
+        # Calculate stats
+        holders = position_df[position_df['net_lot'] > 0]
+        if holders.empty:
+            return html.Div()
+
+        in_profit = len(holders[holders['floating_pnl_pct'] > 0])
+        in_loss = len(holders[holders['floating_pnl_pct'] < 0])
+        total_holders = len(holders)
+        avg_pnl = holders['floating_pnl_pct'].mean()
+
+        # Determine context message
+        if in_loss > in_profit and avg_pnl < -5:
+            context_icon = "📦"
+            context_text = f"Mayoritas broker ({in_loss}/{total_holders}) berada di posisi rugi"
+            context_sub = "→ rebound berpotensi jadi tekanan jual, bukan awal tren"
+            context_color = "danger"
+        elif in_profit > in_loss and avg_pnl > 5:
+            context_icon = "📦"
+            context_text = f"Mayoritas broker ({in_profit}/{total_holders}) berada di posisi profit"
+            context_sub = "→ support kuat dari cost basis, defender aktif"
+            context_color = "success"
+        else:
+            context_icon = "📦"
+            context_text = f"Posisi broker seimbang ({in_profit} profit, {in_loss} loss)"
+            context_sub = "→ belum ada tekanan dominan dari cost basis"
+            context_color = "secondary"
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.Span(context_icon, className="me-2"),
+                html.Strong("Konteks Posisi", className=f"text-{context_color}")
+            ], className="bg-transparent py-2", style={"borderBottom": f"1px solid var(--bs-{context_color})"}),
+            dbc.CardBody([
+                html.Div(context_text, className=f"small text-{context_color}"),
+                html.Small(context_sub, className="text-muted")
+            ], className="py-2")
+        ], className="mb-3", style={"border": f"1px solid var(--bs-{context_color})"})
+
+    except Exception as e:
+        return html.Div()
+
+
+def create_dashboard_education_block() -> html.Div:
+    """
+    Create education block explaining how Dashboard synthesizes all submenus
+    Helps user understand the 'big picture'
+    """
+    return dbc.Card([
+        dbc.CardHeader([
+            html.I(className="fas fa-puzzle-piece me-2 text-info"),
+            html.Strong("Bagaimana Dashboard Ini Dibuat?", className="text-info")
+        ], className="bg-transparent border-info py-2"),
+        dbc.CardBody([
+            html.Div([
+                html.Div([
+                    html.I(className="fas fa-exchange-alt me-2 text-primary"),
+                    html.Strong("Broker Movement", className="text-primary"),
+                    html.Span(" → siapa beli/jual hari ini", className="text-muted ms-1")
+                ], className="mb-1 small"),
+                html.Div([
+                    html.I(className="fas fa-crosshairs me-2 text-info"),
+                    html.Strong("Sensitive Broker", className="text-info"),
+                    html.Span(" → siapa biasanya 'benar lebih dulu'", className="text-muted ms-1")
+                ], className="mb-1 small"),
+                html.Div([
+                    html.I(className="fas fa-chart-pie me-2 text-success"),
+                    html.Strong("Position", className="text-success"),
+                    html.Span(" → di mana tekanan jual / support nyata", className="text-muted ms-1")
+                ], className="mb-2 small"),
+                html.Hr(className="my-2", style={"opacity": "0.2"}),
+                html.Div([
+                    html.I(className="fas fa-arrow-right me-1 text-warning"),
+                    html.Strong("Dashboard = ringkasan dari 3 analisa ini.", className="text-warning small")
+                ])
+            ])
+        ], className="py-2")
+    ], className="mb-3", style={"border": "1px solid var(--bs-info)"})
+
+
 def create_one_line_insight(stock_code: str) -> html.Div:
     """
     Generate a one-line insight bar for quick market context.
@@ -8813,9 +9091,14 @@ def create_dashboard_page(stock_code='CDIA'):
     try:
         unified_data = get_unified_analysis_summary(stock_code)
         validation_result = get_comprehensive_validation(stock_code, 30)
+        # Get overall signal for context-aware components
+        accum = unified_data.get('accumulation', {})
+        summary = accum.get('summary', {})
+        overall_signal = summary.get('overall_signal', 'NETRAL')
     except:
         unified_data = {}
         validation_result = {}
+        overall_signal = 'NETRAL'
 
     return html.Div([
         # === ONE-LINE INSIGHT BAR (NEW) ===
@@ -8823,6 +9106,19 @@ def create_dashboard_page(stock_code='CDIA'):
 
         # === DECISION PANEL - "APA YANG HARUS DILAKUKAN HARI INI?" ===
         create_decision_panel(stock_code, unified_data),
+
+        # === CONTEXT CARDS ROW - Broker Dominan + Position Context ===
+        dbc.Row([
+            dbc.Col([
+                create_broker_dominan_card(stock_code),
+            ], xs=12, md=6),
+            dbc.Col([
+                create_position_context_card(stock_code),
+            ], xs=12, md=6),
+        ], className="mb-2"),
+
+        # === SENSITIVE BROKER NOTICE (Context-aware) ===
+        create_sensitive_broker_notice(stock_code, overall_signal),
 
         # Header with submenu navigation
         dbc.Row([
@@ -8886,6 +9182,9 @@ def create_dashboard_page(stock_code='CDIA'):
             ]),
             dbc.CardBody(id="broker-detail-container")
         ], className="mb-4"),
+
+        # === EDUCATION BLOCK - How Dashboard is Built ===
+        create_dashboard_education_block(),
     ])
 
 def create_accumulation_table(df, stock_code='CDIA'):
@@ -9565,6 +9864,232 @@ def create_broker_history_chart(broker_code, stock_code='CDIA'):
 # PAGE: BROKER POSITION ANALYSIS
 # ============================================================
 
+def create_position_action_card(stock_code, position_df, sr_levels, validation_result):
+    """
+    Create Position Action Card - WAJIB di paling atas
+    Menampilkan rekomendasi: EXIT / REDUCE / HOLD / ADD
+    """
+    try:
+        # Get phase analysis data
+        summary = validation_result.get('summary', {})
+        confidence = validation_result.get('confidence', {})
+        overall_signal = summary.get('overall_signal', 'NETRAL')
+        pass_rate = confidence.get('pass_rate', 0)
+        passed = confidence.get('passed', 0)
+        total = confidence.get('total', 6)
+
+        # Calculate floating P/L stats
+        holders = position_df[position_df['net_lot'] > 0] if not position_df.empty else pd.DataFrame()
+        in_profit = len(holders[holders['floating_pnl_pct'] > 0]) if not holders.empty else 0
+        in_loss = len(holders[holders['floating_pnl_pct'] < 0]) if not holders.empty else 0
+        avg_pnl = holders['floating_pnl_pct'].mean() if not holders.empty else 0
+
+        # Check support/resistance
+        has_support = len(sr_levels.get('supports', [])) > 0
+        has_resistance = len(sr_levels.get('resistances', [])) > 0
+
+        # Determine Position Action
+        if overall_signal == 'DISTRIBUSI':
+            if in_loss > in_profit and avg_pnl < -5:
+                action = "EXIT"
+                action_icon = "🔴"
+                action_color = "danger"
+                action_reason = "Mayoritas broker dalam posisi rugi dan fase distribusi masih dominan."
+                action_guidance = "Pertimbangkan keluar dari posisi untuk menghindari kerugian lebih lanjut."
+            else:
+                action = "REDUCE"
+                action_icon = "🟠"
+                action_color = "warning"
+                action_reason = "Fase distribusi terdeteksi namun sebagian broker masih dalam kondisi wajar."
+                action_guidance = "Kurangi eksposur secara bertahap, jangan tambah posisi baru."
+        elif overall_signal == 'AKUMULASI':
+            if has_support and in_profit > in_loss:
+                action = "ADD"
+                action_icon = "🟢"
+                action_color = "success"
+                action_reason = "Fase akumulasi dengan support kuat dari cost basis broker."
+                action_guidance = "Pertimbangkan menambah posisi saat pullback ke area support."
+            else:
+                action = "HOLD"
+                action_icon = "🔵"
+                action_color = "info"
+                action_reason = "Fase akumulasi terdeteksi namun belum ada konfirmasi support kuat."
+                action_guidance = "Pertahankan posisi, tunggu konfirmasi sebelum menambah."
+        else:  # NETRAL
+            action = "HOLD"
+            action_icon = "⏳"
+            action_color = "secondary"
+            action_reason = "Belum ada sinyal yang cukup kuat untuk mengambil aksi."
+            action_guidance = "Pertahankan posisi saat ini, pantau perkembangan broker flow."
+
+        # Build invalidation checklist
+        invalidation_checks = [
+            {
+                'label': 'Broker akumulator berhenti beli',
+                'checked': overall_signal == 'DISTRIBUSI',
+                'tooltip': 'Broker yang sebelumnya akumulasi sudah tidak aktif membeli'
+            },
+            {
+                'label': 'Distribusi > 2 hari berturut',
+                'checked': overall_signal == 'DISTRIBUSI' and pass_rate >= 60,
+                'tooltip': 'Pola distribusi terjadi lebih dari 2 hari berturut-turut'
+            },
+            {
+                'label': 'Breakdown support utama',
+                'checked': not has_support and avg_pnl < -10,
+                'tooltip': 'Harga menembus support dari cost basis broker'
+            },
+            {
+                'label': 'Volume konfirmasi negatif',
+                'checked': in_loss > in_profit * 2,
+                'tooltip': 'Volume jual lebih dominan dari volume beli'
+            }
+        ]
+
+        # Count how many invalidation checks are true
+        invalid_count = sum(1 for c in invalidation_checks if c['checked'])
+        is_invalid = invalid_count >= 2
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.Div([
+                    html.I(className="fas fa-bullseye me-2 text-warning"),
+                    html.Strong("Rekomendasi Posisi Saat Ini", className="text-warning"),
+                ], className="d-flex align-items-center")
+            ], className="bg-transparent border-warning"),
+            dbc.CardBody([
+                dbc.Row([
+                    # Action Label (LEFT - Big)
+                    dbc.Col([
+                        html.Div([
+                            html.Span(action_icon, style={"fontSize": "48px"}),
+                            html.H2(action, className=f"text-{action_color} fw-bold mb-0 mt-2"),
+                        ], className="text-center")
+                    ], md=3, className="d-flex align-items-center justify-content-center border-end"),
+
+                    # Details (RIGHT)
+                    dbc.Col([
+                        # Reason
+                        html.P(action_reason, className="mb-2", style={"fontSize": "14px"}),
+
+                        # Guidance
+                        html.Div([
+                            html.I(className="fas fa-lightbulb me-2 text-info"),
+                            html.Span(action_guidance, style={"fontSize": "13px"})
+                        ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
+
+                        # Metrics Row
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Fase Pasar", className="text-muted d-block"),
+                                html.Span(
+                                    f"{'DISTRIBUTION' if overall_signal == 'DISTRIBUSI' else 'ACCUMULATION' if overall_signal == 'AKUMULASI' else 'NEUTRAL'}",
+                                    className=f"badge bg-{'warning' if overall_signal == 'DISTRIBUSI' else 'info' if overall_signal == 'AKUMULASI' else 'secondary'}"
+                                ),
+                            ], width=4, className="text-center"),
+                            dbc.Col([
+                                html.Small("Confidence", className="text-muted d-block"),
+                                html.Strong(f"{pass_rate:.0f}%", className=f"text-{'success' if pass_rate >= 70 else 'warning' if pass_rate >= 50 else 'danger'}"),
+                                html.Small(f" ({passed}/{total})", className="text-muted"),
+                            ], width=4, className="text-center"),
+                            dbc.Col([
+                                html.Small("Profit/Loss", className="text-muted d-block"),
+                                html.Strong([
+                                    html.Span(f"{in_profit}", className="text-success"),
+                                    " / ",
+                                    html.Span(f"{in_loss}", className="text-danger")
+                                ]),
+                            ], width=4, className="text-center"),
+                        ], className="mb-3"),
+
+                        # Invalidation Checklist
+                        html.Div([
+                            html.Small([
+                                html.I(className="fas fa-ban me-1"),
+                                html.Strong("Kapan Sinyal Ini Gugur?")
+                            ], className="text-danger d-block mb-2"),
+                            html.Div([
+                                html.Div([
+                                    html.Span("✅" if c['checked'] else "⬜", className="me-2"),
+                                    html.Small(c['label'], title=c['tooltip'], style={"cursor": "help"})
+                                ], className="mb-1") for c in invalidation_checks
+                            ]),
+                            # Warning if invalid
+                            html.Div([
+                                html.I(className="fas fa-exclamation-triangle me-1"),
+                                html.Small(f" {invalid_count}/4 kondisi terpenuhi - Sinyal mungkin tidak valid. Hindari tambah posisi.",
+                                          className="text-warning")
+                            ], className="mt-2") if is_invalid else None
+                        ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.03)"})
+                    ], md=9)
+                ])
+            ], className="py-3")
+        ], className="mb-4", style={"border": f"2px solid var(--bs-{action_color})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"})
+
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardHeader("Rekomendasi Posisi"),
+            dbc.CardBody(html.P(f"Error: {str(e)}", className="text-danger"))
+        ], className="mb-4")
+
+
+def create_selling_pressure_interpretation(position_df, current_price):
+    """
+    Create interpretation box for Selling Pressure Map
+    """
+    try:
+        if position_df.empty:
+            return html.Div()
+
+        holders = position_df[position_df['net_lot'] > 0].copy()
+        if holders.empty:
+            return html.Div()
+
+        # Find the biggest selling pressure zone (where most loss brokers are)
+        loss_brokers = holders[holders['floating_pnl_pct'] < 0]
+        if loss_brokers.empty:
+            return html.Div([
+                html.Div([
+                    html.I(className="fas fa-check-circle me-2 text-success"),
+                    html.Strong("Interpretasi: ", className="text-success"),
+                    "Tidak ada tekanan jual signifikan. Mayoritas broker dalam posisi profit."
+                ], className="p-3 rounded", style={"backgroundColor": "rgba(40, 167, 69, 0.1)", "border": "1px solid #28a745"})
+            ], className="mt-3")
+
+        # Calculate pressure zones
+        avg_loss_price = (loss_brokers['weighted_avg_buy'] * loss_brokers['net_lot']).sum() / loss_brokers['net_lot'].sum()
+        total_loss_lot = loss_brokers['net_lot'].sum()
+
+        # Price range for resistance
+        min_loss_price = loss_brokers['weighted_avg_buy'].min()
+        max_loss_price = loss_brokers['weighted_avg_buy'].max()
+
+        return html.Div([
+            html.Div([
+                html.I(className="fas fa-search me-2 text-warning"),
+                html.Strong("Interpretasi Selling Pressure", className="text-warning"),
+            ], className="mb-2"),
+            html.P([
+                f"Tekanan jual terbesar berada di range ",
+                html.Strong(f"Rp {min_loss_price:,.0f} - Rp {max_loss_price:,.0f}", className="text-danger"),
+                f" dengan total ",
+                html.Strong(f"{total_loss_lot:,.0f} lot", className="text-danger"),
+                " berpotensi menjadi resistance aktif jika harga rebound."
+            ], className="mb-2 small"),
+            html.Div([
+                html.I(className="fas fa-lightbulb me-1 text-info"),
+                html.Small([
+                    "Upside cenderung terbatas karena ",
+                    html.Strong("rebound berpotensi dimanfaatkan broker untuk keluar", className="text-warning"),
+                    ". Semakin banyak broker rugi di atas, semakin berat ceiling-nya."
+                ])
+            ], className="text-muted")
+        ], className="mt-3 p-3 rounded", style={"backgroundColor": "rgba(255, 193, 7, 0.1)", "border": "1px solid #ffc107"})
+
+    except Exception as e:
+        return html.Div()
+
+
 def create_position_page(stock_code='CDIA'):
     """Create broker position analysis page"""
 
@@ -9625,6 +10150,9 @@ def create_position_page(stock_code='CDIA'):
     in_profit = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] > 0)]
     in_loss = position_df[(position_df['net_lot'] > 0) & (position_df['floating_pnl_pct'] < 0)]
 
+    # Get validation result for Position Action card
+    validation_result = get_comprehensive_validation(stock_code, 30)
+
     return html.Div([
         # Page Header with submenu navigation
         html.Div([
@@ -9634,15 +10162,22 @@ def create_position_page(stock_code='CDIA'):
             ], className="mb-0 d-inline-block me-3"),
             create_dashboard_submenu_nav('position', stock_code),
         ], className="d-flex align-items-center flex-wrap mb-2"),
-        html.P(period_str, className="text-muted mb-4"),
+        html.P([
+            html.Small("Analisis posisi berdasarkan perilaku broker & cost basis ", className="text-muted"),
+            html.Small(f"({period_str})", className="text-info")
+        ], className="mb-3"),
 
-        # Summary Cards
+        # 🎯 POSITION ACTION CARD - WAJIB DI PALING ATAS
+        create_position_action_card(stock_code, position_df, sr_levels, validation_result),
+
+        # Summary Cards with improved labels
         dbc.Row([
             dbc.Col([
                 dbc.Card([
                     dbc.CardBody([
                         html.H6("Total Holders", className="text-muted mb-1"),
-                        html.H3(f"{total_holders}", className="mb-0 text-info")
+                        html.H3(f"{total_holders}", className="mb-0 text-info"),
+                        html.Small("Broker yang masih pegang saham", className="text-muted", style={"fontSize": "10px"})
                     ])
                 ], color="dark", outline=True)
             ], md=3),
@@ -9650,7 +10185,8 @@ def create_position_page(stock_code='CDIA'):
                 dbc.Card([
                     dbc.CardBody([
                         html.H6("Total Net Position", className="text-muted mb-1"),
-                        html.H3(f"{total_net_lot:,.0f} lot", className="mb-0 text-primary")
+                        html.H3(f"{total_net_lot:,.0f} lot", className="mb-0 text-primary"),
+                        html.Small("Total saham yang dipegang", className="text-muted", style={"fontSize": "10px"})
                     ])
                 ], color="dark", outline=True)
             ], md=3),
@@ -9661,7 +10197,8 @@ def create_position_page(stock_code='CDIA'):
                         html.H3(
                             f"{avg_floating_pnl:+.1f}%",
                             className=f"mb-0 text-{'success' if avg_floating_pnl > 0 else 'danger'}"
-                        )
+                        ),
+                        html.Small("Rata-rata untung/rugi broker", className="text-muted", style={"fontSize": "10px"})
                     ])
                 ], color="dark", outline=True)
             ], md=3),
@@ -9673,7 +10210,12 @@ def create_position_page(stock_code='CDIA'):
                             html.Span(f"{len(in_profit)}", className="text-success"),
                             " / ",
                             html.Span(f"{len(in_loss)}", className="text-danger")
-                        ], className="mb-0")
+                        ], className="mb-0"),
+                        html.Small(
+                            "Mayoritas masih rugi" if len(in_loss) > len(in_profit) else "Mayoritas sudah profit",
+                            className=f"text-{'danger' if len(in_loss) > len(in_profit) else 'success'}",
+                            style={"fontSize": "10px"}
+                        )
                     ])
                 ], color="dark", outline=True)
             ], md=3),
@@ -9773,7 +10315,7 @@ def create_position_page(stock_code='CDIA'):
 
                         html.Div([
                             html.H6("Support Levels", className="text-success mb-2"),
-                            html.Small("(Broker floating profit - will defend)", className="text-muted d-block mb-2"),
+                            html.Small("(Broker floating profit - akan defend posisi)", className="text-muted d-block mb-2"),
                             *([html.Div([
                                 html.Span(f"Rp {s['price']:,.0f}", className="fw-bold"),
                                 html.Span(" - "),
@@ -9781,7 +10323,12 @@ def create_position_page(stock_code='CDIA'):
                                 html.Span(f" ({s['lot']:,.0f} lot)", className="small"),
                                 html.Span(f" {s['pnl']:+.1f}%", className="text-success small ms-2"),
                             ], className="mb-1") for s in sr_levels.get('supports', [])] if sr_levels.get('supports') else [
-                                html.Small("Tidak ada support dari cost basis", className="text-muted")
+                                html.Div([
+                                    html.I(className="fas fa-exclamation-circle me-1 text-warning"),
+                                    html.Small("Belum ada support kuat dari cost basis broker", className="text-warning d-block"),
+                                    html.Small("Mayoritas broker masih rugi → cenderung menjual saat harga naik (resistance), bukan bertahan.",
+                                              className="text-muted", style={"fontSize": "10px"})
+                                ])
                             ]),
                         ]),
 
@@ -9789,7 +10336,11 @@ def create_position_page(stock_code='CDIA'):
                         html.Small([
                             html.Strong("Cara Baca: "),
                             "Support = level harga di mana broker profit (akan defend). ",
-                            "Resistance = level di mana broker loss (mungkin jual saat harga naik)."
+                            "Resistance = level di mana broker loss (mungkin jual saat harga naik). ",
+                            html.Br(),
+                            html.I(className="fas fa-info-circle me-1 text-info"),
+                            html.Span("Dalam fase distribusi, rebound sering tertahan karena broker memanfaatkan kenaikan untuk keluar.",
+                                     style={"fontSize": "10px"})
                         ], className="text-muted")
                     ])
                 ], className="mb-4"),
@@ -9819,6 +10370,8 @@ def create_position_page(stock_code='CDIA'):
             ]),
             dbc.CardBody([
                 create_selling_pressure_chart(position_df, current_price),
+                # 🔎 Interpretasi Selling Pressure - Actionable insight
+                create_selling_pressure_interpretation(position_df, current_price),
                 html.Hr(),
                 # Legend for colors
                 html.Div([
@@ -10188,6 +10741,8 @@ def refresh_movement_page(n_clicks, stock_code):
     prevent_initial_call=False  # Allow initial call to work properly
 )
 def update_streak_chart(selected_brokers, stock_code):
+    print(f"[CALLBACK] update_streak_chart CALLED! brokers={selected_brokers}, stock={stock_code}", flush=True)
+
     if not stock_code:
         stocks = get_available_stocks()
         stock_code = stocks[0] if stocks else 'PANI'
@@ -10196,6 +10751,7 @@ def update_streak_chart(selected_brokers, stock_code):
         return html.Div("Pilih minimal 1 broker untuk melihat grafik", className="text-muted text-center py-3")
 
     # Pass selected_brokers directly to chart function
+    print(f"[CALLBACK] Calling create_broker_streak_chart with {len(selected_brokers)} brokers", flush=True)
     return create_broker_streak_chart(stock_code, list(selected_brokers))
 
 # Sensitive Broker page refresh callback

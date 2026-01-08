@@ -18,6 +18,13 @@ def create_decision_panel(stock_code, unified_data):
         impulse = unified_data.get('impulse', {})
         confidence = accum.get('confidence', {})
         summary = accum.get('summary', {})
+        sr = unified_data.get('support_resistance', {})
+
+        # Get price context for actionable guidance
+        current_price = sr.get('current_price', 0) or accum.get('current_price', 0)
+        resistance_levels = sr.get('resistance_levels', [])
+        key_resistance = resistance_levels[0] if resistance_levels else None
+        key_support = sr.get('key_support', None)
 
         action = decision.get('action', 'WAIT')
         action_color = decision.get('color', 'secondary')
@@ -66,12 +73,16 @@ def create_decision_panel(stock_code, unified_data):
             'NETRAL': 'secondary'
         }.get(overall_signal, 'secondary')
 
-        # FINAL COPYWRITING V2: Action label & description based on signal
+        # FINAL COPYWRITING V2: Action label & description based on signal WITH PRICE CONTEXT
         if overall_signal == 'DISTRIBUSI':
             display_action = "EXIT"
             display_icon = "🚨"
             display_color = "danger"
-            sub_guidance = "Sinyal distribusi terdeteksi. Pertimbangkan mengamankan profit atau mengurangi eksposur."
+            # Add price context for distribution
+            if key_resistance:
+                sub_guidance = f"Sinyal distribusi terdeteksi. EXIT direkomendasikan selama harga di bawah Rp {key_resistance:,.0f} (zona distribusi aktif)."
+            else:
+                sub_guidance = "Sinyal distribusi terdeteksi. Pertimbangkan mengamankan profit atau mengurangi eksposur."
             next_focus = [
                 "Harga breakdown area support",
                 "Volume distribusi meningkat",
@@ -81,7 +92,11 @@ def create_decision_panel(stock_code, unified_data):
             display_action = "BUY ON WEAKNESS"
             display_icon = "🟢"
             display_color = "success"
-            sub_guidance = "Ada indikasi akumulasi. Fokus pada area support dan manajemen risiko."
+            # Add price context for accumulation
+            if key_support:
+                sub_guidance = f"Ada indikasi akumulasi. Entry optimal di area Rp {key_support:,.0f} (zona support aktif)."
+            else:
+                sub_guidance = "Ada indikasi akumulasi. Fokus pada area support dan manajemen risiko."
             next_focus = [
                 "Harga menyentuh zona support",
                 "Volume konfirmasi saat pullback",
