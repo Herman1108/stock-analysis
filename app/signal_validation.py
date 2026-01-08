@@ -28,6 +28,7 @@ import numpy as np
 from datetime import timedelta
 from database import execute_query
 from composite_analyzer import analyze_support_resistance
+from momentum_engine import detect_impulse_signal
 
 
 # ============================================================
@@ -1359,6 +1360,9 @@ def get_comprehensive_validation(stock_code: str, analysis_days: int = 30, param
     # === MARKUP TRIGGER DETECTION ===
     markup_trigger = detect_markup_trigger(price_filtered, broker_filtered, detection)
 
+    # === IMPULSE/MOMENTUM DETECTION (NEW ENGINE) ===
+    impulse_signal = detect_impulse_signal(price_filtered, broker_filtered, lookback=5)
+
     # === CALCULATE CONFIDENCE ===
     checks = ['cpr', 'uvdv', 'broker_influence', 'failed_breaks', 'elasticity', 'rotation']
     passed = sum(1 for c in checks if validations.get(c, {}).get('passed', False))
@@ -1399,9 +1403,21 @@ def get_comprehensive_validation(stock_code: str, analysis_days: int = 30, param
     persistence = validations.get('persistence', {})
     max_streak = persistence.get('max_streak', 0)
 
-    # Prioritas: Markup Trigger > Accumulation > Distribution > Neutral
-    if markup_trigger.get('markup_triggered'):
-        # Markup phase detected!
+    # Prioritas: Impulse > Markup Trigger > Accumulation > Distribution > Neutral
+    if impulse_signal.get('impulse_detected'):
+        # IMPULSE/MOMENTUM detected (highest priority - different engine!)
+        imp_strength = impulse_signal.get('strength', 'WEAK')
+        imp_metrics = impulse_signal.get('metrics', {})
+        vol_ratio = imp_metrics.get('volume_ratio', 1)
+        breakout_pct = imp_metrics.get('breakout_pct', 0)
+        insight = f"MOMENTUM/IMPULSE terdeteksi ({imp_strength})! Volume {vol_ratio:.1f}x rata-rata dengan breakout +{breakout_pct:.1f}%. Risiko tinggi, momentum trader dominan."
+    elif impulse_signal.get('near_impulse'):
+        # Near impulse - almost triggered
+        conds = impulse_signal.get('trigger_conditions', {})
+        met = conds.get('conditions_met', 0)
+        insight = f"Hampir impulse ({met}/3 kondisi). Pantau volume spike dan breakout untuk konfirmasi."
+    elif markup_trigger.get('markup_triggered'):
+        # Markup phase detected (after accumulation)
         source_str = markup_trigger.get('source_strength', 'WEAK')
         breakout_pct = markup_trigger.get('breakout_pct', 0)
         insight = f"Harga memasuki FASE MARKUP setelah akumulasi ({source_str}) terdeteksi. Breakout +{breakout_pct:.1f}% dari resistance terdekat."
@@ -1424,7 +1440,12 @@ def get_comprehensive_validation(stock_code: str, analysis_days: int = 30, param
             insight = f"Pola belum jelas - hanya {passed}/6 validasi terpenuhi. Pantau perkembangan."
 
     # === WHAT THIS MEANS (Context-aware) ===
-    if markup_trigger.get('markup_triggered'):
+    if impulse_signal.get('impulse_detected'):
+        # Impulse/Momentum explanation
+        what_means = impulse_signal.get('educational', 'Momentum breakout terdeteksi tanpa fase akumulasi. Risiko tinggi.')
+    elif impulse_signal.get('near_impulse'):
+        what_means = "Sinyal momentum hampir terpenuhi. Salah satu kondisi (volume 2x, breakout, atau CPR bullish) belum tercapai. Pantau perkembangan."
+    elif markup_trigger.get('markup_triggered'):
         what_means = f"Harga mulai bergerak naik setelah periode akumulasi. Ini adalah transisi dari pengumpulan ke markup. Volume dan momentum mendukung pergerakan ini."
     elif overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
         what_means = "Ada pihak yang mengumpulkan saham secara bertahap. Pola ini biasanya muncul sebelum kenaikan, namun timing tidak bisa diprediksi."
@@ -1461,6 +1482,7 @@ def get_comprehensive_validation(stock_code: str, analysis_days: int = 30, param
         },
         'detection': detection,
         'markup_trigger': markup_trigger,
+        'impulse_signal': impulse_signal,
         'decision_rule': decision_rule,
         'validations': validations,
         'summary': {
@@ -1569,12 +1591,38 @@ def get_unified_analysis_summary(stock_code: str) -> dict:
     key_points = []
     warnings = []
 
-    # From Accumulation
+    # From Accumulation and Momentum Engines
     decision_rule = accum_data.get('decision_rule', {})
     markup_trigger = accum_data.get('markup_trigger', {})
+    impulse_signal = accum_data.get('impulse_signal', {})
     confidence = accum_data.get('confidence', {})
 
-    if markup_trigger.get('markup_triggered'):
+    # HIGHEST PRIORITY: Impulse/Momentum Signal
+    if impulse_signal.get('impulse_detected'):
+        imp_strength = impulse_signal.get('strength', 'WEAK')
+        imp_metrics = impulse_signal.get('metrics', {})
+        vol_ratio = imp_metrics.get('volume_ratio', 1)
+        key_points.insert(0, {
+            'icon': '⚡',
+            'text': f'MOMENTUM ({imp_strength}) - Volume {vol_ratio:.1f}x, breakout terdeteksi',
+            'color': 'danger'  # Red to indicate high risk
+        })
+        warnings.append({
+            'icon': '⚠️',
+            'text': 'Risiko tinggi! Momentum tanpa akumulasi. Gunakan stop loss ketat.',
+            'color': 'danger'
+        })
+    elif impulse_signal.get('near_impulse'):
+        conds = impulse_signal.get('trigger_conditions', {})
+        met = conds.get('conditions_met', 0)
+        key_points.append({
+            'icon': '👁️',
+            'text': f'Hampir impulse ({met}/3 kondisi). Pantau volume spike.',
+            'color': 'info'
+        })
+
+    # Markup trigger (after accumulation)
+    if markup_trigger.get('markup_triggered') and not impulse_signal.get('impulse_detected'):
         key_points.append({
             'icon': '🔥',
             'text': 'MARKUP TRIGGERED - Harga breakout setelah akumulasi',
@@ -1636,8 +1684,22 @@ def get_unified_analysis_summary(stock_code: str) -> dict:
         'ENTRY': 'Pertimbangkan untuk masuk bertahap',
         'ADD': 'Layak untuk menambah posisi',
         'HOLD': 'Pertahankan posisi, jangan kejar',
-        'EXIT': 'Pertimbangkan untuk keluar/kurangi'
+        'EXIT': 'Pertimbangkan untuk keluar/kurangi',
+        # Momentum-specific decisions
+        'MASUK_MOMENTUM': 'Entry momentum dengan stop loss ketat',
+        'PANTAU_BREAKOUT': 'Momentum building, pantau konfirmasi',
+        'TUNGGU': 'Sinyal lemah, tunggu konfirmasi',
+        'SIAGA': 'Hampir impulse, siapkan watchlist',
+        'TIDAK_ADA_SINYAL': 'Tidak ada sinyal momentum'
     }
+
+    # Check if impulse overrides accumulation decision
+    if impulse_signal.get('impulse_detected'):
+        imp_decision = impulse_signal.get('decision', {})
+        decision = imp_decision.get('action', decision)
+        decision_reason = imp_decision.get('reason', decision_reason)
+        decision_icon = '⚡'
+        decision_color = 'danger'  # Red for high risk momentum
 
     return {
         'stock_code': stock_code,
@@ -1649,6 +1711,7 @@ def get_unified_analysis_summary(stock_code: str) -> dict:
             'description': decision_descriptions.get(decision, decision_reason)
         },
         'accumulation': accum_data,
+        'impulse': impulse_signal,
         'fundamental': fundamental,
         'support_resistance': support_resistance,
         'key_points': key_points,

@@ -2514,6 +2514,7 @@ def create_landing_page():
             summary = accum.get('summary', {})
             confidence = accum.get('confidence', {})
             markup_trigger = accum.get('markup_trigger', {})
+            impulse_signal = accum.get('impulse_signal', {})
 
             # Get current price from S&R or Accum
             current_price = sr.get('current_price', 0) or accum.get('current_price', 0)
@@ -2622,13 +2623,27 @@ def create_landing_page():
                                 ], className="text-center")
                             ], width=4),
 
-                            # Accumulation
+                            # Accumulation / Momentum Engine
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Akumulasi", className="text-warning d-block"),
-                                    dbc.Badge(overall_signal, color=signal_color, className="mb-1"),
+                                    # Show which engine detected signal
+                                    html.Small(
+                                        "⚡ Momentum" if impulse_signal.get('impulse_detected') 
+                                        else "📊 Akumulasi",
+                                        className=f"{'text-danger' if impulse_signal.get('impulse_detected') else 'text-warning'} d-block fw-bold"
+                                    ),
+                                    dbc.Badge(
+                                        impulse_signal.get('strength', 'IMPULSE') if impulse_signal.get('impulse_detected')
+                                        else overall_signal,
+                                        color="danger" if impulse_signal.get('impulse_detected') else signal_color,
+                                        className="mb-1"
+                                    ),
                                     html.Div([
-                                        html.Span(f"{confidence.get('passed', 0)}/6 Valid", className="small text-muted"),
+                                        html.Span(
+                                            f"Vol {impulse_signal.get('metrics', {}).get('volume_ratio', 0):.1f}x" if impulse_signal.get('impulse_detected')
+                                            else f"{confidence.get('passed', 0)}/6 Valid",
+                                            className="small text-muted"
+                                        ),
                                     ]),
                                 ], className="text-center")
                             ], width=4),
@@ -2653,7 +2668,7 @@ def create_landing_page():
                         # Decision Reason
                         html.Div([
                             html.Small([
-                                html.I(className=f"fas fa-{'check-circle text-success' if action in ['ENTRY', 'ADD'] else 'exclamation-circle text-warning' if action == 'WAIT' else 'times-circle text-danger'} me-2"),
+                                html.I(className=f"fas fa-{'bolt text-danger' if action in ['MASUK_MOMENTUM', 'PANTAU_BREAKOUT'] else 'check-circle text-success' if action in ['ENTRY', 'ADD'] else 'exclamation-circle text-warning' if action in ['WAIT', 'TUNGGU', 'SIAGA'] else 'times-circle text-danger'} me-2"),
                                 decision.get('description', '')[:60] + "..." if len(decision.get('description', '')) > 60 else decision.get('description', '')
                             ], className="text-muted")
                         ], className="mb-3"),
