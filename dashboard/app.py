@@ -3042,12 +3042,14 @@ def create_thread_card(thread: dict) -> dbc.Card:
         html.Div([
             # Preview (always shown)
             html.Div([
-                html.P(content_full[:500] + "..." if is_long_content else content_full,
-                      className="mb-2 small forum-content"),
+                html.Pre(content_full[:500] + "..." if is_long_content else content_full,
+                      className="mb-2 small forum-content",
+                      style={"whiteSpace": "pre-wrap", "fontFamily": "inherit", "margin": "0", "background": "transparent", "border": "none", "padding": "0"}),
             ], id={"type": "thread-preview", "index": thread['id']}),
             # Full content (hidden by default for long posts)
             dbc.Collapse([
-                html.P(content_full, className="mb-2 small forum-content"),
+                html.Pre(content_full, className="mb-2 small forum-content",
+                      style={"whiteSpace": "pre-wrap", "fontFamily": "inherit", "margin": "0", "background": "transparent", "border": "none", "padding": "0"}),
             ], id={"type": "thread-full", "index": thread['id']}, is_open=False) if is_long_content else None,
             # Expand button
             dbc.Button([
