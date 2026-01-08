@@ -11844,76 +11844,71 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
     if not n_clicks:
         return "", dash.no_update, dash.no_update, dash.no_update
 
-    # Validate inputs
-    if not author or not title or not content:
-        return dbc.Alert("Semua field harus diisi!", color="danger"), dash.no_update, dash.no_update, dash.no_update
-
-    if len(title) < 5:
-        return dbc.Alert("Judul terlalu pendek (min 5 karakter)", color="warning"), dash.no_update, dash.no_update, dash.no_update
-
-    if len(content) < 20:
-        return dbc.Alert("Isi thread terlalu pendek (min 20 karakter)", color="warning"), dash.no_update, dash.no_update, dash.no_update
-
-    # Check for admin-like names - require password
-    import re
-    admin_name_pattern = re.compile(r'(admin|administrator|moderator|mod|pengelola|official)', re.IGNORECASE)
-    if admin_name_pattern.search(author):
-        if admin_pwd != ADMIN_PASSWORD:
-            return dbc.Alert([
-                html.I(className="fas fa-shield-alt me-2"),
-                "Nama mengandung kata 'admin/moderator'. Masukkan password admin untuk menggunakan nama ini."
-            ], color="warning"), dash.no_update, dash.no_update, dash.no_update
-
-    # Check profanity
-    title_check = check_profanity(title)
-    content_check = check_profanity(content)
-
-    # Level 1 - HARD BLOCK
-    if title_check['level'] == 1 or content_check['level'] == 1:
-        return dbc.Alert([
-            html.I(className="fas fa-ban me-2"),
-            "Kalimat mengandung kata tidak pantas. Forum ini untuk diskusi investasi, bukan provokasi."
-        ], color="danger"), dash.no_update, dash.no_update, dash.no_update
-
-    # Determine if admin
-    is_admin = admin_pwd == ADMIN_PASSWORD
-    admin_opts = admin_opts or []
-    is_pinned = 'pinned' in admin_opts and is_admin
-    is_frozen = 'frozen' in admin_opts and is_admin
-    author_type = 'admin' if is_admin else 'user'
-
-    # Level 2 - FLAG as provokatif
-    flag = None
-    collapsed = False
-    initial_score = 0
-
-    if title_check['level'] == 2 or content_check['level'] == 2:
-        flag = 'provokatif'
-        collapsed = True
-        initial_score = -2
-
-    # Level 3 - Warning (just log, no action)
-
-    # Process PDF if uploaded
-    pdf_data = None
-    pdf_name = None
-    if pdf_contents and pdf_filename:
-        # Validate it's a PDF
-        if not pdf_filename.lower().endswith('.pdf'):
-            return dbc.Alert("Hanya file PDF yang diperbolehkan!", color="danger"), dash.no_update, dash.no_update, dash.no_update
-        # Decode base64 content
-        try:
-            content_type, content_string = pdf_contents.split(',')
-            pdf_data = base64.b64decode(content_string)
-            pdf_name = pdf_filename
-            # Check size (max 5MB)
-            if len(pdf_data) > 5 * 1024 * 1024:
-                return dbc.Alert("Ukuran file PDF maksimal 5MB!", color="danger"), dash.no_update, dash.no_update, dash.no_update
-        except Exception as e:
-            return dbc.Alert(f"Error membaca file PDF: {str(e)}", color="danger"), dash.no_update, dash.no_update, dash.no_update
-
-    # Insert to database
     try:
+        # Validate inputs
+        if not author or not title or not content:
+            return dbc.Alert("Semua field harus diisi!", color="danger"), dash.no_update, dash.no_update, dash.no_update
+
+        if len(title) < 5:
+            return dbc.Alert("Judul terlalu pendek (min 5 karakter)", color="warning"), dash.no_update, dash.no_update, dash.no_update
+
+        if len(content) < 20:
+            return dbc.Alert("Isi thread terlalu pendek (min 20 karakter)", color="warning"), dash.no_update, dash.no_update, dash.no_update
+
+        # Check for admin-like names - require password
+        import re
+        admin_name_pattern = re.compile(r'(admin|administrator|moderator|mod|pengelola|official)', re.IGNORECASE)
+        if admin_name_pattern.search(author):
+            if admin_pwd != ADMIN_PASSWORD:
+                return dbc.Alert([
+                    html.I(className="fas fa-shield-alt me-2"),
+                    "Nama mengandung kata 'admin/moderator'. Masukkan password admin untuk menggunakan nama ini."
+                ], color="warning"), dash.no_update, dash.no_update, dash.no_update
+
+        # Check profanity
+        title_check = check_profanity(title)
+        content_check = check_profanity(content)
+
+        # Level 1 - HARD BLOCK
+        if title_check['level'] == 1 or content_check['level'] == 1:
+            return dbc.Alert([
+                html.I(className="fas fa-ban me-2"),
+                "Kalimat mengandung kata tidak pantas. Forum ini untuk diskusi investasi, bukan provokasi."
+            ], color="danger"), dash.no_update, dash.no_update, dash.no_update
+
+        # Determine if admin
+        is_admin = admin_pwd == ADMIN_PASSWORD
+        admin_opts = admin_opts or []
+        is_pinned = 'pinned' in admin_opts and is_admin
+        is_frozen = 'frozen' in admin_opts and is_admin
+        author_type = 'admin' if is_admin else 'user'
+
+        # Level 2 - FLAG as provokatif
+        flag = None
+        collapsed = False
+        initial_score = 0
+
+        if title_check['level'] == 2 or content_check['level'] == 2:
+            flag = 'provokatif'
+            collapsed = True
+            initial_score = -2
+
+        # Process PDF if uploaded
+        pdf_data = None
+        pdf_name = None
+        if pdf_contents and pdf_filename:
+            if not pdf_filename.lower().endswith('.pdf'):
+                return dbc.Alert("Hanya file PDF yang diperbolehkan!", color="danger"), dash.no_update, dash.no_update, dash.no_update
+            try:
+                content_type, content_string = pdf_contents.split(',')
+                pdf_data = base64.b64decode(content_string)
+                pdf_name = pdf_filename
+                if len(pdf_data) > 5 * 1024 * 1024:
+                    return dbc.Alert("Ukuran file PDF maksimal 5MB!", color="danger"), dash.no_update, dash.no_update, dash.no_update
+            except Exception as pdf_err:
+                return dbc.Alert(f"Error membaca file PDF: {str(pdf_err)}", color="danger"), dash.no_update, dash.no_update, dash.no_update
+
+        # Insert to database
         insert_query = """
             INSERT INTO forum_threads
             (stock_code, title, content, author_name, author_type, is_pinned, is_frozen, flag, collapsed, score, pdf_data, pdf_filename)
@@ -11940,7 +11935,6 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
         if is_pinned:
             feedback_msg += " (Dipinned sebagai Admin Insight)"
 
-        # Admin section style - show if there are admin threads
         admin_style = {} if admin_threads else {"display": "none"}
 
         return (
@@ -11953,6 +11947,9 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
         )
 
     except Exception as e:
+        import traceback
+        error_detail = traceback.format_exc()
+        print(f"Submit thread error: {error_detail}")
         return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update, dash.no_update, dash.no_update
 
 
