@@ -2945,8 +2945,9 @@ def create_thread_card(thread: dict) -> dbc.Card:
     score = thread['score']
     score_color = "success" if score > 0 else "danger" if score < 0 else "secondary"
 
-    # Content - collapse if flagged
-    content_display = thread['content'][:300] + "..." if len(thread['content']) > 300 else thread['content']
+    # Content - show preview with expand option for long content
+    content_full = thread['content']
+    is_long_content = len(content_full) > 500
 
     card_body = [
         # Header
@@ -2956,9 +2957,23 @@ def create_thread_card(thread: dict) -> dbc.Card:
             html.Span(f" • {thread['stock_code']}", className="text-info ms-2") if thread['stock_code'] else None,
         ], className="mb-2"),
 
-        # Content
+        # Content with expand/collapse for long posts
         html.Div([
-            html.P(content_display, className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
+            # Preview (always shown)
+            html.Div([
+                html.P(content_full[:500] + "..." if is_long_content else content_full,
+                      className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
+            ], id={"type": "thread-preview", "index": thread['id']}),
+            # Full content (hidden by default for long posts)
+            dbc.Collapse([
+                html.P(content_full, className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
+            ], id={"type": "thread-full", "index": thread['id']}, is_open=False) if is_long_content else None,
+            # Expand button
+            dbc.Button([
+                html.I(className="fas fa-chevron-down me-1"),
+                "Lihat selengkapnya"
+            ], id={"type": "expand-content", "index": thread['id']},
+               color="link", size="sm", className="p-0 text-info") if is_long_content else None,
         ], id={"type": "thread-content", "index": thread['id']}),
 
         # PDF Attachment
@@ -11690,6 +11705,51 @@ def update_pdf_status(filename):
             f"File terpilih: {filename}"
         ])
     return ""
+
+# Expand/collapse thread content
+@app.callback(
+    [Output({"type": "thread-full", "index": ALL}, "is_open"),
+     Output({"type": "thread-preview", "index": ALL}, "style"),
+     Output({"type": "expand-content", "index": ALL}, "children")],
+    [Input({"type": "expand-content", "index": ALL}, "n_clicks")],
+    [State({"type": "thread-full", "index": ALL}, "is_open")],
+    prevent_initial_call=True
+)
+def toggle_thread_content(n_clicks_list, is_open_list):
+    ctx = dash.callback_context
+    if not ctx.triggered or not any(n_clicks_list):
+        return [dash.no_update] * 3
+
+    # Find which button was clicked
+    triggered_id = ctx.triggered[0]['prop_id']
+    import json
+    button_info = json.loads(triggered_id.split('.')[0])
+    clicked_index = button_info['index']
+
+    # Update states
+    new_is_open = []
+    new_preview_style = []
+    new_button_text = []
+
+    for i, (n_clicks, is_open) in enumerate(zip(n_clicks_list, is_open_list)):
+        # Check if this is the clicked button by comparing indices
+        # We need to find which index corresponds to clicked_index
+        if n_clicks and ctx.triggered[0]['prop_id'].startswith(f'{{"index":{clicked_index}'):
+            # Toggle this one
+            if is_open:
+                new_is_open.append(False)
+                new_preview_style.append({})
+                new_button_text.append([html.I(className="fas fa-chevron-down me-1"), "Lihat selengkapnya"])
+            else:
+                new_is_open.append(True)
+                new_preview_style.append({"display": "none"})
+                new_button_text.append([html.I(className="fas fa-chevron-up me-1"), "Sembunyikan"])
+        else:
+            new_is_open.append(is_open if is_open is not None else False)
+            new_preview_style.append({"display": "none"} if is_open else {})
+            new_button_text.append([html.I(className="fas fa-chevron-up me-1"), "Sembunyikan"] if is_open else [html.I(className="fas fa-chevron-down me-1"), "Lihat selengkapnya"])
+
+    return new_is_open, new_preview_style, new_button_text
 
 # Submit new thread
 @app.callback(
