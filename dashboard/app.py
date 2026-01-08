@@ -11845,6 +11845,16 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
     if len(content) < 20:
         return dbc.Alert("Isi thread terlalu pendek (min 20 karakter)", color="warning"), dash.no_update
 
+    # Check for admin-like names - require password
+    import re
+    admin_name_pattern = re.compile(r'(admin|administrator|moderator|mod|pengelola|official)', re.IGNORECASE)
+    if admin_name_pattern.search(author):
+        if admin_pwd != ADMIN_PASSWORD:
+            return dbc.Alert([
+                html.I(className="fas fa-shield-alt me-2"),
+                "Nama mengandung kata 'admin/moderator'. Masukkan password admin untuk menggunakan nama ini."
+            ], color="warning"), dash.no_update
+
     # Check profanity
     title_check = check_profanity(title)
     content_check = check_profanity(content)
@@ -12153,6 +12163,13 @@ def submit_comment(n_clicks_list, author_list, content_list):
 
     if len(content) < 3:
         feedback_output[clicked_idx] = dbc.Alert("Komentar terlalu pendek!", color="warning", className="py-1 px-2 mb-0 small")
+        return comments_output, feedback_output, author_output, content_output
+
+    # Block admin-like names in comments (no password field available)
+    import re
+    admin_name_pattern = re.compile(r'(admin|administrator|moderator|mod|pengelola|official)', re.IGNORECASE)
+    if admin_name_pattern.search(author):
+        feedback_output[clicked_idx] = dbc.Alert("Nama 'admin/moderator' tidak diperbolehkan!", color="danger", className="py-1 px-2 mb-0 small")
         return comments_output, feedback_output, author_output, content_output
 
     # Check profanity
