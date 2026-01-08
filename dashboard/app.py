@@ -2985,6 +2985,18 @@ def get_thread_comments(thread_id: int):
     results = execute_query(query, (thread_id,), use_cache=False)
     return results or []
 
+def text_with_linebreaks(text: str) -> list:
+    """Convert text with newlines to list of html elements with Br tags"""
+    if not text:
+        return []
+    lines = text.split('\n')
+    result = []
+    for i, line in enumerate(lines):
+        if i > 0:
+            result.append(html.Br())
+        result.append(line)
+    return result
+
 def create_comment_card(comment: dict) -> html.Div:
     """Create a comment display"""
     time_str = comment['created_at'].strftime("%d %b %Y, %H:%M") if comment.get('created_at') else ""
@@ -2999,7 +3011,7 @@ def create_comment_card(comment: dict) -> html.Div:
                 html.Span(f" • {time_str}", className="text-muted ms-2"),
             ]),
         ], className="mb-1"),
-        html.P(comment['content'], className="mb-1 small", style={"whiteSpace": "pre-wrap", "marginLeft": "1.5rem"}),
+        html.Div(text_with_linebreaks(comment['content']), className="mb-1 small", style={"marginLeft": "1.5rem"}),
     ], className="border-start border-2 ps-2 mb-2", style={"borderColor": "#17a2b8" if is_admin else "#6c757d"})
 
 def create_thread_card(thread: dict) -> dbc.Card:
@@ -3048,14 +3060,17 @@ def create_thread_card(thread: dict) -> dbc.Card:
         html.Div([
             # Preview (always shown)
             html.Div([
-                html.Pre(content_full[:500] + "..." if is_long_content else content_full,
-                      className="mb-2 small forum-content",
-                      style={"whiteSpace": "pre-wrap", "fontFamily": "inherit", "margin": "0", "background": "transparent", "border": "none", "padding": "0"}),
+                html.Div(
+                    text_with_linebreaks(content_full[:500] + "..." if is_long_content else content_full),
+                    className="mb-2 small forum-content"
+                ),
             ], id={"type": "thread-preview", "index": thread['id']}),
             # Full content (hidden by default for long posts)
             dbc.Collapse([
-                html.Pre(content_full, className="mb-2 small forum-content",
-                      style={"whiteSpace": "pre-wrap", "fontFamily": "inherit", "margin": "0", "background": "transparent", "border": "none", "padding": "0"}),
+                html.Div(
+                    text_with_linebreaks(content_full),
+                    className="mb-2 small forum-content"
+                ),
             ], id={"type": "thread-full", "index": thread['id']}, is_open=False) if is_long_content else None,
             # Expand button
             dbc.Button([
