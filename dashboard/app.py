@@ -3186,8 +3186,8 @@ def create_discussion_page(stock_code: str = None):
                     # Admin section (hidden by default)
                     dbc.Collapse([
                         html.Hr(),
-                        dbc.Label("Admin Password", className="small text-warning"),
-                        dbc.Input(id="admin-password", type="password", placeholder="Password admin...", size="sm", className="mb-2"),
+                        dbc.Label("Admin Password", className="small text-warning fw-bold"),
+                        dbc.Input(id="admin-password", type="password", placeholder="Password admin...", size="sm", className="mb-3"),
                         dbc.Checklist(
                             id="admin-options",
                             options=[
@@ -3195,9 +3195,14 @@ def create_discussion_page(stock_code: str = None):
                                 {"label": " 🔒 Freeze (tidak bisa dikomentari)", "value": "frozen"},
                             ],
                             value=[],
-                            className="small"
+                            switch=True,
+                            className="mb-2",
+                            style={"fontSize": "0.95rem"}
                         ),
                     ], id="admin-section", is_open=False),
+
+                    # Warning for admin-like names
+                    html.Div(id="admin-name-warning", className="mb-2"),
 
                     html.Div(id="thread-submit-feedback", className="mb-3"),
 
@@ -11756,6 +11761,33 @@ def toggle_admin_section(n_clicks, is_open):
     if n_clicks:
         return not is_open
     return is_open
+
+
+# Check for admin-like names and show warning
+@app.callback(
+    [Output("admin-name-warning", "children"),
+     Output("admin-section", "is_open", allow_duplicate=True)],
+    [Input("thread-author", "value")],
+    [State("admin-section", "is_open")],
+    prevent_initial_call=True
+)
+def check_admin_name(author, is_section_open):
+    if not author:
+        return "", is_section_open
+
+    import re
+    admin_name_pattern = re.compile(r'(admin|administrator|moderator|mod|pengelola|official)', re.IGNORECASE)
+
+    if admin_name_pattern.search(author):
+        warning = dbc.Alert([
+            html.I(className="fas fa-shield-alt me-2"),
+            "Nama mengandung kata 'admin/moderator'. ",
+            html.Strong("Password admin wajib diisi!")
+        ], color="warning", className="py-2 mb-0")
+        return warning, True  # Auto-open admin section
+
+    return "", is_section_open
+
 
 # PDF upload status
 @app.callback(
