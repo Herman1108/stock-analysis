@@ -2858,15 +2858,18 @@ def create_thread_card(thread: dict) -> dbc.Card:
     is_provokatif = thread['flag'] == 'provokatif'
     is_collapsed = thread['collapsed']
 
-    # Card styling based on type
+    # Card styling based on type - using theme-aware borders
     if is_admin and is_pinned:
-        card_style = {"border": "2px solid #17a2b8", "backgroundColor": "rgba(23, 162, 184, 0.1)"}
+        card_class = "border-info"
+        card_style = {"borderWidth": "2px", "backgroundColor": "rgba(23, 162, 184, 0.1)"}
         badge = dbc.Badge("📌 ADMIN INSIGHT", color="info", className="me-2")
     elif is_provokatif:
-        card_style = {"border": "1px solid #ffc107", "opacity": "0.7"}
+        card_class = "border-warning"
+        card_style = {"opacity": "0.7"}
         badge = dbc.Badge("⚠️ Provokatif", color="warning", className="me-2")
     else:
-        card_style = {"border": "1px solid #444"}
+        card_class = "border-secondary"
+        card_style = {}
         badge = None
 
     # Time formatting
@@ -2884,7 +2887,7 @@ def create_thread_card(thread: dict) -> dbc.Card:
         # Header
         html.Div([
             badge,
-            html.Strong(thread['title'], className="text-white" if is_admin else ""),
+            html.Strong(thread['title']),
             html.Span(f" • {thread['stock_code']}", className="text-info ms-2") if thread['stock_code'] else None,
         ], className="mb-2"),
 
@@ -2928,11 +2931,11 @@ def create_thread_card(thread: dict) -> dbc.Card:
                 id={"type": "thread-collapse", "index": thread['id']},
                 is_open=False
             )
-        ], className="mb-3", style=card_style)
+        ], className=f"mb-3 {card_class}", style=card_style)
 
     return dbc.Card([
         dbc.CardBody(card_body)
-    ], className="mb-3", style=card_style)
+    ], className=f"mb-3 {card_class}", style=card_style)
 
 
 def create_discussion_page(stock_code: str = None):
@@ -3046,7 +3049,7 @@ def create_discussion_page(stock_code: str = None):
                         ], className="text-end"),
                     ]),
                 ])
-            ], className="mb-4", style={"border": "1px solid #17a2b8"})
+            ], className="mb-4 border-info")
         ], id="new-thread-form", is_open=False),
 
         # Admin Pinned Threads Section
