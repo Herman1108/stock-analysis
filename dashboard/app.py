@@ -481,6 +481,41 @@ PWA_INDEX_STRING = '''
                 0% { transform: rotate(0deg); }
                 100% { transform: rotate(360deg); }
             }
+            /* Light mode overrides */
+            body.light-mode {
+                background-color: #f8f9fa !important;
+                color: #212529 !important;
+            }
+            body.light-mode .card {
+                background-color: #ffffff !important;
+                color: #212529 !important;
+            }
+            body.light-mode .navbar {
+                background-color: #e9ecef !important;
+            }
+            body.light-mode .alert-secondary {
+                background-color: #e9ecef !important;
+                color: #212529 !important;
+                border-color: #dee2e6 !important;
+            }
+            body.light-mode .text-muted {
+                color: #6c757d !important;
+            }
+            body.light-mode .form-control,
+            body.light-mode .form-select {
+                background-color: #ffffff !important;
+                color: #212529 !important;
+                border-color: #ced4da !important;
+            }
+            body.light-mode .dropdown-menu {
+                background-color: #ffffff !important;
+            }
+            body.light-mode .dropdown-item {
+                color: #212529 !important;
+            }
+            body.light-mode .dropdown-item:hover {
+                background-color: #e9ecef !important;
+            }
         </style>
     </head>
     <body>
