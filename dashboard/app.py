@@ -14,7 +14,7 @@ sys.path.insert(0, app_dir)
 sys.path.insert(0, dashboard_dir)
 
 import dash
-from dash import dcc, html, dash_table, callback, Input, Output, State, no_update, ALL
+from dash import dcc, html, dash_table, callback, Input, Output, State, no_update, ALL, MATCH
 import dash_bootstrap_components as dbc
 import plotly.graph_objects as go
 import plotly.express as px
@@ -11804,50 +11804,24 @@ def update_pdf_status(filename):
         ])
     return ""
 
-# Expand/collapse thread content
+# Expand/collapse thread content - using MATCH for reliability
 @app.callback(
-    [Output({"type": "thread-full", "index": ALL}, "is_open"),
-     Output({"type": "thread-preview", "index": ALL}, "style"),
-     Output({"type": "expand-content", "index": ALL}, "children")],
-    [Input({"type": "expand-content", "index": ALL}, "n_clicks")],
-    [State({"type": "thread-full", "index": ALL}, "is_open")],
+    [Output({"type": "thread-full", "index": MATCH}, "is_open"),
+     Output({"type": "thread-preview", "index": MATCH}, "style"),
+     Output({"type": "expand-content", "index": MATCH}, "children")],
+    [Input({"type": "expand-content", "index": MATCH}, "n_clicks")],
+    [State({"type": "thread-full", "index": MATCH}, "is_open")],
     prevent_initial_call=True
 )
-def toggle_thread_content(n_clicks_list, is_open_list):
-    ctx = dash.callback_context
-    if not ctx.triggered or not any(n_clicks_list):
-        return [dash.no_update] * 3
+def toggle_thread_content(n_clicks, is_open):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
 
-    # Find which button was clicked
-    triggered_id = ctx.triggered[0]['prop_id']
-    import json
-    button_info = json.loads(triggered_id.split('.')[0])
-    clicked_index = button_info['index']
-
-    # Update states
-    new_is_open = []
-    new_preview_style = []
-    new_button_text = []
-
-    for i, (n_clicks, is_open) in enumerate(zip(n_clicks_list, is_open_list)):
-        # Check if this is the clicked button by comparing indices
-        # We need to find which index corresponds to clicked_index
-        if n_clicks and ctx.triggered[0]['prop_id'].startswith(f'{{"index":{clicked_index}'):
-            # Toggle this one
-            if is_open:
-                new_is_open.append(False)
-                new_preview_style.append({})
-                new_button_text.append([html.I(className="fas fa-chevron-down me-1"), "Lihat selengkapnya"])
-            else:
-                new_is_open.append(True)
-                new_preview_style.append({"display": "none"})
-                new_button_text.append([html.I(className="fas fa-chevron-up me-1"), "Sembunyikan"])
-        else:
-            new_is_open.append(is_open if is_open is not None else False)
-            new_preview_style.append({"display": "none"} if is_open else {})
-            new_button_text.append([html.I(className="fas fa-chevron-up me-1"), "Sembunyikan"] if is_open else [html.I(className="fas fa-chevron-down me-1"), "Lihat selengkapnya"])
-
-    return new_is_open, new_preview_style, new_button_text
+    # Toggle the state
+    if is_open:
+        return False, {}, [html.I(className="fas fa-chevron-down me-1"), "Lihat selengkapnya"]
+    else:
+        return True, {"display": "none"}, [html.I(className="fas fa-chevron-up me-1"), "Sembunyikan"]
 
 # Submit new thread
 @app.callback(
