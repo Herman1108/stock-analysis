@@ -2912,8 +2912,25 @@ def get_thread_comments(thread_id: int):
         WHERE thread_id = %s AND is_hidden = FALSE
         ORDER BY created_at ASC
     """
-    results = execute_query(query, (thread_id,))
+    results = execute_query(query, (thread_id,), use_cache=False)
     return results or []
+
+def create_comment_card(comment: dict) -> html.Div:
+    """Create a comment display"""
+    time_str = comment['created_at'].strftime("%d %b %Y, %H:%M") if comment.get('created_at') else ""
+    is_admin = comment.get('author_type') == 'admin'
+
+    return html.Div([
+        html.Div([
+            html.Small([
+                html.Span("👤 ", className="me-1"),
+                html.Strong(comment['author_name'], className="text-info" if is_admin else ""),
+                html.Span(" (Admin)" if is_admin else "", className="text-info small"),
+                html.Span(f" • {time_str}", className="text-muted ms-2"),
+            ]),
+        ], className="mb-1"),
+        html.P(comment['content'], className="mb-1 small", style={"whiteSpace": "pre-wrap", "marginLeft": "1.5rem"}),
+    ], className="border-start border-2 ps-2 mb-2", style={"borderColor": "#17a2b8" if is_admin else "#6c757d"})
 
 def create_thread_card(thread: dict) -> dbc.Card:
     """Create a card for a forum thread"""
@@ -3018,6 +3035,54 @@ def create_thread_card(thread: dict) -> dbc.Card:
                       id={"type": "delete-thread", "index": thread['id']},
                       color="danger", size="sm", outline=True),
         ], className="mt-2", id={"type": "admin-controls", "index": thread['id']}),
+
+        # Comment section
+        html.Div([
+            html.Hr(className="my-2"),
+            # Toggle comments button
+            dbc.Button([
+                html.I(className="fas fa-comments me-1"),
+                f"Komentar ({thread['comment_count']})"
+            ], id={"type": "toggle-comments", "index": thread['id']},
+               color="secondary", size="sm", outline=True, className="mb-2"),
+
+            # Comments container (collapsible)
+            dbc.Collapse([
+                # Existing comments
+                html.Div(
+                    id={"type": "comments-list", "index": thread['id']},
+                    children=[create_comment_card(c) for c in get_thread_comments(thread['id'])] or [
+                        html.Small("Belum ada komentar.", className="text-muted")
+                    ]
+                ),
+                # Add comment form (if not frozen)
+                html.Div([
+                    html.Hr(className="my-2"),
+                    dbc.InputGroup([
+                        dbc.Input(
+                            id={"type": "comment-author", "index": thread['id']},
+                            placeholder="Nama Anda",
+                            size="sm",
+                            style={"maxWidth": "150px"}
+                        ),
+                        dbc.Textarea(
+                            id={"type": "comment-content", "index": thread['id']},
+                            placeholder="Tulis komentar...",
+                            size="sm",
+                            rows=2,
+                            style={"flex": "1"}
+                        ),
+                        dbc.Button(
+                            html.I(className="fas fa-paper-plane"),
+                            id={"type": "submit-comment", "index": thread['id']},
+                            color="primary",
+                            size="sm"
+                        ),
+                    ], size="sm"),
+                    html.Div(id={"type": "comment-feedback", "index": thread['id']}, className="mt-1"),
+                ], className="mt-2") if not is_frozen else None,
+            ], id={"type": "comments-collapse", "index": thread['id']}, is_open=False),
+        ]) if not is_frozen else None,
     ]
 
     # Collapse wrapper for provokatif posts
@@ -12004,6 +12069,125 @@ def refresh_threads_after_admin_action(edit_open, delete_open, stock_code):
             dbc.Alert("Belum ada diskusi. Jadilah yang pertama!", color="secondary")
         ]
     return dash.no_update
+
+
+# ============================================================
+# FORUM COMMENTS
+# ============================================================
+
+# Toggle comments visibility
+@app.callback(
+    Output({"type": "comments-collapse", "index": ALL}, "is_open"),
+    [Input({"type": "toggle-comments", "index": ALL}, "n_clicks")],
+    [State({"type": "comments-collapse", "index": ALL}, "is_open")],
+    prevent_initial_call=True
+)
+def toggle_comments(n_clicks_list, is_open_list):
+    ctx = dash.callback_context
+    if not ctx.triggered or not any(n for n in n_clicks_list if n):
+        return [dash.no_update] * len(is_open_list)
+
+    # Find which button was clicked
+    trigger = ctx.triggered[0]['prop_id']
+    import json
+    button_info = json.loads(trigger.split('.')[0])
+    clicked_index = button_info['index']
+
+    # Toggle only the clicked one
+    new_states = []
+    for i, is_open in enumerate(is_open_list):
+        # Check if this corresponds to the clicked button
+        if trigger.startswith(f'{{"index":{clicked_index}'):
+            new_states.append(not is_open if is_open is not None else True)
+        else:
+            new_states.append(is_open if is_open is not None else False)
+
+    return new_states
+
+
+# Submit new comment
+@app.callback(
+    [Output({"type": "comments-list", "index": ALL}, "children"),
+     Output({"type": "comment-feedback", "index": ALL}, "children"),
+     Output({"type": "comment-author", "index": ALL}, "value"),
+     Output({"type": "comment-content", "index": ALL}, "value")],
+    [Input({"type": "submit-comment", "index": ALL}, "n_clicks")],
+    [State({"type": "comment-author", "index": ALL}, "value"),
+     State({"type": "comment-content", "index": ALL}, "value")],
+    prevent_initial_call=True
+)
+def submit_comment(n_clicks_list, author_list, content_list):
+    ctx = dash.callback_context
+    if not ctx.triggered or not any(n for n in n_clicks_list if n):
+        return [dash.no_update] * 4
+
+    # Find which button was clicked
+    trigger = ctx.triggered[0]['prop_id']
+    import json
+    button_info = json.loads(trigger.split('.')[0])
+    thread_id = button_info['index']
+
+    # Find the index in the lists
+    clicked_idx = None
+    for i, n in enumerate(n_clicks_list):
+        if n and trigger.startswith(f'{{"index":{thread_id}'):
+            clicked_idx = i
+            break
+
+    if clicked_idx is None:
+        return [dash.no_update] * 4
+
+    author = author_list[clicked_idx] if clicked_idx < len(author_list) else None
+    content = content_list[clicked_idx] if clicked_idx < len(content_list) else None
+
+    # Prepare output lists
+    comments_output = [dash.no_update] * len(n_clicks_list)
+    feedback_output = [dash.no_update] * len(n_clicks_list)
+    author_output = [dash.no_update] * len(n_clicks_list)
+    content_output = [dash.no_update] * len(n_clicks_list)
+
+    # Validate inputs
+    if not author or not content:
+        feedback_output[clicked_idx] = dbc.Alert("Nama dan komentar harus diisi!", color="warning", className="py-1 px-2 mb-0 small")
+        return comments_output, feedback_output, author_output, content_output
+
+    if len(content) < 3:
+        feedback_output[clicked_idx] = dbc.Alert("Komentar terlalu pendek!", color="warning", className="py-1 px-2 mb-0 small")
+        return comments_output, feedback_output, author_output, content_output
+
+    # Check profanity
+    content_check = check_profanity(content)
+    if content_check['level'] == 1:
+        feedback_output[clicked_idx] = dbc.Alert("Komentar mengandung kata tidak pantas!", color="danger", className="py-1 px-2 mb-0 small")
+        return comments_output, feedback_output, author_output, content_output
+
+    try:
+        # Insert comment
+        insert_query = """
+            INSERT INTO forum_comments (thread_id, author_name, content)
+            VALUES (%s, %s, %s)
+        """
+        execute_query(insert_query, (thread_id, author, content), fetch=False)
+
+        # Update comment count
+        update_query = "UPDATE forum_threads SET comment_count = comment_count + 1 WHERE id = %s"
+        execute_query(update_query, (thread_id,), fetch=False)
+
+        # Get updated comments list
+        comments = get_thread_comments(thread_id)
+        comments_output[clicked_idx] = [create_comment_card(c) for c in comments] if comments else [
+            html.Small("Belum ada komentar.", className="text-muted")
+        ]
+
+        # Clear form and show success
+        feedback_output[clicked_idx] = dbc.Alert("Komentar berhasil ditambahkan!", color="success", className="py-1 px-2 mb-0 small")
+        author_output[clicked_idx] = ""
+        content_output[clicked_idx] = ""
+
+    except Exception as e:
+        feedback_output[clicked_idx] = dbc.Alert(f"Error: {str(e)}", color="danger", className="py-1 px-2 mb-0 small")
+
+    return comments_output, feedback_output, author_output, content_output
 
 
 # ============================================================
