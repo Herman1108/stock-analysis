@@ -3221,17 +3221,18 @@ def create_discussion_page(stock_code: str = None):
             ], className="mb-4 border-info")
         ], id="new-thread-form", is_open=False),
 
-        # Admin Pinned Threads Section
+        # Admin Pinned Threads Section (always at top)
         html.Div([
             html.H6([
                 html.I(className="fas fa-thumbtack me-2 text-info"),
                 "Admin Insight"
-            ], className="mb-3 text-info") if admin_threads else None,
-            *[create_thread_card(t) for t in admin_threads]
-        ]) if admin_threads else None,
-
-        # Separator
-        html.Hr(className="my-4") if admin_threads else None,
+            ], className="mb-3 text-info", id="admin-insight-header"),
+            html.Div(
+                id="admin-threads-container",
+                children=[create_thread_card(t) for t in admin_threads] if admin_threads else []
+            ),
+            html.Hr(className="my-4", id="admin-separator")
+        ], id="admin-section-wrapper", style={} if admin_threads else {"display": "none"}),
 
         # Community Threads Section
         html.Div([
@@ -11851,6 +11852,8 @@ def toggle_thread_content(n_clicks_list, is_open_list):
 # Submit new thread
 @app.callback(
     [Output("thread-submit-feedback", "children"),
+     Output("admin-threads-container", "children"),
+     Output("admin-section-wrapper", "style"),
      Output("community-threads-container", "children")],
     [Input("submit-thread-btn", "n_clicks")],
     [State("thread-author", "value"),
@@ -11865,17 +11868,17 @@ def toggle_thread_content(n_clicks_list, is_open_list):
 )
 def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, admin_opts, pdf_contents, pdf_filename):
     if not n_clicks:
-        return "", dash.no_update
+        return "", dash.no_update, dash.no_update, dash.no_update
 
     # Validate inputs
     if not author or not title or not content:
-        return dbc.Alert("Semua field harus diisi!", color="danger"), dash.no_update
+        return dbc.Alert("Semua field harus diisi!", color="danger"), dash.no_update, dash.no_update, dash.no_update
 
     if len(title) < 5:
-        return dbc.Alert("Judul terlalu pendek (min 5 karakter)", color="warning"), dash.no_update
+        return dbc.Alert("Judul terlalu pendek (min 5 karakter)", color="warning"), dash.no_update, dash.no_update, dash.no_update
 
     if len(content) < 20:
-        return dbc.Alert("Isi thread terlalu pendek (min 20 karakter)", color="warning"), dash.no_update
+        return dbc.Alert("Isi thread terlalu pendek (min 20 karakter)", color="warning"), dash.no_update, dash.no_update, dash.no_update
 
     # Check for admin-like names - require password
     import re
@@ -11885,7 +11888,7 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
             return dbc.Alert([
                 html.I(className="fas fa-shield-alt me-2"),
                 "Nama mengandung kata 'admin/moderator'. Masukkan password admin untuk menggunakan nama ini."
-            ], color="warning"), dash.no_update
+            ], color="warning"), dash.no_update, dash.no_update, dash.no_update
 
     # Check profanity
     title_check = check_profanity(title)
@@ -11896,7 +11899,7 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
         return dbc.Alert([
             html.I(className="fas fa-ban me-2"),
             "Kalimat mengandung kata tidak pantas. Forum ini untuk diskusi investasi, bukan provokasi."
-        ], color="danger"), dash.no_update
+        ], color="danger"), dash.no_update, dash.no_update, dash.no_update
 
     # Determine if admin
     is_admin = admin_pwd == ADMIN_PASSWORD
@@ -11923,7 +11926,7 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
     if pdf_contents and pdf_filename:
         # Validate it's a PDF
         if not pdf_filename.lower().endswith('.pdf'):
-            return dbc.Alert("Hanya file PDF yang diperbolehkan!", color="danger"), dash.no_update
+            return dbc.Alert("Hanya file PDF yang diperbolehkan!", color="danger"), dash.no_update, dash.no_update, dash.no_update
         # Decode base64 content
         try:
             content_type, content_string = pdf_contents.split(',')
@@ -11931,9 +11934,9 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
             pdf_name = pdf_filename
             # Check size (max 5MB)
             if len(pdf_data) > 5 * 1024 * 1024:
-                return dbc.Alert("Ukuran file PDF maksimal 5MB!", color="danger"), dash.no_update
+                return dbc.Alert("Ukuran file PDF maksimal 5MB!", color="danger"), dash.no_update, dash.no_update, dash.no_update
         except Exception as e:
-            return dbc.Alert(f"Error membaca file PDF: {str(e)}", color="danger"), dash.no_update
+            return dbc.Alert(f"Error membaca file PDF: {str(e)}", color="danger"), dash.no_update, dash.no_update, dash.no_update
 
     # Insert to database
     try:
@@ -11952,6 +11955,7 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
 
         # Refresh threads
         threads = get_forum_threads(stock_val)
+        admin_threads = [t for t in threads if t['is_pinned'] and t['author_type'] == 'admin']
         community_threads = [t for t in threads if not (t['is_pinned'] and t['author_type'] == 'admin')]
 
         feedback_msg = "Thread berhasil dibuat!"
@@ -11959,16 +11963,23 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
             feedback_msg += f" (PDF: {pdf_name})"
         if flag == 'provokatif':
             feedback_msg += " (Ditandai sebagai provokatif - score awal -2)"
+        if is_pinned:
+            feedback_msg += " (Dipinned sebagai Admin Insight)"
+
+        # Admin section style - show if there are admin threads
+        admin_style = {} if admin_threads else {"display": "none"}
 
         return (
             dbc.Alert([html.I(className="fas fa-check me-2"), feedback_msg], color="success"),
+            [create_thread_card(t) for t in admin_threads],
+            admin_style,
             [create_thread_card(t) for t in community_threads] if community_threads else [
                 dbc.Alert("Belum ada diskusi.", color="secondary")
             ]
         )
 
     except Exception as e:
-        return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update
+        return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update, dash.no_update, dash.no_update
 
 
 # ============================================================
@@ -12096,7 +12107,9 @@ def handle_delete_thread(delete_clicks, cancel_click, confirm_click, is_open, pa
 
 # Refresh threads after edit/delete
 @app.callback(
-    Output("community-threads-container", "children", allow_duplicate=True),
+    [Output("admin-threads-container", "children", allow_duplicate=True),
+     Output("admin-section-wrapper", "style", allow_duplicate=True),
+     Output("community-threads-container", "children", allow_duplicate=True)],
     [Input("edit-thread-modal", "is_open"),
      Input("delete-thread-modal", "is_open")],
     [State("stock-selector", "value")],
@@ -12106,11 +12119,19 @@ def refresh_threads_after_admin_action(edit_open, delete_open, stock_code):
     # Only refresh when modals are closed (action completed)
     if not edit_open and not delete_open:
         threads = get_forum_threads(stock_code)
+        admin_threads = [t for t in threads if t['is_pinned'] and t['author_type'] == 'admin']
         community_threads = [t for t in threads if not (t['is_pinned'] and t['author_type'] == 'admin')]
-        return [create_thread_card(t) for t in community_threads] if community_threads else [
-            dbc.Alert("Belum ada diskusi. Jadilah yang pertama!", color="secondary")
-        ]
-    return dash.no_update
+
+        admin_style = {} if admin_threads else {"display": "none"}
+
+        return (
+            [create_thread_card(t) for t in admin_threads],
+            admin_style,
+            [create_thread_card(t) for t in community_threads] if community_threads else [
+                dbc.Alert("Belum ada diskusi. Jadilah yang pertama!", color="secondary")
+            ]
+        )
+    return dash.no_update, dash.no_update, dash.no_update
 
 
 # ============================================================
