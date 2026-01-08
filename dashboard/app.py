@@ -7,9 +7,11 @@ import os
 import base64
 import io
 
-# Add app directory to path
+# Add app and dashboard directories to path
 app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
+dashboard_dir = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, app_dir)
+sys.path.insert(0, dashboard_dir)
 
 import dash
 from dash import dcc, html, dash_table, callback, Input, Output, State, no_update
