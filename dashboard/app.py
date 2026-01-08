@@ -427,6 +427,14 @@ PWA_INDEX_STRING = '''
     <head>
         {%metas%}
         <title>{%title%}</title>
+        <!-- Google Analytics GA4 -->
+        <script async src="https://www.googletagmanager.com/gtag/js?id=G-JJ1WVNZLZE"></script>
+        <script>
+            window.dataLayer = window.dataLayer || [];
+            function gtag(){dataLayer.push(arguments);}
+            gtag('js', new Date());
+            gtag('config', 'G-JJ1WVNZLZE');
+        </script>
         <!-- PWA Manifest -->
         <link rel="manifest" href="/assets/manifest.json">
         <!-- Apple Touch Icons -->
