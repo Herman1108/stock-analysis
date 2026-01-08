@@ -5735,6 +5735,9 @@ def calculate_broker_streak_history(stock_code, broker_codes, days=30):
     Returns daily streak values (positive = accumulation, negative = distribution)
     Also includes net_lot for Stockbit-style units.
     """
+    # Debug log
+    print(f"[CALC_STREAK] Called with broker_codes: {broker_codes}")
+
     broker_df = get_broker_data(stock_code)
     if broker_df.empty:
         return pd.DataFrame(), pd.DataFrame()
@@ -5752,6 +5755,7 @@ def calculate_broker_streak_history(stock_code, broker_codes, days=30):
 
     streak_history = []
 
+    # IMPORTANT: Only process the passed broker_codes
     for broker in broker_codes:
         b_data = filtered_df[filtered_df['broker_code'] == broker].sort_values('date')
 
@@ -5841,16 +5845,28 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
                           'rgba(255, 182, 193, 0.4)', 'rgba(255, 140, 0, 0.4)']
         line_colors = ['#00ff88', '#00d4ff', '#ffe66d', '#4ecdc4', '#95e1d3']
 
-        # Calculate SELECTED brokers total net (LOT)
-        selected_net_df = streak_df.groupby('date').agg({
-            'net_lot': 'sum',
-            'streak': 'sum'
+        # Calculate SELECTED brokers total net (LOT) - DIRECT from raw broker data
+        # Get raw broker data and filter by selected brokers
+        broker_df_raw = get_broker_data(stock_code)
+        end_date = broker_df_raw['date'].max()
+        start_date = end_date - pd.Timedelta(days=days)
+        broker_df_filtered = broker_df_raw[
+            (broker_df_raw['date'] >= start_date) &
+            (broker_df_raw['broker_code'].isin(selected_brokers))
+        ]
+
+        # Calculate daily net lot for SELECTED brokers only
+        selected_net_df = broker_df_filtered.groupby('date').agg({
+            'net_lot': 'sum'
         }).reset_index().sort_values('date')
         selected_net_df['cumulative_lot'] = selected_net_df['net_lot'].cumsum()
 
         # Calculate ALL brokers cumulative (LOT)
         all_brokers_df = all_brokers_df.sort_values('date')
         all_brokers_df['cumulative_lot'] = all_brokers_df['net_lot'].cumsum()
+
+        # Debug: print selected brokers info
+        print(f"[STREAK CHART] Selected: {selected_brokers}, Rows: {len(broker_df_filtered)}, Cumulative: {selected_net_df['cumulative_lot'].iloc[-1] if not selected_net_df.empty else 0}")
 
         # Add broker streak areas
         for i, broker in enumerate(selected_brokers):
