@@ -53,6 +53,19 @@ def create_decision_panel(stock_code, unified_data):
         # Check for impulse signal
         is_impulse = impulse.get('impulse_detected', False)
 
+        # Get actual signal result (AKUMULASI/NETRAL/DISTRIBUSI)
+        overall_signal = summary.get('overall_signal', 'NETRAL')
+        signal_text = {
+            'AKUMULASI': 'AKUMULASI',
+            'DISTRIBUSI': 'DISTRIBUSI',
+            'NETRAL': 'NETRAL'
+        }.get(overall_signal, 'NETRAL')
+        signal_color = {
+            'AKUMULASI': 'success',
+            'DISTRIBUSI': 'danger',
+            'NETRAL': 'secondary'
+        }.get(overall_signal, 'secondary')
+
         # Sub-Guidance based on action (WAJIB ADA)
         sub_guidance = {
             'WAIT': f"Pasar belum siap. Range masih terlalu lebar ({range_pct:.1f}%). Prioritas: observasi, bukan eksekusi.",
@@ -118,17 +131,24 @@ def create_decision_panel(stock_code, unified_data):
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Mesin Analisis", className="text-muted d-block"),
+                                    html.Small("Sinyal Hari Ini", className="text-muted d-block"),
                                     html.H4(
-                                        "⚡ Momentum" if is_impulse else "📊 Akumulasi",
-                                        className=f"text-{'danger' if is_impulse else 'info'} mb-0",
+                                        f"⚡ {signal_text}" if is_impulse else f"📊 {signal_text}",
+                                        className=f"text-{'danger' if is_impulse else signal_color} mb-0",
                                         style={"fontSize": "16px"}
                                     ),
                                     html.Small(
-                                        "Pergerakan cepat & agresif" if is_impulse else "Fokus pergerakan broker",
+                                        "Pergerakan cepat & agresif" if is_impulse else (
+                                            "Pola pembelian terdeteksi" if overall_signal == 'AKUMULASI' else
+                                            "Pola penjualan terdeteksi" if overall_signal == 'DISTRIBUSI' else
+                                            "Belum ada pola jelas"
+                                        ),
                                         className="text-muted d-block"
                                     ),
-                                    html.Small("& distribusi volume", className="text-muted", style={"fontSize": "10px"}),
+                                    html.Small(
+                                        "via mesin Momentum" if is_impulse else "via mesin Akumulasi",
+                                        className="text-muted", style={"fontSize": "10px"}
+                                    ),
                                 ], className="text-center")
                             ], width=4),
                         ], className="mb-3"),
