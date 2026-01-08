@@ -136,6 +136,13 @@ TERM_DEFINITIONS = {
     # Volume Terms
     'rvol': 'Relative Volume - volume hari ini dibanding rata-rata. >1.5x = volume tinggi.',
     'volume_absorption': 'Volume tinggi tanpa pergerakan harga signifikan = ada yang menyerap.',
+
+    # Momentum/Impulse Terms (NEW)
+    'impulse': 'Pergerakan harga agresif tanpa fase akumulasi. Volume spike + breakout + CPR tinggi. Risiko tinggi.',
+    'momentum': 'Kecepatan pergerakan harga. Momentum tinggi = harga bergerak cepat dalam satu arah.',
+    'breakout': 'Harga menembus level resistance (naik) atau support (turun) dengan volume tinggi.',
+    'volume_spike': 'Lonjakan volume signifikan (>2x rata-rata). Bisa indikasi pergerakan besar akan terjadi.',
+    'near_impulse': 'Hampir memenuhi kriteria impulse (2 dari 3 kondisi). Pantau untuk konfirmasi.',
 }
 
 def with_tooltip(text: str, term_key: str, placement: str = 'top') -> html.Span:
@@ -6965,6 +6972,7 @@ def create_analysis_page(stock_code='CDIA'):
         validations = accum.get('validations', {})
         detection = accum.get('detection', {})
         markup_trigger = accum.get('markup_trigger', {})
+        impulse_signal = accum.get('impulse_signal', {})
 
         current_price = sr.get('current_price', 0) or accum.get('current_price', 0)
 
@@ -6986,7 +6994,17 @@ def create_analysis_page(stock_code='CDIA'):
     pass_rate = confidence.get('pass_rate', 0)
     action = decision.get('action', 'WAIT')
 
-    if overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
+    # Check impulse signal first (highest priority)
+    if impulse_signal.get('impulse_detected'):
+        imp_strength = impulse_signal.get('strength', 'WEAK')
+        vol_ratio = impulse_signal.get('metrics', {}).get('volume_ratio', 0)
+        insight_text = f"⚡ {stock_code} IMPULSE BREAKOUT ({imp_strength})! Volume {vol_ratio:.1f}x rata-rata. Momentum tinggi, risiko tinggi."
+        insight_color = "danger"
+    elif impulse_signal.get('near_impulse'):
+        conds_met = impulse_signal.get('trigger_conditions', {}).get('conditions_met', 0)
+        insight_text = f"👁️ {stock_code} hampir memenuhi kriteria impulse ({conds_met}/3). Pantau volume dan breakout."
+        insight_color = "info"
+    elif overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
         insight_text = f"🟢 {stock_code} menunjukkan pola akumulasi kuat ({pass_rate:.0f}% validasi lolos). Perhatikan zona entry."
         insight_color = "success"
     elif overall_signal == 'AKUMULASI':
@@ -7080,7 +7098,53 @@ def create_analysis_page(stock_code='CDIA'):
             ])
         ], className="mb-4", style={"border": f"3px solid var(--bs-{decision.get('color', 'secondary')})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
 
-        # === MARKUP TRIGGER ALERT (jika aktif) ===
+        # === IMPULSE/MOMENTUM ALERT (tertinggi prioritas) ===
+        dbc.Alert([
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.Span("⚡", style={"fontSize": "32px"}),
+                        html.Strong(f" MOMENTUM {impulse_signal.get('strength', '')} DETECTED", className="text-danger fs-5 ms-2"),
+                    ], className="d-flex align-items-center"),
+                    html.P([
+                        html.Strong("Pergerakan agresif tanpa fase akumulasi. "),
+                        "Volume ", html.Strong(f"{impulse_signal.get('metrics', {}).get('volume_ratio', 0):.1f}x"),
+                        " rata-rata dengan breakout ", html.Strong(f"+{impulse_signal.get('metrics', {}).get('breakout_pct', 0):.1f}%"),
+                        " dari high terdekat."
+                    ], className="mb-0 small"),
+                ], md=8),
+                dbc.Col([
+                    html.Div([
+                        html.Small("Trigger Conditions", className="text-muted d-block"),
+                        html.Div([
+                            dbc.Badge("✓ Vol 2x" if impulse_signal.get('metrics', {}).get('is_volume_spike') else "○ Vol 2x",
+                                      color="success" if impulse_signal.get('metrics', {}).get('is_volume_spike') else "secondary", className="me-1"),
+                            dbc.Badge("✓ Breakout" if impulse_signal.get('metrics', {}).get('is_breakout') else "○ Breakout",
+                                      color="success" if impulse_signal.get('metrics', {}).get('is_breakout') else "secondary", className="me-1"),
+                            dbc.Badge(f"✓ CPR {impulse_signal.get('metrics', {}).get('today_cpr_pct', 0):.0f}%" if impulse_signal.get('metrics', {}).get('is_cpr_bullish') else f"○ CPR {impulse_signal.get('metrics', {}).get('today_cpr_pct', 0):.0f}%",
+                                      color="success" if impulse_signal.get('metrics', {}).get('is_cpr_bullish') else "secondary"),
+                        ])
+                    ]),
+                ], md=4, className="text-end"),
+            ]),
+        ], color="danger", className="mb-3", style={"backgroundColor": "rgba(220,53,69,0.15)", "border": "2px solid #dc3545"})
+        if impulse_signal.get('impulse_detected') else html.Div(),
+
+        # === NEAR IMPULSE ALERT (hampir impulse) ===
+        dbc.Alert([
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.Span("👁️", style={"fontSize": "28px"}),
+                        html.Strong(f" HAMPIR IMPULSE ({impulse_signal.get('trigger_conditions', {}).get('conditions_met', 0)}/3 kondisi)", className="text-info fs-6 ms-2"),
+                    ], className="d-flex align-items-center"),
+                    html.P("Satu atau dua kondisi belum terpenuhi. Pantau volume dan price action besok.", className="mb-0 small"),
+                ], md=12),
+            ]),
+        ], color="info", className="mb-3", style={"backgroundColor": "rgba(23,162,184,0.15)", "border": "1px solid #17a2b8"})
+        if impulse_signal.get('near_impulse') and not impulse_signal.get('impulse_detected') else html.Div(),
+
+        # === MARKUP TRIGGER ALERT (setelah akumulasi) ===
         dbc.Alert([
             dbc.Row([
                 dbc.Col([
@@ -7102,7 +7166,104 @@ def create_analysis_page(stock_code='CDIA'):
                 ], md=3, className="text-end"),
             ]),
         ], color="warning", className="mb-3", style={"backgroundColor": "rgba(255,193,7,0.15)", "border": "2px solid #ffc107"})
-        if markup_trigger.get('markup_triggered') else html.Div(),
+        if markup_trigger.get('markup_triggered') and not impulse_signal.get('impulse_detected') else html.Div(),
+
+        # === EDUCATIONAL CARD - "Apa Artinya Ini?" ===
+        dbc.Card([
+            dbc.CardHeader([
+                html.Div([
+                    html.I(className="fas fa-graduation-cap me-2 text-info"),
+                    html.Strong("Apa Artinya Ini?", className="text-info"),
+                ], className="d-flex align-items-center")
+            ], className="bg-transparent border-info"),
+            dbc.CardBody([
+                # Dynamic educational content based on signal type
+                html.Div([
+                    # For Impulse/Momentum signal
+                    html.Div([
+                        html.P([
+                            html.Strong("⚡ Sinyal Momentum/Impulse", className="text-danger d-block mb-2"),
+                            html.Span(impulse_signal.get('educational', 'Tidak ada data'), className="text-light"),
+                        ], className="mb-3"),
+                        html.Div([
+                            html.Small("Perbedaan dengan Akumulasi:", className="text-warning d-block mb-2"),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Div([
+                                        html.Small("📊 Akumulasi", className="text-success d-block"),
+                                        html.Small("• Lambat, tersembunyi", className="text-muted d-block"),
+                                        html.Small("• Volume stabil", className="text-muted d-block"),
+                                        html.Small("• CPR rendah/sedang", className="text-muted d-block"),
+                                        html.Small("• Risiko lebih rendah", className="text-muted d-block"),
+                                    ])
+                                ], width=6),
+                                dbc.Col([
+                                    html.Div([
+                                        html.Small("⚡ Momentum", className="text-danger d-block"),
+                                        html.Small("• Cepat, agresif", className="text-muted d-block"),
+                                        html.Small("• Volume spike >2x", className="text-muted d-block"),
+                                        html.Small("• CPR tinggi >55%", className="text-muted d-block"),
+                                        html.Small("• Risiko tinggi", className="text-muted d-block"),
+                                    ])
+                                ], width=6),
+                            ])
+                        ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
+                    ]) if impulse_signal.get('impulse_detected') or impulse_signal.get('near_impulse') else html.Div(),
+
+                    # For Markup Trigger signal
+                    html.Div([
+                        html.P([
+                            html.Strong("🔥 Sinyal Markup Trigger", className="text-warning d-block mb-2"),
+                            "Harga mulai bergerak naik setelah periode akumulasi. ",
+                            "Ini adalah transisi dari fase pengumpulan ke fase markup. ",
+                            "Volume dan momentum mendukung pergerakan ini."
+                        ], className="mb-2"),
+                        html.Small([
+                            html.I(className="fas fa-lightbulb me-1 text-warning"),
+                            "Tips: Jangan kejar harga yang sudah breakout. Tunggu pullback ke zona entry atau kelola posisi yang sudah ada."
+                        ], className="text-muted")
+                    ]) if markup_trigger.get('markup_triggered') and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') else html.Div(),
+
+                    # For Accumulation signal
+                    html.Div([
+                        html.P([
+                            html.Strong("📊 Sinyal Akumulasi", className="text-success d-block mb-2"),
+                            summary.get('what_means', 'Ada pihak yang mengumpulkan saham secara bertahap. Pola ini biasanya muncul sebelum kenaikan, namun timing tidak bisa diprediksi.')
+                        ], className="mb-2"),
+                        html.Small([
+                            html.I(className="fas fa-lightbulb me-1 text-warning"),
+                            "Tips: Masuk bertahap di zona entry. Jangan all-in. Siapkan stop loss di bawah invalidation level."
+                        ], className="text-muted")
+                    ]) if overall_signal == 'AKUMULASI' and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') and not markup_trigger.get('markup_triggered') else html.Div(),
+
+                    # For Distribution signal
+                    html.Div([
+                        html.P([
+                            html.Strong("🔴 Sinyal Distribusi", className="text-danger d-block mb-2"),
+                            "Terdeteksi penjualan bertahap oleh pelaku besar. ",
+                            "Berhati-hati dengan posisi beli baru."
+                        ], className="mb-2"),
+                        html.Small([
+                            html.I(className="fas fa-exclamation-triangle me-1 text-danger"),
+                            "Warning: Hindari entry baru. Jika sudah punya posisi, pertimbangkan untuk mengurangi atau memasang stop loss ketat."
+                        ], className="text-muted")
+                    ]) if overall_signal == 'DISTRIBUSI' and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') else html.Div(),
+
+                    # For Neutral signal
+                    html.Div([
+                        html.P([
+                            html.Strong("⏳ Kondisi Netral", className="text-secondary d-block mb-2"),
+                            "Pola belum terbentuk jelas. Tidak ada sinyal kuat dari akumulasi maupun distribusi. ",
+                            "Pantau perkembangan untuk konfirmasi arah selanjutnya."
+                        ], className="mb-2"),
+                        html.Small([
+                            html.I(className="fas fa-clock me-1 text-info"),
+                            "Tips: Sabar menunggu sinyal yang lebih jelas. Pasar tidak selalu memberikan peluang setiap saat."
+                        ], className="text-muted")
+                    ]) if overall_signal == 'NETRAL' and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') and not markup_trigger.get('markup_triggered') else html.Div(),
+                ])
+            ], className="py-2")
+        ], color="dark", outline=True, className="mb-4", style={"borderColor": "var(--bs-info)"}),
 
         # === 2. QUICK SUMMARY FROM 3 SUBMENUS (Cards) ===
         dbc.Row([
