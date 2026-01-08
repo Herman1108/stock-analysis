@@ -5845,28 +5845,22 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
                           'rgba(255, 182, 193, 0.4)', 'rgba(255, 140, 0, 0.4)']
         line_colors = ['#00ff88', '#00d4ff', '#ffe66d', '#4ecdc4', '#95e1d3']
 
-        # Calculate SELECTED brokers total net (LOT) - DIRECT from raw broker data
-        # Get raw broker data and filter by selected brokers
-        broker_df_raw = get_broker_data(stock_code)
-        end_date = broker_df_raw['date'].max()
-        start_date = end_date - pd.Timedelta(days=days)
-        broker_df_filtered = broker_df_raw[
-            (broker_df_raw['date'] >= start_date) &
-            (broker_df_raw['broker_code'].isin(selected_brokers))
-        ]
-
-        # Calculate daily net lot for SELECTED brokers only
-        selected_net_df = broker_df_filtered.groupby('date').agg({
+        # Calculate SELECTED brokers total net (LOT) - USE streak_df which is already filtered
+        # This ensures we use the SAME data source as the area charts
+        selected_net_df = streak_df.groupby('date').agg({
             'net_lot': 'sum'
         }).reset_index().sort_values('date')
         selected_net_df['cumulative_lot'] = selected_net_df['net_lot'].cumsum()
+
+        # Debug: Log broker list
+        print(f"[STREAK CHART] Using streak_df for selected: {selected_brokers}")
 
         # Calculate ALL brokers cumulative (LOT)
         all_brokers_df = all_brokers_df.sort_values('date')
         all_brokers_df['cumulative_lot'] = all_brokers_df['net_lot'].cumsum()
 
         # Debug: print selected brokers info
-        print(f"[STREAK CHART] Selected: {selected_brokers}, Rows: {len(broker_df_filtered)}, Cumulative: {selected_net_df['cumulative_lot'].iloc[-1] if not selected_net_df.empty else 0}")
+        print(f"[STREAK CHART] Selected: {selected_brokers}, Cumulative: {selected_net_df['cumulative_lot'].iloc[-1] if not selected_net_df.empty else 0}")
 
         # Add broker streak areas
         for i, broker in enumerate(selected_brokers):
@@ -5989,8 +5983,19 @@ def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30
         selected_color = "success" if latest_selected > 0 else "danger" if latest_selected < 0 else "secondary"
         all_color = "success" if latest_all > 0 else "danger" if latest_all < 0 else "secondary"
 
+        # Debug: create timestamp to verify re-render
+        import datetime as dt_debug
+        debug_ts = dt_debug.datetime.now().strftime("%H:%M:%S")
+
         return html.Div([
             dcc.Graph(figure=fig, config={'displayModeBar': False}),
+            # Debug info - shows which brokers are actually used
+            html.Div([
+                html.Small([
+                    html.I(className="fas fa-bug me-1 text-warning"),
+                    f"DEBUG [{debug_ts}]: Brokers={selected_brokers}, Net={latest_selected/1e6:+,.2f}M"
+                ], className="text-warning", style={"fontSize": "9px"})
+            ], className="mb-1"),
             # Summary Section
             html.Div([
                 dbc.Row([
