@@ -5377,9 +5377,7 @@ def create_key_metrics_compact(stock_code='CDIA'):
 def create_broker_movement_alert(stock_code='CDIA'):
     """
     Section 3: Broker Movement Alert
-    - New accumulation signals
-    - New distribution warnings
-    - Biggest movement today vs yesterday
+    FINAL UI COPYWRITING V2 - Professional, edukatif, actionable
     """
     try:
         broker_df = get_broker_data(stock_code)
@@ -5387,7 +5385,7 @@ def create_broker_movement_alert(stock_code='CDIA'):
         if broker_df.empty:
             return dbc.Card([
                 dbc.CardHeader("🔔 Broker Movement Alert"),
-                dbc.CardBody(html.P("No data available", className="text-muted"))
+                dbc.CardBody(html.P("Data tidak tersedia", className="text-muted"))
             ], className="mb-3", color="dark")
 
         # Get last 2 days
@@ -5395,7 +5393,7 @@ def create_broker_movement_alert(stock_code='CDIA'):
         if len(dates_sorted) < 2:
             return dbc.Card([
                 dbc.CardHeader("🔔 Broker Movement Alert"),
-                dbc.CardBody(html.P("Need at least 2 days of data", className="text-muted"))
+                dbc.CardBody(html.P("Membutuhkan minimal 2 hari data", className="text-muted"))
             ], className="mb-3", color="dark")
 
         today = dates_sorted[0]
@@ -5432,93 +5430,113 @@ def create_broker_movement_alert(stock_code='CDIA'):
         # Find new distribution (was positive/neutral, now negative)
         new_dist = [m for m in movements if m['yesterday'] >= 0 and m['today'] < -1e9][:3]
 
-        # Build accumulation items - horizontal with better spacing
-        accum_items = [html.Span([
-            colored_broker(m['broker'], with_badge=True),
-            html.Span(f" +{m['today']/1e9:.1f}B", className="text-success fw-bold", style={"marginLeft": "4px"})
-        ], style={"display": "inline-flex", "alignItems": "center", "marginRight": "20px", "marginBottom": "4px"}) for m in new_accum] if new_accum else [html.Small("None today", className="text-muted")]
+        # Determine dominant movement for sub-headline
+        total_accum = sum(m['today'] for m in new_accum) if new_accum else 0
+        total_dist = abs(sum(m['today'] for m in new_dist)) if new_dist else 0
 
-        # Build distribution items - horizontal with better spacing
-        dist_items = [html.Span([
+        if total_dist > total_accum:
+            sub_headline = "Terjadi tekanan jual baru dari beberapa broker besar hari ini."
+            sub_color = "danger"
+        elif total_accum > total_dist:
+            sub_headline = "Terjadi pergeseran beli signifikan oleh broker tertentu hari ini."
+            sub_color = "success"
+        else:
+            sub_headline = "Pergerakan broker relatif seimbang hari ini."
+            sub_color = "secondary"
+
+        # Build accumulation items
+        accum_items = [html.Div([
             colored_broker(m['broker'], with_badge=True),
-            html.Span(f" {m['today']/1e9:.1f}B", className="text-danger fw-bold", style={"marginLeft": "4px"})
-        ], style={"display": "inline-flex", "alignItems": "center", "marginRight": "20px", "marginBottom": "4px"}) for m in new_dist] if new_dist else [html.Small("None today", className="text-muted")]
+            html.Span(f" +{m['today']/1e9:.1f}B", className="text-success fw-bold ms-2")
+        ], className="d-inline-flex align-items-center me-3 mb-1") for m in new_accum] if new_accum else [html.Small("Tidak ada hari ini", className="text-muted")]
+
+        # Build distribution items
+        dist_items = [html.Div([
+            colored_broker(m['broker'], with_badge=True),
+            html.Span(f" {m['today']/1e9:.1f}B", className="text-danger fw-bold ms-2")
+        ], className="d-inline-flex align-items-center me-3 mb-1") for m in new_dist] if new_dist else [html.Small("Tidak ada hari ini", className="text-muted")]
 
         return dbc.Card([
             dbc.CardHeader([
-                html.I(className="fas fa-bell me-2"),
-                html.Span("Broker Movement Alert", className="fw-bold")
+                html.Div([
+                    html.I(className="fas fa-bell me-2"),
+                    html.Span("Broker Movement Alert", className="fw-bold"),
+                ], className="d-flex align-items-center")
             ]),
             dbc.CardBody([
+                # Sub-headline dinamis
+                html.P([
+                    html.I(className=f"fas fa-{'exclamation-triangle' if sub_color == 'danger' else 'arrow-up' if sub_color == 'success' else 'minus-circle'} me-2 text-{sub_color}"),
+                    html.Span(sub_headline, className=f"text-{sub_color}")
+                ], className="mb-3", style={"fontSize": "14px"}),
+
                 dbc.Row([
                     # New Accumulation Signal
                     dbc.Col([
                         html.Div([
-                            html.Span([
-                                html.I(className="fas fa-arrow-up text-success me-1"),
+                            html.Div([
+                                html.Span("🟢", className="me-2"),
                                 html.Span("New Accumulation", className="text-success fw-bold")
-                            ]),
-                            html.Span(" : ", className="text-muted mx-2"),
-                            *accum_items
-                        ], className="p-2 rounded alert-box-success d-flex flex-wrap align-items-center")
-                    ], width=12, lg=6, className="mb-2 mb-lg-0"),
+                            ], className="mb-2"),
+                            html.Small("Broker yang sebelumnya netral atau jual, hari ini mulai membeli signifikan.",
+                                      className="text-muted d-block mb-2", style={"fontSize": "11px"}),
+                            html.Div(accum_items, className="d-flex flex-wrap"),
+                            html.Small([
+                                html.I(className="fas fa-lightbulb me-1"),
+                                "Ini sering menjadi sinyal awal perubahan arah."
+                            ], className="text-muted fst-italic d-block mt-2", style={"fontSize": "10px"})
+                        ], className="p-3 rounded alert-box-success h-100")
+                    ], width=12, lg=6, className="mb-3 mb-lg-0"),
+
                     # New Distribution Warning
                     dbc.Col([
                         html.Div([
-                            html.Span([
-                                html.I(className="fas fa-arrow-down text-danger me-1"),
+                            html.Div([
+                                html.Span("🔴", className="me-2"),
                                 html.Span("New Distribution", className="text-danger fw-bold")
-                            ]),
-                            html.Span(" : ", className="text-muted mx-2"),
-                            *dist_items
-                        ], className="p-2 rounded alert-box-danger d-flex flex-wrap align-items-center")
+                            ], className="mb-2"),
+                            html.Small("Broker yang sebelumnya netral atau beli, hari ini mulai jual besar.",
+                                      className="text-muted d-block mb-2", style={"fontSize": "11px"}),
+                            html.Div(dist_items, className="d-flex flex-wrap"),
+                            html.Small([
+                                html.I(className="fas fa-exclamation-circle me-1"),
+                                "Jika terjadi beruntun, risiko tekanan harga lanjutan meningkat."
+                            ], className="text-muted fst-italic d-block mt-2", style={"fontSize": "10px"})
+                        ], className="p-3 rounded alert-box-danger h-100")
                     ], width=12, lg=6),
                 ], className="mb-3"),
 
-                # Biggest Movement Table - dengan warna broker berdasarkan tipe
-                html.Small("Biggest Movement Today vs Yesterday", className="text-muted fw-bold mb-2 d-block"),
-                html.Table([
-                    html.Thead(html.Tr([
-                        html.Th("Broker", className="table-header"),
-                        html.Th("Tipe", className="table-header"),
-                        html.Th("Today", className="table-header"),
-                        html.Th("Yest", className="table-header"),
-                        html.Th("Change", className="table-header"),
-                    ])),
-                    html.Tbody([
-                        html.Tr([
-                            html.Td(colored_broker(m['broker'], with_badge=True), className="table-cell"),
-                            html.Td(html.Span(m['type'][:6], className=f"broker-{get_broker_type(m['broker']).lower()}"), className="table-cell"),
-                            html.Td(f"{m['today']/1e9:+.1f}B", className="table-cell"),
-                            html.Td(f"{m['yesterday']/1e9:+.1f}B", className="table-cell"),
-                            html.Td(html.Span(f"{m['change']/1e9:+.1f}B", className="text-success" if m['change'] > 0 else "text-danger"), className="table-cell"),
-                        ]) for m in top_movements
-                    ])
-                ], className="table table-sm", style={'width': '100%'}),
-
-                html.Hr(className="my-2"),
-
-                # Penjelasan Section
+                # Biggest Movement Section
                 html.Div([
+                    html.Div([
+                        html.Span("📊", className="me-2"),
+                        html.Span("Perubahan Terbesar Hari Ini vs Kemarin", className="fw-bold")
+                    ], className="mb-2"),
+                    html.Small("Broker dengan perubahan perilaku paling signifikan.",
+                              className="text-muted d-block mb-2", style={"fontSize": "11px"}),
+                    html.Table([
+                        html.Thead(html.Tr([
+                            html.Th("Broker", className="table-header"),
+                            html.Th("Tipe", className="table-header"),
+                            html.Th([html.Span("Today", title="Net value hari ini")], className="table-header"),
+                            html.Th([html.Span("Yest", title="Net value kemarin")], className="table-header"),
+                            html.Th([html.Span("Change", title="Perubahan sikap broker")], className="table-header"),
+                        ])),
+                        html.Tbody([
+                            html.Tr([
+                                html.Td(colored_broker(m['broker'], with_badge=True), className="table-cell"),
+                                html.Td(html.Span(m['type'][:6], className=f"broker-{get_broker_type(m['broker']).lower()}"), className="table-cell"),
+                                html.Td(f"{m['today']/1e9:+.1f}B", className="table-cell"),
+                                html.Td(f"{m['yesterday']/1e9:+.1f}B", className="table-cell"),
+                                html.Td(html.Span(f"{m['change']/1e9:+.1f}B", className="text-success fw-bold" if m['change'] > 0 else "text-danger fw-bold"), className="table-cell"),
+                            ]) for m in top_movements
+                        ])
+                    ], className="table table-sm", style={'width': '100%'}),
                     html.Small([
                         html.I(className="fas fa-info-circle me-1"),
-                        html.Strong("Cara Baca: ")
-                    ], className="text-info"),
-                    html.Br(),
-                    html.Small([
-                        html.Strong("• New Accumulation: "), "Broker yang kemarin jual/netral, HARI INI mulai beli besar (>1B). ",
-                        html.Span("Sinyal awal bullish!", className="text-success"),
-                        html.Br(),
-                        html.Strong("• New Distribution: "), "Broker yang kemarin beli/netral, HARI INI mulai jual besar. ",
-                        html.Span("Sinyal awal bearish!", className="text-danger"),
-                        html.Br(),
-                        html.Strong("• Biggest Movement: "), "Broker dengan perubahan TERBESAR dari kemarin ke hari ini.",
-                        html.Br(),
-                        html.Strong("• Today vs Yest: "), "Bandingkan net hari ini vs kemarin untuk lihat perubahan perilaku",
-                        html.Br(),
-                        html.Strong("💡 Tip: "), "Perhatikan jika broker asing/sensitif muncul di New Accumulation!"
-                    ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded info-box")
+                        "Fokus pada broker dengan perubahan ekstrem, karena ini biasanya bukan transaksi acak."
+                    ], className="text-muted fst-italic", style={"fontSize": "10px"})
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.03)"}),
             ])
         ], className="mb-3")
     except Exception as e:
@@ -5829,68 +5847,122 @@ def create_broker_watchlist(stock_code='CDIA'):
                     # Accumulation Streak
                     dbc.Col([
                         html.Div([
-                            html.Small("🔥 Accumulation Streak", className="text-success fw-bold mb-2 d-block"),
-                            *accum_items
+                            html.Div([
+                                html.Span("🔥", className="me-2"),
+                                html.Span("Accumulation Streak", className="text-success fw-bold")
+                            ], className="mb-2"),
+                            html.Small("Broker yang membeli berturut-turut selama beberapa hari.",
+                                      className="text-muted d-block mb-2", style={"fontSize": "10px"}),
+                            *accum_items,
+                            html.Small([
+                                html.I(className="fas fa-lightbulb me-1"),
+                                "Streak panjang + net besar = conviction kuat. Ikuti broker, bukan candle 😉"
+                            ], className="text-success fst-italic d-block mt-2", style={"fontSize": "9px"})
                         ], className="p-2 rounded h-100 alert-box-success")
                     ], xs=12, md=4, className="mb-2 mb-md-0"),
 
                     # Distribution Warning
                     dbc.Col([
                         html.Div([
-                            html.Small("⚠️ Distribution Warning", className="text-danger fw-bold mb-2 d-block"),
-                            *dist_items
+                            html.Div([
+                                html.Span("⚠️", className="me-2"),
+                                html.Span("Distribution Warning", className="text-danger fw-bold")
+                            ], className="mb-2"),
+                            html.Small("Broker yang jual berturut-turut, indikasi pelepasan posisi.",
+                                      className="text-muted d-block mb-2", style={"fontSize": "10px"}),
+                            *dist_items,
+                            html.Small([
+                                html.I(className="fas fa-exclamation-circle me-1"),
+                                "Semakin panjang streak jual, semakin besar risiko supply lanjutan."
+                            ], className="text-danger fst-italic d-block mt-2", style={"fontSize": "9px"})
                         ], className="p-2 rounded h-100 alert-box-danger")
                     ], xs=12, md=4, className="mb-2 mb-md-0"),
 
                     # Floating Loss
                     dbc.Col([
                         html.Div([
-                            html.Small("💸 Floating Loss", className="text-warning fw-bold mb-2 d-block"),
-                            *float_items
+                            html.Div([
+                                html.Span("📉", className="me-2"),
+                                html.Span("Floating Loss", className="text-warning fw-bold")
+                            ], className="mb-2"),
+                            html.Small("Broker dengan avg buy lebih tinggi dari harga sekarang.",
+                                      className="text-muted d-block mb-2", style={"fontSize": "10px"}),
+                            *float_items,
+                            html.Small([
+                                html.I(className="fas fa-info-circle me-1"),
+                                "Area avg buy mereka sering jadi zona reaksi harga."
+                            ], className="text-warning fst-italic d-block mt-2", style={"fontSize": "9px"})
                         ], className="p-2 rounded h-100 alert-box-warning")
                     ], xs=12, md=4),
                 ]),
 
-                html.Hr(className="my-2"),
+                html.Hr(className="my-3"),
 
-                # Penjelasan Section
+                # Why This Matters Section
                 html.Div([
-                    html.Small([
-                        html.I(className="fas fa-info-circle me-1"),
-                        html.Strong("Cara Baca: ")
-                    ], className="text-info"),
-                    html.Br(),
-                    html.Small([
-                        html.Strong("🔥 ACCUMULATION STREAK:"),
-                        html.Br(),
-                        "Broker yang BELI berturut-turut ≥2 hari. Badge menunjukkan jumlah hari streak.",
-                        html.Br(),
-                        html.Span("Streak panjang + Net besar = broker punya conviction kuat. Ikuti mereka!", className="text-success"),
-                        html.Br(), html.Br(),
-                        html.Strong("⚠️ DISTRIBUTION WARNING:"),
-                        html.Br(),
-                        "Broker yang JUAL berturut-turut ≥2 hari. ",
-                        html.Span("Hati-hati jika broker besar/sensitif muncul di sini!", className="text-danger"),
-                        html.Br(), html.Br(),
-                        html.Strong("💸 FLOATING LOSS:"),
-                        html.Br(),
-                        "Broker yang Avg Buy-nya >5% di atas harga sekarang (floating rugi).",
-                        html.Br(),
-                        "Implikasi: Mungkin mereka akan DEFEND di level Avg Buy atau CUT LOSS.",
-                        html.Br(),
-                        "• Defend = support sementara di Avg Buy mereka",
-                        html.Br(),
-                        "• Cut Loss = tekanan jual tambahan",
-                        html.Br(), html.Br(),
-                        html.Strong("💡 Strategi: "),
-                        html.Br(),
-                        "• Ikuti broker dengan Accum Streak panjang",
-                        html.Br(),
-                        "• Hindari/jual jika banyak Dist Warning dari broker besar",
-                        html.Br(),
-                        "• Perhatikan level Avg Buy broker Float Loss sebagai potensi support/resistance"
-                    ], className="text-muted", style={"fontSize": "10px"})
-                ], className="p-2 rounded info-box")
+                    html.Div([
+                        html.I(className="fas fa-question-circle me-2 text-info"),
+                        html.Strong("Cara Membaca Broker Movement", className="text-info")
+                    ], className="mb-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("New Accumulation → ", className="text-success"),
+                                "Awal niat beli"
+                            ], className="d-block mb-1"),
+                            html.Small([
+                                html.Strong("Distribution Warning → ", className="text-danger"),
+                                "Pelepasan posisi"
+                            ], className="d-block mb-1"),
+                        ], width=6),
+                        dbc.Col([
+                            html.Small([
+                                html.Strong("Accumulation Streak → ", className="text-success"),
+                                "Keyakinan broker"
+                            ], className="d-block mb-1"),
+                            html.Small([
+                                html.Strong("Floating Loss → ", className="text-warning"),
+                                "Area potensial support/tekanan"
+                            ], className="d-block mb-1"),
+                        ], width=6),
+                    ]),
+                    html.Div([
+                        html.Small([
+                            html.I(className="fas fa-quote-left me-1 text-muted"),
+                            html.Span("Harga bisa bohong. Broker jarang.", className="fst-italic text-muted")
+                        ], style={"fontSize": "11px"})
+                    ], className="mt-2 text-center")
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(23, 162, 184, 0.1)"}),
+
+                html.Hr(className="my-3"),
+
+                # Strategi Praktis Section
+                html.Div([
+                    html.Div([
+                        html.I(className="fas fa-bullseye me-2 text-warning"),
+                        html.Strong("Strategi Praktis untuk Trader", className="text-warning")
+                    ], className="mb-2"),
+                    html.Ul([
+                        html.Li(html.Small("Ikuti Accumulation Streak terpanjang, bukan yang cuma 1 hari.")),
+                        html.Li(html.Small([
+                            "Waspadai saham jika: ",
+                            html.Span("banyak broker masuk Distribution Warning ", className="text-danger"),
+                            "atau ",
+                            html.Span("broker besar muncul di Floating Loss", className="text-warning")
+                        ])),
+                        html.Li(html.Small("Gunakan avg buy broker sebagai support/resistance dinamis")),
+                        html.Li(html.Small([
+                            html.Strong("Jangan melawan: "),
+                            "distribusi beruntun + volume naik = no hero trade"
+                        ])),
+                    ], className="mb-2 ps-3", style={"fontSize": "11px"}),
+                    html.Div([
+                        html.Small([
+                            html.I(className="fas fa-shield-alt me-1"),
+                            "Trader ritel selamat bukan karena cepat, tapi karena tahu kapan tidak ikut."
+                        ], className="text-muted fst-italic", style={"fontSize": "10px"})
+                    ], className="text-center")
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(255, 193, 7, 0.1)"})
             ])
         ], className="mb-3")
     except Exception as e:
