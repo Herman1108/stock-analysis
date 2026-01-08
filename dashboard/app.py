@@ -2490,6 +2490,7 @@ def create_navbar():
                 dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
                 dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
                 dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
+                dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white me-1"), href="/discussion")),
                 dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
             ], className="ms-auto d-none d-lg-flex", navbar=True),
 
@@ -2499,6 +2500,7 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/dashboard", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/analysis", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white mb-1 w-100"), href="/discussion", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/upload", refresh=True)),
                 ], className="p-2 flex-column d-lg-none", navbar=True, style={"backgroundColor": "#fd7e14", "borderRadius": "8px"}),
                 id="navbar-collapse",
@@ -2779,6 +2781,304 @@ def create_landing_page():
             ], className="mb-4")
         ], fluid=True)
     ])
+
+# ============================================================
+# PAGE: DISCUSSION FORUM
+# ============================================================
+
+ADMIN_PASSWORD = "12153800"  # Same as upload password for admin actions
+
+def get_profanity_words():
+    """Get profanity words from database"""
+    query = "SELECT keyword, level FROM forum_profanity ORDER BY level"
+    results = execute_query(query)
+    words = {1: [], 2: [], 3: []}
+    if results:
+        for r in results:
+            words[r['level']].append(r['keyword'].lower())
+    return words
+
+def check_profanity(text: str) -> dict:
+    """Check text for profanity - returns level and matched words"""
+    text_lower = text.lower()
+    words = get_profanity_words()
+
+    # Check level 1 (hard block)
+    for word in words[1]:
+        if word in text_lower:
+            return {'level': 1, 'word': word, 'action': 'block'}
+
+    # Check level 2 (provokatif)
+    for word in words[2]:
+        if word in text_lower:
+            return {'level': 2, 'word': word, 'action': 'flag'}
+
+    # Check level 3 (warning)
+    for word in words[3]:
+        if word in text_lower:
+            return {'level': 3, 'word': word, 'action': 'warning'}
+
+    return {'level': 0, 'word': None, 'action': 'ok'}
+
+def get_forum_threads(stock_code: str = None, limit: int = 50):
+    """Get forum threads, pinned first, then by score"""
+    if stock_code:
+        query = """
+            SELECT * FROM forum_threads
+            WHERE (stock_code = %s OR stock_code IS NULL) AND is_hidden = FALSE
+            ORDER BY is_pinned DESC, score DESC, created_at DESC
+            LIMIT %s
+        """
+        results = execute_query(query, (stock_code, limit))
+    else:
+        query = """
+            SELECT * FROM forum_threads
+            WHERE is_hidden = FALSE
+            ORDER BY is_pinned DESC, score DESC, created_at DESC
+            LIMIT %s
+        """
+        results = execute_query(query, (limit,))
+    return results or []
+
+def get_thread_comments(thread_id: int):
+    """Get comments for a thread"""
+    query = """
+        SELECT * FROM forum_comments
+        WHERE thread_id = %s AND is_hidden = FALSE
+        ORDER BY created_at ASC
+    """
+    results = execute_query(query, (thread_id,))
+    return results or []
+
+def create_thread_card(thread: dict) -> dbc.Card:
+    """Create a card for a forum thread"""
+    is_admin = thread['author_type'] == 'admin'
+    is_pinned = thread['is_pinned']
+    is_frozen = thread['is_frozen']
+    is_provokatif = thread['flag'] == 'provokatif'
+    is_collapsed = thread['collapsed']
+
+    # Card styling based on type
+    if is_admin and is_pinned:
+        card_style = {"border": "2px solid #17a2b8", "backgroundColor": "rgba(23, 162, 184, 0.1)"}
+        badge = dbc.Badge("📌 ADMIN INSIGHT", color="info", className="me-2")
+    elif is_provokatif:
+        card_style = {"border": "1px solid #ffc107", "opacity": "0.7"}
+        badge = dbc.Badge("⚠️ Provokatif", color="warning", className="me-2")
+    else:
+        card_style = {"border": "1px solid #444"}
+        badge = None
+
+    # Time formatting
+    created = thread['created_at']
+    time_str = created.strftime("%d %b %Y, %H:%M") if created else ""
+
+    # Score display
+    score = thread['score']
+    score_color = "success" if score > 0 else "danger" if score < 0 else "secondary"
+
+    # Content - collapse if flagged
+    content_display = thread['content'][:300] + "..." if len(thread['content']) > 300 else thread['content']
+
+    card_body = [
+        # Header
+        html.Div([
+            badge,
+            html.Strong(thread['title'], className="text-white" if is_admin else ""),
+            html.Span(f" • {thread['stock_code']}", className="text-info ms-2") if thread['stock_code'] else None,
+        ], className="mb-2"),
+
+        # Content
+        html.Div([
+            html.P(content_display, className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
+        ], id={"type": "thread-content", "index": thread['id']}),
+
+        # Footer
+        html.Div([
+            html.Small([
+                html.Span(f"👤 {thread['author_name']}", className="me-3"),
+                html.Span(f"🕐 {time_str}", className="me-3 text-muted"),
+                html.Span(f"💬 {thread['comment_count']}", className="me-3"),
+                html.Span(f"👁 {thread['view_count']}", className="me-3 text-muted"),
+            ]),
+            # Score & Reactions
+            html.Div([
+                dbc.Badge(f"Score: {score:+d}", color=score_color, className="me-2"),
+                dbc.Button("👍", id={"type": "upvote", "index": thread['id']}, color="success", size="sm", outline=True, className="me-1"),
+                dbc.Button("⚠️", id={"type": "warn-vote", "index": thread['id']}, color="warning", size="sm", outline=True, className="me-1"),
+                dbc.Button("👎", id={"type": "downvote", "index": thread['id']}, color="danger", size="sm", outline=True, className="me-1"),
+            ], className="mt-2") if not is_frozen else None,
+        ], className="d-flex justify-content-between align-items-center flex-wrap"),
+
+        # Frozen notice
+        html.Div([
+            html.Small("🔒 Thread ini dikunci oleh Admin", className="text-muted fst-italic")
+        ], className="mt-2") if is_frozen else None,
+    ]
+
+    # Collapse wrapper for provokatif posts
+    if is_collapsed or is_provokatif:
+        return dbc.Card([
+            dbc.CardHeader([
+                html.Span("⚠️ Post ini mengandung bahasa provokatif. ", className="text-warning"),
+                dbc.Button("Lihat", id={"type": "expand-thread", "index": thread['id']}, size="sm", color="link")
+            ]),
+            dbc.Collapse(
+                dbc.CardBody(card_body),
+                id={"type": "thread-collapse", "index": thread['id']},
+                is_open=False
+            )
+        ], className="mb-3", style=card_style)
+
+    return dbc.Card([
+        dbc.CardBody(card_body)
+    ], className="mb-3", style=card_style)
+
+
+def create_discussion_page(stock_code: str = None):
+    """Create discussion forum page"""
+    threads = get_forum_threads(stock_code)
+
+    # Separate admin pinned vs community
+    admin_threads = [t for t in threads if t['is_pinned'] and t['author_type'] == 'admin']
+    community_threads = [t for t in threads if not (t['is_pinned'] and t['author_type'] == 'admin')]
+
+    return html.Div([
+        # Header
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-comments me-2"),
+                "Discussion Forum",
+                html.Span(f" - {stock_code}", className="text-info") if stock_code else ""
+            ], className="mb-0"),
+        ], className="mb-3"),
+
+        # Guidelines Banner
+        dbc.Alert([
+            html.Div([
+                html.I(className="fas fa-info-circle me-2"),
+                html.Strong("Panduan Diskusi"),
+            ], className="mb-2"),
+            html.Small([
+                "Thread teratas adalah pandangan admin sebagai konteks. ",
+                "Diskusi di bawah bebas, tapi gunakan bahasa rasional & berbasis data. ",
+                "Post provokatif akan di-collapse dan mendapat score negatif."
+            ], className="text-muted")
+        ], color="info", className="mb-3"),
+
+        # Stock Filter
+        dbc.Row([
+            dbc.Col([
+                dbc.InputGroup([
+                    dbc.InputGroupText(html.I(className="fas fa-filter")),
+                    dbc.Select(
+                        id="forum-stock-filter",
+                        options=[{"label": "Semua Saham", "value": ""}] +
+                                [{"label": s, "value": s} for s in get_available_stocks()],
+                        value=stock_code or "",
+                        style={"maxWidth": "200px"}
+                    ),
+                ], size="sm")
+            ], md=4),
+            dbc.Col([
+                dbc.Button([
+                    html.I(className="fas fa-plus me-2"),
+                    "Buat Thread Baru"
+                ], id="new-thread-btn", color="primary", size="sm")
+            ], md=8, className="text-end"),
+        ], className="mb-4"),
+
+        # New Thread Form (hidden by default)
+        dbc.Collapse([
+            dbc.Card([
+                dbc.CardHeader([
+                    html.I(className="fas fa-edit me-2"),
+                    "Buat Thread Baru"
+                ]),
+                dbc.CardBody([
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Label("Nama (akan ditampilkan)", className="small"),
+                            dbc.Input(id="thread-author", placeholder="Nama Anda", size="sm"),
+                        ], md=6),
+                        dbc.Col([
+                            dbc.Label("Kode Saham (opsional)", className="small"),
+                            dbc.Select(
+                                id="thread-stock",
+                                options=[{"label": "Umum (tidak spesifik)", "value": ""}] +
+                                        [{"label": s, "value": s} for s in get_available_stocks()],
+                                value="",
+                            ),
+                        ], md=6),
+                    ], className="mb-3"),
+                    dbc.Label("Judul Thread", className="small"),
+                    dbc.Input(id="thread-title", placeholder="Judul diskusi...", className="mb-3"),
+                    dbc.Label("Isi Thread", className="small"),
+                    dbc.Textarea(id="thread-content", placeholder="Tulis pendapat atau analisa Anda...", rows=5, className="mb-3"),
+
+                    # Admin section (hidden by default)
+                    dbc.Collapse([
+                        html.Hr(),
+                        dbc.Label("Admin Password", className="small text-warning"),
+                        dbc.Input(id="admin-password", type="password", placeholder="Password admin...", size="sm", className="mb-2"),
+                        dbc.Checklist(
+                            id="admin-options",
+                            options=[
+                                {"label": " 📌 Pin sebagai Admin Insight", "value": "pinned"},
+                                {"label": " 🔒 Freeze (tidak bisa dikomentari)", "value": "frozen"},
+                            ],
+                            value=[],
+                            className="small"
+                        ),
+                    ], id="admin-section", is_open=False),
+
+                    html.Div(id="thread-submit-feedback", className="mb-3"),
+
+                    dbc.Row([
+                        dbc.Col([
+                            dbc.Button("Saya Admin", id="toggle-admin-btn", color="link", size="sm"),
+                        ]),
+                        dbc.Col([
+                            dbc.Button([
+                                html.I(className="fas fa-paper-plane me-2"),
+                                "Kirim Thread"
+                            ], id="submit-thread-btn", color="success"),
+                        ], className="text-end"),
+                    ]),
+                ])
+            ], className="mb-4", style={"border": "1px solid #17a2b8"})
+        ], id="new-thread-form", is_open=False),
+
+        # Admin Pinned Threads Section
+        html.Div([
+            html.H6([
+                html.I(className="fas fa-thumbtack me-2 text-info"),
+                "Admin Insight"
+            ], className="mb-3 text-info") if admin_threads else None,
+            *[create_thread_card(t) for t in admin_threads]
+        ]) if admin_threads else None,
+
+        # Separator
+        html.Hr(className="my-4") if admin_threads else None,
+
+        # Community Threads Section
+        html.Div([
+            html.H6([
+                html.I(className="fas fa-users me-2"),
+                "Community Discussion"
+            ], className="mb-3"),
+            html.Div(
+                id="community-threads-container",
+                children=[create_thread_card(t) for t in community_threads] if community_threads else [
+                    dbc.Alert("Belum ada diskusi. Jadilah yang pertama!", color="secondary")
+                ]
+            )
+        ]),
+
+        # Hidden store for thread data
+        dcc.Store(id="forum-data-store"),
+    ])
+
 
 # ============================================================
 # PAGE: UPLOAD DATA (Password Protected)
@@ -10639,6 +10939,8 @@ def display_page(pathname, selected_stock):
         return create_position_page(selected_stock)
     elif pathname == '/upload':
         return create_upload_page()
+    elif pathname == '/discussion':
+        return create_discussion_page()
     elif pathname == '/movement':
         return create_broker_movement_page(selected_stock)
     elif pathname == '/sensitive':
@@ -10958,6 +11260,137 @@ def create_stocks_list():
             )
 
     return dbc.ListGroup(items)
+
+
+# ============================================================
+# FORUM CALLBACKS
+# ============================================================
+
+# Toggle new thread form
+@app.callback(
+    Output("new-thread-form", "is_open"),
+    [Input("new-thread-btn", "n_clicks")],
+    [State("new-thread-form", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_new_thread_form(n_clicks, is_open):
+    if n_clicks:
+        return not is_open
+    return is_open
+
+# Toggle admin section
+@app.callback(
+    Output("admin-section", "is_open"),
+    [Input("toggle-admin-btn", "n_clicks")],
+    [State("admin-section", "is_open")],
+    prevent_initial_call=True
+)
+def toggle_admin_section(n_clicks, is_open):
+    if n_clicks:
+        return not is_open
+    return is_open
+
+# Submit new thread
+@app.callback(
+    [Output("thread-submit-feedback", "children"),
+     Output("community-threads-container", "children")],
+    [Input("submit-thread-btn", "n_clicks")],
+    [State("thread-author", "value"),
+     State("thread-title", "value"),
+     State("thread-content", "value"),
+     State("thread-stock", "value"),
+     State("admin-password", "value"),
+     State("admin-options", "value")],
+    prevent_initial_call=True
+)
+def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, admin_opts):
+    if not n_clicks:
+        return "", dash.no_update
+
+    # Validate inputs
+    if not author or not title or not content:
+        return dbc.Alert("Semua field harus diisi!", color="danger"), dash.no_update
+
+    if len(title) < 5:
+        return dbc.Alert("Judul terlalu pendek (min 5 karakter)", color="warning"), dash.no_update
+
+    if len(content) < 20:
+        return dbc.Alert("Isi thread terlalu pendek (min 20 karakter)", color="warning"), dash.no_update
+
+    # Check profanity
+    title_check = check_profanity(title)
+    content_check = check_profanity(content)
+
+    # Level 1 - HARD BLOCK
+    if title_check['level'] == 1 or content_check['level'] == 1:
+        return dbc.Alert([
+            html.I(className="fas fa-ban me-2"),
+            "Kalimat mengandung kata tidak pantas. Forum ini untuk diskusi investasi, bukan provokasi."
+        ], color="danger"), dash.no_update
+
+    # Determine if admin
+    is_admin = admin_pwd == ADMIN_PASSWORD
+    admin_opts = admin_opts or []
+    is_pinned = 'pinned' in admin_opts and is_admin
+    is_frozen = 'frozen' in admin_opts and is_admin
+    author_type = 'admin' if is_admin else 'user'
+
+    # Level 2 - FLAG as provokatif
+    flag = None
+    collapsed = False
+    initial_score = 0
+
+    if title_check['level'] == 2 or content_check['level'] == 2:
+        flag = 'provokatif'
+        collapsed = True
+        initial_score = -2
+
+    # Level 3 - Warning (just log, no action)
+
+    # Insert to database
+    try:
+        insert_query = """
+            INSERT INTO forum_threads
+            (stock_code, title, content, author_name, author_type, is_pinned, is_frozen, flag, collapsed, score)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+        """
+        stock_val = stock_code if stock_code else None
+        result = execute_query(insert_query, (
+            stock_val, title, content, author, author_type,
+            is_pinned, is_frozen, flag, collapsed, initial_score
+        ))
+
+        # Refresh threads
+        threads = get_forum_threads(stock_val)
+        community_threads = [t for t in threads if not (t['is_pinned'] and t['author_type'] == 'admin')]
+
+        feedback_msg = "Thread berhasil dibuat!"
+        if flag == 'provokatif':
+            feedback_msg += " (Ditandai sebagai provokatif - score awal -2)"
+
+        return (
+            dbc.Alert([html.I(className="fas fa-check me-2"), feedback_msg], color="success"),
+            [create_thread_card(t) for t in community_threads] if community_threads else [
+                dbc.Alert("Belum ada diskusi.", color="secondary")
+            ]
+        )
+
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update
+
+
+# Filter threads by stock
+@app.callback(
+    Output("url", "pathname", allow_duplicate=True),
+    [Input("forum-stock-filter", "value")],
+    prevent_initial_call=True
+)
+def filter_forum_by_stock(stock_code):
+    if stock_code:
+        return f"/discussion?stock={stock_code}"
+    return "/discussion"
+
 
 # ============================================================
 # RUN SERVER
