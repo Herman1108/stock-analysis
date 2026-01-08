@@ -8219,8 +8219,7 @@ def create_broker_consistency_table(df):
 def create_one_line_insight(stock_code: str) -> html.Div:
     """
     Generate a one-line insight bar for quick market context.
-    This appears at the top of dashboard for immediate understanding.
-    FINAL COPYWRITING: Simple, non-technical, for busy users.
+    FINAL COPYWRITING V2: Data-driven, edukatif, membantu pengambilan keputusan.
     """
     try:
         # Get unified analysis for insight
@@ -8232,27 +8231,26 @@ def create_one_line_insight(stock_code: str) -> html.Div:
         confidence = accum.get('confidence', {})
         overall_signal = summary.get('overall_signal', 'NETRAL')
         conf_level = confidence.get('level', 'LOW')
-        action = decision.get('action', 'WAIT')
 
-        # Generate contextual insight - SIMPLE, NON-TECHNICAL
-        if overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
-            insight = f"🟢 {stock_code} menunjukkan pola pembelian bertahap yang kuat. Peluang masuk mulai terbuka."
-            color = "success"
-            icon = "fas fa-arrow-trend-up"
-        elif overall_signal == 'AKUMULASI':
-            insight = f"🟡 {stock_code} mulai menunjukkan tanda-tanda pembelian. Pantau perkembangan selanjutnya."
-            color = "info"
-            icon = "fas fa-chart-line"
-        elif overall_signal == 'DISTRIBUSI' and conf_level in ['HIGH', 'VERY_HIGH']:
-            insight = f"🔴 {stock_code} sedang dalam tekanan jual. Hindari pembelian baru untuk sementara."
+        # Generate contextual insight - FINAL COPYWRITING
+        if overall_signal == 'DISTRIBUSI' and conf_level in ['HIGH', 'VERY_HIGH']:
+            insight = f"🔴 {stock_code} sedang dalam tekanan jual. Risiko pelepasan masih dominan. Hindari pembelian baru sementara."
             color = "danger"
             icon = "fas fa-arrow-trend-down"
         elif overall_signal == 'DISTRIBUSI':
             insight = f"🟠 {stock_code} menunjukkan tanda pelepasan saham. Pertimbangkan untuk mengurangi posisi."
             color = "warning"
             icon = "fas fa-exclamation-triangle"
+        elif overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
+            insight = f"🟢 {stock_code} menunjukkan pola akumulasi kuat. Peluang masuk mulai terbuka, fokus pada area support."
+            color = "success"
+            icon = "fas fa-arrow-trend-up"
+        elif overall_signal == 'AKUMULASI':
+            insight = f"🟡 {stock_code} mulai menunjukkan tanda akumulasi. Pantau konsistensi dan konfirmasi volume."
+            color = "info"
+            icon = "fas fa-chart-line"
         else:
-            insight = f"⏳ {stock_code} dalam fase netral. Belum ada sinyal kuat. Fokus observasi dan tunggu konfirmasi lanjutan."
+            insight = f"⏳ {stock_code} dalam fase netral. Pasar belum memberikan konfirmasi arah. Observasi lebih aman daripada spekulasi."
             color = "secondary"
             icon = "fas fa-clock"
 
@@ -8261,11 +8259,16 @@ def create_one_line_insight(stock_code: str) -> html.Div:
         color = "secondary"
         icon = "fas fa-spinner fa-spin"
 
+    # Tooltip edukatif
+    tooltip_text = "Insight ini disusun dari kombinasi struktur harga, perilaku broker, dan volume transaksi."
+
     return html.Div([
         dbc.Alert([
             html.Div([
                 html.I(className=f"{icon} me-2"),
-                html.Strong("Insight Hari Ini: ", className="me-1"),
+                html.Strong("Insight Hari Ini: ", className="me-1",
+                           style={'cursor': 'help', 'borderBottom': '1px dotted'},
+                           title=tooltip_text),
                 html.Span(insight),
             ], className="d-flex align-items-center flex-wrap")
         ], color=color, className="mb-3 py-2", style={

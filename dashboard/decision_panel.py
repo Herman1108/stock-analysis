@@ -66,26 +66,52 @@ def create_decision_panel(stock_code, unified_data):
             'NETRAL': 'secondary'
         }.get(overall_signal, 'secondary')
 
-        # Sub-Guidance based on action (WAJIB ADA)
-        sub_guidance = {
-            'WAIT': f"Pasar belum siap. Range masih terlalu lebar ({range_pct:.1f}%). Prioritas: observasi, bukan eksekusi.",
-            'ENTRY': "Kondisi mendukung untuk masuk posisi. Gunakan zona support sebagai acuan entry.",
-            'ADD': "Sinyal cukup kuat untuk menambah posisi. Pastikan manajemen risiko tetap terjaga.",
-            'HOLD': "Tidak ada alasan untuk keluar. Pertahankan posisi dan pantau perkembangan.",
-            'EXIT': "Sinyal distribusi terdeteksi. Pertimbangkan untuk mengamankan profit."
-        }.get(action, "Tunggu konfirmasi lebih lanjut.")
+        # FINAL COPYWRITING V2: Action label & description based on signal
+        if overall_signal == 'DISTRIBUSI':
+            display_action = "EXIT"
+            display_icon = "🚨"
+            display_color = "danger"
+            sub_guidance = "Sinyal distribusi terdeteksi. Pertimbangkan mengamankan profit atau mengurangi eksposur."
+            next_focus = [
+                "Harga breakdown area support",
+                "Volume distribusi meningkat",
+                "Broker besar mulai keluar konsisten"
+            ]
+        elif overall_signal == 'AKUMULASI':
+            display_action = "BUY ON WEAKNESS"
+            display_icon = "🟢"
+            display_color = "success"
+            sub_guidance = "Ada indikasi akumulasi. Fokus pada area support dan manajemen risiko."
+            next_focus = [
+                "Harga menyentuh zona support",
+                "Volume konfirmasi saat pullback",
+                "Broker besar konsisten akumulasi"
+            ]
+        else:  # NETRAL
+            display_action = "WAIT"
+            display_icon = "⏳"
+            display_color = "secondary"
+            sub_guidance = "Pasar belum memberikan konfirmasi arah. Observasi lebih aman daripada spekulasi."
+            next_focus = [
+                "Range menyempit < 20%",
+                "Volume terserap konsisten >= 3 hari",
+                "Sinyal akumulasi atau distribusi muncul"
+            ]
 
-        # Next Focus (kecil tapi krusial)
-        next_focus = {
-            'WAIT': ["Range menyempit < 20%", "Volume terserap konsisten >= 3 hari"],
-            'ENTRY': ["Harga menyentuh zona support", "Volume konfirmasi saat entry"],
-            'ADD': ["Breakout resistance dengan volume", "Tidak ada distribusi tersembunyi"],
-            'HOLD': ["Tidak ada breakdown support", "Broker besar tetap akumulasi"],
-            'EXIT': ["Harga breakdown support", "Volume distribusi meningkat"]
-        }.get(action, ["Pantau perkembangan harga", "Perhatikan volume"])
+        # Override with impulse if detected
+        if is_impulse:
+            display_action = "MOMENTUM"
+            display_icon = "⚡"
+            display_color = "danger"
+            sub_guidance = "Pergerakan cepat terdeteksi. Risiko tinggi, potensi tinggi. Hanya untuk trader berpengalaman."
+            next_focus = [
+                "Pantau volume spike berkelanjutan",
+                "Perhatikan resistance terdekat",
+                "Siapkan exit strategy"
+            ]
 
         # Confidence subtext explanation
-        conf_subtext = f"Sistem yakin bahwa {action} adalah keputusan terbaik saat ini"
+        conf_subtext = "Sistem memiliki keyakinan tinggi berdasarkan kombinasi indikator teknikal & broker flow."
 
         return dbc.Card([
             dbc.CardHeader([
@@ -96,11 +122,11 @@ def create_decision_panel(stock_code, unified_data):
             ], className="bg-transparent border-warning"),
             dbc.CardBody([
                 dbc.Row([
-                    # Action Label (MAIN - Besar)
+                    # Action Label (MAIN - Besar) - Using display variables from signal
                     dbc.Col([
                         html.Div([
-                            html.Span(action_icon, style={"fontSize": "48px"}),
-                            html.H2(action, className=f"text-{action_color} fw-bold mb-0 mt-2"),
+                            html.Span(display_icon, style={"fontSize": "48px"}),
+                            html.H2(display_action, className=f"text-{display_color} fw-bold mb-0 mt-2"),
                         ], className="text-center")
                     ], md=3, className="d-flex align-items-center justify-content-center border-end"),
 
@@ -167,7 +193,7 @@ def create_decision_panel(stock_code, unified_data):
                     ], md=9)
                 ])
             ], className="py-3")
-        ], className="mb-3", style={"border": f"2px solid var(--bs-{action_color})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"})
+        ], className="mb-3", style={"border": f"2px solid var(--bs-{display_color})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"})
 
     except Exception as e:
         return dbc.Card([
@@ -336,7 +362,13 @@ def create_why_signal_checklist(stock_code, validation_result):
                         html.I(className="fas fa-list-check me-1"),
                         html.Strong("Checklist Validasi:")
                     ], className="text-info d-block mb-2"),
-                    dbc.Row(checklist_items)
+                    dbc.Row(checklist_items),
+                    # Footer Edukatif
+                    html.Hr(className="my-2", style={"opacity": "0.2"}),
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1"),
+                        "Semakin banyak validasi terpenuhi, semakin kuat sinyal yang terbentuk."
+                    ], className="text-muted fst-italic", style={"fontSize": "10px"})
                 ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.03)"}),
             ])
         ], color="dark", outline=True, className="mb-3", style={"borderColor": "var(--bs-info)"})
