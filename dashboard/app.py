@@ -519,11 +519,11 @@ PWA_INDEX_STRING = '''
 
             /* Forum Mobile Responsive */
             .forum-content {
-                word-wrap: break-word;
-                overflow-wrap: break-word;
-                word-break: break-word;
-                white-space: pre-wrap;
-                max-width: 100%;
+                word-wrap: break-word !important;
+                overflow-wrap: break-word !important;
+                word-break: break-word !important;
+                white-space: pre-wrap !important;
+                max-width: 100% !important;
             }
 
             /* Mobile breakpoint */
@@ -537,6 +537,7 @@ PWA_INDEX_STRING = '''
                 .forum-content {
                     font-size: 0.85rem !important;
                     line-height: 1.5 !important;
+                    white-space: pre-wrap !important;
                 }
                 /* Hide long separator lines on mobile */
                 .forum-content br + br {
@@ -569,6 +570,7 @@ PWA_INDEX_STRING = '''
                 }
                 .forum-content {
                     font-size: 0.8rem !important;
+                    white-space: pre-wrap !important;
                 }
                 h4, .h4 {
                     font-size: 1.1rem !important;
