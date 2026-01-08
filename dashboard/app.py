@@ -10162,18 +10162,20 @@ def refresh_movement_page(n_clicks, stock_code):
 # Streak chart dropdown callback - update chart when broker selection changes
 @app.callback(
     Output("streak-chart-container", "children"),
-    [Input("streak-broker-dropdown", "value"), Input('stock-selector', 'value')],
-    prevent_initial_call=True
+    [Input("streak-broker-dropdown", "value")],
+    [State('stock-selector', 'value')],
+    prevent_initial_call=False  # Allow initial call to work properly
 )
 def update_streak_chart(selected_brokers, stock_code):
     if not stock_code:
         stocks = get_available_stocks()
         stock_code = stocks[0] if stocks else 'PANI'
 
-    if not selected_brokers:
+    if not selected_brokers or len(selected_brokers) == 0:
         return html.Div("Pilih minimal 1 broker untuk melihat grafik", className="text-muted text-center py-3")
 
-    return create_broker_streak_chart(stock_code, selected_brokers)
+    # Pass selected_brokers directly to chart function
+    return create_broker_streak_chart(stock_code, list(selected_brokers))
 
 # Sensitive Broker page refresh callback
 @app.callback(
