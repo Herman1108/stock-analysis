@@ -26,7 +26,8 @@ from composite_analyzer import (
 from signal_validation import (
     get_comprehensive_validation,
     get_company_profile,
-    get_unified_analysis_summary
+    get_unified_analysis_summary,
+    DEFAULT_PARAMS
 )
 
 def get_stock_fundamental(stock_code: str) -> dict:

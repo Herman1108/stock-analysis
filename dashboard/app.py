@@ -589,6 +589,29 @@ server.config['COMPRESS_MIMETYPES'] = [
 server.config['COMPRESS_LEVEL'] = 6
 server.config['COMPRESS_MIN_SIZE'] = 500
 
+# Flask route for PDF download from forum
+from flask import Response, send_file
+@server.route('/download-pdf/<int:thread_id>')
+def download_thread_pdf(thread_id):
+    """Download PDF attachment from a forum thread"""
+    try:
+        query = "SELECT pdf_data, pdf_filename FROM forum_threads WHERE id = %s"
+        result = execute_query(query, (thread_id,))
+        if result and result[0].get('pdf_data'):
+            pdf_data = result[0]['pdf_data']
+            filename = result[0].get('pdf_filename', f'attachment_{thread_id}.pdf')
+            # Handle bytea/memoryview from PostgreSQL
+            if isinstance(pdf_data, memoryview):
+                pdf_data = bytes(pdf_data)
+            return Response(
+                pdf_data,
+                mimetype='application/pdf',
+                headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+            )
+        return "PDF not found", 404
+    except Exception as e:
+        return f"Error: {str(e)}", 500
+
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
@@ -2931,6 +2954,15 @@ def create_thread_card(thread: dict) -> dbc.Card:
             html.P(content_display, className="mb-2 small", style={"whiteSpace": "pre-wrap"}),
         ], id={"type": "thread-content", "index": thread['id']}),
 
+        # PDF Attachment
+        html.Div([
+            html.A([
+                html.I(className="fas fa-file-pdf me-2 text-danger"),
+                thread['pdf_filename']
+            ], href=f"/download-pdf/{thread['id']}", target="_blank",
+               className="btn btn-light btn-sm mb-2")
+        ]) if thread.get('pdf_filename') else None,
+
         # Footer
         html.Div([
             html.Small([
@@ -3026,6 +3058,31 @@ def create_discussion_page(stock_code: str = None):
                     dbc.Input(id="thread-title", placeholder="Judul diskusi...", className="mb-3"),
                     dbc.Label("Isi Thread", className="small"),
                     dbc.Textarea(id="thread-content", placeholder="Tulis pendapat atau analisa Anda...", rows=5, className="mb-3"),
+
+                    # PDF Upload
+                    dbc.Label("Lampiran PDF (opsional)", className="small"),
+                    dcc.Upload(
+                        id="thread-pdf-upload",
+                        children=html.Div([
+                            html.I(className="fas fa-file-pdf me-2 text-danger"),
+                            "Drag & drop atau ",
+                            html.A("klik untuk upload PDF", className="text-info")
+                        ]),
+                        style={
+                            'width': '100%',
+                            'height': '50px',
+                            'lineHeight': '50px',
+                            'borderWidth': '1px',
+                            'borderStyle': 'dashed',
+                            'borderRadius': '5px',
+                            'textAlign': 'center',
+                            'cursor': 'pointer'
+                        },
+                        className="mb-2 border-secondary",
+                        accept=".pdf",
+                        max_size=5*1024*1024  # 5MB max
+                    ),
+                    html.Div(id="pdf-upload-status", className="small text-muted mb-3"),
 
                     # Admin section (hidden by default)
                     dbc.Collapse([
@@ -3385,14 +3442,6 @@ def create_validation_card(stock_code: str):
     conf_level = confidence.get('level', 'LOW')
     conf_colors = {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}
     conf_color = conf_colors.get(conf_level, 'secondary')
-
-    # === 14. WHAT THIS MEANS ===
-    if overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
-        what_means = "Pola ini menunjukkan akumulasi terstruktur, namun belum menentukan arah pergerakan harga berikutnya."
-    elif overall_signal == 'DISTRIBUSI':
-        what_means = "Terdeteksi penjualan bertahap oleh pelaku besar. Berhati-hati dengan posisi beli baru."
-    else:
-        what_means = "Pola belum terbentuk jelas. Pantau terus untuk konfirmasi arah selanjutnya."
 
     # === BUILD BROKER HORIZONTAL BARS ===
     def create_broker_bars(brokers, is_buy=True):
@@ -4118,19 +4167,7 @@ def create_validation_card(stock_code: str):
                 ], md=6),
             ], className="mb-3"),
 
-            # === 14. WHAT THIS MEANS ===
-            dbc.Card([
-                dbc.CardHeader([
-                    html.H6([html.I(className="fas fa-graduation-cap me-2"), "What This Means (Edukasi)"], className="mb-0 text-info d-inline"),
-                    html.Small(" - Kesimpulan dalam bahasa sederhana", className="text-muted ms-2")
-                ]),
-                dbc.CardBody([
-                    html.Small("Penjelasan pola yang terdeteksi tanpa rekomendasi beli/jual:", className="text-muted d-block mb-2"),
-                    html.P(what_means, className="mb-0 fst-italic")
-                ])
-            ], className="mb-3", color="dark", outline=True),
-
-            # === 15. HIDDEN/EXPANDABLE SECTION ===
+            # === 14. HIDDEN/EXPANDABLE SECTION ===
             dbc.Accordion([
                 dbc.AccordionItem([
                     dbc.Tabs([
@@ -4195,6 +4232,289 @@ def create_validation_card(stock_code: str):
             ], start_collapsed=True, className="mb-0"),
         ])
     ], className="mb-4", style={"background": "linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%)", "border": "1px solid #0f3460"})
+
+
+# ============================================================
+# HELPER: SIGNAL EDUCATION CARD (Dinamis - Bukan Template)
+# ============================================================
+
+def generate_signal_education_data(validation_data: dict, broker_data: dict = None) -> dict:
+    """
+    Generate dynamic educational explanation based on actual data.
+    Bukan template - analisis berdasarkan kondisi real.
+    """
+    validations = validation_data.get('validations', {})
+    decision_rule = validation_data.get('decision_rule', {})
+    summary = validation_data.get('summary', {})
+    detection = validation_data.get('detection', {})
+
+    signal = summary.get('overall_signal', 'NETRAL')
+    decision = decision_rule.get('decision', 'WAIT')
+
+    # Get CPR
+    cpr_data = validations.get('cpr', {})
+    cpr_pct = int(cpr_data.get('avg_cpr', 0.5) * 100)
+
+    education = {
+        'signal_explanation': '',
+        'why_not_buy': [],
+        'wait_for_confirmation': [],
+        'positive_factors': [],
+        'warning_factors': []
+    }
+
+    # ══════════════════════════════════════════════════════════════
+    # ANALISIS KONDISI AKTUAL (bukan template)
+    # ══════════════════════════════════════════════════════════════
+
+    # 1. Analisis CPR
+    if cpr_pct < 30:
+        education['why_not_buy'].append(f"CPR hanya {cpr_pct}% - harga ditutup dekat LOW, seller masih dominan")
+        education['wait_for_confirmation'].append("CPR naik ke >50% (close mendekati HIGH)")
+    elif cpr_pct > 70:
+        education['positive_factors'].append(f"CPR {cpr_pct}% - buyer berhasil push harga ke atas")
+
+    # 2. Analisis UVDV (Up Volume vs Down Volume)
+    uvdv_data = validations.get('uvdv', {})
+    uvdv_signal = uvdv_data.get('signal', '')
+    if 'DISTRIBUSI' in str(uvdv_signal).upper():
+        education['why_not_buy'].append("Volume saat harga turun lebih besar dari volume saat naik")
+        education['wait_for_confirmation'].append("Volume buying > volume selling konsisten 3+ hari")
+    elif 'AKUMULASI' in str(uvdv_signal).upper():
+        education['positive_factors'].append("Volume buying mendominasi - institusi aktif mengumpulkan")
+
+    # 3. Analisis Broker Influence
+    broker_inf = validations.get('broker_influence', {})
+    broker_sig = broker_inf.get('signal', '')
+    if 'AKUMULASI' in str(broker_sig).upper():
+        education['positive_factors'].append("Broker besar sedang akumulasi - smart money masuk")
+    elif 'DISTRIBUSI' in str(broker_sig).upper():
+        education['why_not_buy'].append("Broker besar sedang jual - smart money keluar")
+        education['wait_for_confirmation'].append("Broker institusi berbalik dari sell ke buy")
+
+    # 4. Analisis Persistence
+    persist_data = validations.get('persistence', {})
+    if persist_data.get('passed'):
+        education['positive_factors'].append("Pola akumulasi sudah berlangsung konsisten (persistence)")
+
+    # 5. Analisis Failed Breaks
+    failed_data = validations.get('failed_breaks', {})
+    if failed_data.get('signal') == 'AKUMULASI':
+        education['positive_factors'].append("Ada buying saat breakdown gagal - support kuat")
+    if failed_data.get('active_resistance'):
+        education['why_not_buy'].append("Resistance aktif di atas - seller defend di level tersebut")
+        education['wait_for_confirmation'].append("Breakout menembus resistance dengan volume tinggi")
+
+    # 6. Analisis Elasticity
+    elastic_data = validations.get('elasticity', {})
+    elastic_sig = elastic_data.get('signal', '')
+    if 'PENAHAN' in str(elastic_sig).upper():
+        education['positive_factors'].append("Ada penahan di bawah - support aktif")
+    elif 'DISTRIBUSI' in str(elastic_sig).upper():
+        education['why_not_buy'].append("Harga mudah turun tapi sulit naik - supply masih besar")
+        education['wait_for_confirmation'].append("Harga mampu bertahan di atas resistance sebelumnya")
+
+    # 7. Analisis Rotation
+    rotation_data = validations.get('rotation', {})
+    rotation_sig = rotation_data.get('signal', '')
+    if 'SEHAT' in str(rotation_sig).upper():
+        education['positive_factors'].append("Rotasi broker sehat - bukan pump and dump")
+    elif 'GORENG' in str(rotation_sig).upper():
+        education['warning_factors'].append("Hati-hati: Pola rotasi tidak sehat, potensi saham gorengan")
+
+    # 8. Broker data (jika tersedia)
+    if broker_data:
+        foreign_net = broker_data.get('foreign_net', 0)
+        if foreign_net < 0:
+            education['warning_factors'].append(f"Asing net sell - foreign outflow")
+        elif foreign_net > 0:
+            education['positive_factors'].append(f"Asing net buy - foreign inflow")
+
+    # ══════════════════════════════════════════════════════════════
+    # GENERATE MAIN EXPLANATION
+    # ══════════════════════════════════════════════════════════════
+
+    if signal == 'NETRAL' or decision == 'WAIT':
+        if education['why_not_buy'] and education['positive_factors']:
+            education['signal_explanation'] = (
+                f"Meskipun ada {len(education['positive_factors'])} sinyal positif, "
+                f"masih ada {len(education['why_not_buy'])} kondisi yang belum mendukung. "
+                f"Sistem menunggu konfirmasi sebelum entry untuk melindungi dari false signal."
+            )
+        elif education['why_not_buy']:
+            education['signal_explanation'] = (
+                f"Terdeteksi {len(education['why_not_buy'])} kondisi negatif. "
+                f"Sistem menyarankan WAIT sampai kondisi membaik."
+            )
+        else:
+            education['signal_explanation'] = (
+                f"Belum ada sinyal dominan yang jelas. "
+                f"Kondisi market sideways atau dalam transisi."
+            )
+
+    elif 'AKUMULASI' in signal:
+        education['signal_explanation'] = (
+            f"{len(education['positive_factors'])} faktor positif terdeteksi. "
+            f"Institusi sedang mengumpulkan saham."
+        )
+
+    elif 'DISTRIBUSI' in signal:
+        education['signal_explanation'] = (
+            f"Terdeteksi {len(education['why_not_buy'])} sinyal distribusi. "
+            f"Institusi sedang menjual/mengurangi posisi."
+        )
+
+    return education
+
+
+def create_signal_education_card(stock_code: str, validation_data: dict = None, broker_data: dict = None):
+    """
+    Create educational card explaining WHY the signal is what it is.
+    Dinamis berdasarkan kondisi aktual - bukan template.
+    """
+    try:
+        if validation_data is None:
+            validation_data = get_comprehensive_validation(stock_code, 30)
+
+        education = generate_signal_education_data(validation_data, broker_data)
+        summary = validation_data.get('summary', {})
+        decision_rule = validation_data.get('decision_rule', {})
+
+        signal = summary.get('overall_signal', 'NETRAL')
+        decision = decision_rule.get('decision', 'WAIT')
+        cpr_data = validation_data.get('validations', {}).get('cpr', {})
+        cpr_pct = int(cpr_data.get('avg_cpr', 0.5) * 100)
+
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardBody(html.P(f"Error loading education: {str(e)}", className="text-danger"))
+        ], className="mb-4")
+
+    # Signal color
+    signal_colors = {'AKUMULASI': 'success', 'DISTRIBUSI': 'danger', 'NETRAL': 'warning'}
+    signal_color = signal_colors.get(signal, 'secondary')
+
+    # Build content sections
+    sections = []
+
+    # A. Main explanation box
+    sections.append(
+        html.Div([
+            html.H6([
+                html.I(className="fas fa-question-circle me-2"),
+                f"Kenapa Status {signal}?"
+            ], className=f"text-{signal_color} mb-2"),
+            html.P(education['signal_explanation'], className="mb-0 small",
+                   style={"backgroundColor": "rgba(255,255,255,0.05)", "padding": "10px", "borderRadius": "5px"})
+        ], className="mb-3")
+    )
+
+    # B. Absorption explanation (if WAIT with positive net buy)
+    if decision == 'WAIT' and cpr_pct < 40:
+        sections.append(
+            dbc.Alert([
+                html.H6([
+                    html.I(className="fas fa-info-circle me-2"),
+                    "Kenapa WAIT padahal ada Net Buy?"
+                ], className="text-warning mb-2"),
+                html.P([
+                    f"Meskipun ada pembelian, harga masih ditutup di area bawah (CPR {cpr_pct}%). ",
+                    "Ini menandakan ", html.Strong("ABSORPTION"), " - supply masih aktif menyerap buying pressure. ",
+                    "Sistem menunggu konfirmasi buyer berhasil mengangkat harga."
+                ], className="mb-0 small")
+            ], color="warning", className="mb-3", style={"backgroundColor": "rgba(255,193,7,0.1)"})
+        )
+
+    # C. Why not buy (if any)
+    if education['why_not_buy']:
+        sections.append(
+            html.Div([
+                html.H6([
+                    html.I(className="fas fa-times-circle me-2 text-danger"),
+                    "Kenapa Belum Buy?"
+                ], className="text-danger mb-2"),
+                html.Div([
+                    html.Div([
+                        html.Span(f"{i}. ", className="text-danger fw-bold"),
+                        html.Span(reason, className="small")
+                    ], className="mb-1") for i, reason in enumerate(education['why_not_buy'], 1)
+                ])
+            ], className="mb-3")
+        )
+
+    # D. Wait for confirmation (if any)
+    if education['wait_for_confirmation']:
+        sections.append(
+            html.Div([
+                html.H6([
+                    html.I(className="fas fa-clock me-2 text-info"),
+                    "Tunggu Konfirmasi Apa?"
+                ], className="text-info mb-2"),
+                html.Div([
+                    html.Div([
+                        html.Span("→ ", className="text-success fw-bold"),
+                        html.Span(conf, className="small")
+                    ], className="mb-1") for conf in education['wait_for_confirmation']
+                ])
+            ], className="mb-3")
+        )
+
+    # E. Positive factors (if any)
+    if education['positive_factors']:
+        sections.append(
+            html.Div([
+                html.H6([
+                    html.I(className="fas fa-check-circle me-2 text-success"),
+                    "Faktor Positif"
+                ], className="text-success mb-2"),
+                html.Div([
+                    html.Div([
+                        html.Span("+ ", className="text-success fw-bold"),
+                        html.Span(factor, className="small text-success")
+                    ], className="mb-1") for factor in education['positive_factors']
+                ])
+            ], className="mb-3")
+        )
+
+    # F. Warning factors (if any)
+    if education['warning_factors']:
+        sections.append(
+            html.Div([
+                html.H6([
+                    html.I(className="fas fa-exclamation-triangle me-2 text-warning"),
+                    "Peringatan"
+                ], className="text-warning mb-2"),
+                html.Div([
+                    html.Div([
+                        html.Span("! ", className="text-warning fw-bold"),
+                        html.Span(warn, className="small text-warning")
+                    ], className="mb-1") for warn in education['warning_factors']
+                ])
+            ], className="mb-3")
+        )
+
+    # G. Important note
+    sections.append(
+        html.Div([
+            html.Hr(className="my-2"),
+            html.Small([
+                html.I(className="fas fa-shield-alt me-1 text-info"),
+                "Sistem ini dirancang untuk ",
+                html.Strong("MELINDUNGI", className="text-info"),
+                " investor dari entry prematur. Signal WAIT bukan berarti saham jelek - tapi timing belum tepat."
+            ], className="text-muted fst-italic")
+        ])
+    )
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Div([
+                html.I(className="fas fa-graduation-cap me-2 text-info"),
+                html.Strong("Edukasi: Memahami Sinyal", className="text-info"),
+            ], className="d-flex align-items-center")
+        ], style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)", "borderBottom": "2px solid #17a2b8"}),
+        dbc.CardBody(sections)
+    ], className="mb-4", style={"background": "linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%)", "border": "1px solid #17a2b8"})
 
 
 # ============================================================
@@ -8266,6 +8586,9 @@ def create_analysis_page(stock_code='CDIA'):
             ], className="py-2")
         ], color="dark", outline=True, className="mb-4", style={"borderColor": "var(--bs-info)"}),
 
+        # === EDUKASI: KENAPA BELUM BUY / TUNGGU KONFIRMASI APA ===
+        create_signal_education_card(stock_code, validation_data=accum),
+
         # === 2. QUICK SUMMARY FROM 3 SUBMENUS (Cards) ===
         dbc.Row([
             # FUNDAMENTAL CARD
@@ -11301,6 +11624,20 @@ def toggle_admin_section(n_clicks, is_open):
         return not is_open
     return is_open
 
+# PDF upload status
+@app.callback(
+    Output("pdf-upload-status", "children"),
+    [Input("thread-pdf-upload", "filename")],
+    prevent_initial_call=True
+)
+def update_pdf_status(filename):
+    if filename:
+        return html.Span([
+            html.I(className="fas fa-check-circle text-success me-1"),
+            f"File terpilih: {filename}"
+        ])
+    return ""
+
 # Submit new thread
 @app.callback(
     [Output("thread-submit-feedback", "children"),
@@ -11311,10 +11648,12 @@ def toggle_admin_section(n_clicks, is_open):
      State("thread-content", "value"),
      State("stock-selector", "value"),  # Use main stock selector
      State("admin-password", "value"),
-     State("admin-options", "value")],
+     State("admin-options", "value"),
+     State("thread-pdf-upload", "contents"),
+     State("thread-pdf-upload", "filename")],
     prevent_initial_call=True
 )
-def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, admin_opts):
+def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, admin_opts, pdf_contents, pdf_filename):
     if not n_clicks:
         return "", dash.no_update
 
@@ -11358,18 +11697,37 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
 
     # Level 3 - Warning (just log, no action)
 
+    # Process PDF if uploaded
+    pdf_data = None
+    pdf_name = None
+    if pdf_contents and pdf_filename:
+        # Validate it's a PDF
+        if not pdf_filename.lower().endswith('.pdf'):
+            return dbc.Alert("Hanya file PDF yang diperbolehkan!", color="danger"), dash.no_update
+        # Decode base64 content
+        try:
+            content_type, content_string = pdf_contents.split(',')
+            pdf_data = base64.b64decode(content_string)
+            pdf_name = pdf_filename
+            # Check size (max 5MB)
+            if len(pdf_data) > 5 * 1024 * 1024:
+                return dbc.Alert("Ukuran file PDF maksimal 5MB!", color="danger"), dash.no_update
+        except Exception as e:
+            return dbc.Alert(f"Error membaca file PDF: {str(e)}", color="danger"), dash.no_update
+
     # Insert to database
     try:
         insert_query = """
             INSERT INTO forum_threads
-            (stock_code, title, content, author_name, author_type, is_pinned, is_frozen, flag, collapsed, score)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (stock_code, title, content, author_name, author_type, is_pinned, is_frozen, flag, collapsed, score, pdf_data, pdf_filename)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """
         stock_val = stock_code if stock_code else None
         result = execute_query(insert_query, (
             stock_val, title, content, author, author_type,
-            is_pinned, is_frozen, flag, collapsed, initial_score
+            is_pinned, is_frozen, flag, collapsed, initial_score,
+            pdf_data, pdf_name
         ))
 
         # Refresh threads
@@ -11377,6 +11735,8 @@ def submit_new_thread(n_clicks, author, title, content, stock_code, admin_pwd, a
         community_threads = [t for t in threads if not (t['is_pinned'] and t['author_type'] == 'admin')]
 
         feedback_msg = "Thread berhasil dibuat!"
+        if pdf_name:
+            feedback_msg += f" (PDF: {pdf_name})"
         if flag == 'provokatif':
             feedback_msg += " (Ditandai sebagai provokatif - score awal -2)"
 
