@@ -5729,6 +5729,254 @@ def create_broker_sensitivity_pattern(stock_code='CDIA'):
         ], className="mb-3")
 
 
+def calculate_broker_streak_history(stock_code, broker_codes, days=30):
+    """
+    Calculate historical streak data for selected brokers.
+    Returns daily streak values (positive = accumulation, negative = distribution)
+    """
+    broker_df = get_broker_data(stock_code)
+    if broker_df.empty:
+        return pd.DataFrame()
+
+    # Filter by date range
+    end_date = broker_df['date'].max()
+    start_date = end_date - pd.Timedelta(days=days)
+    broker_df = broker_df[broker_df['date'] >= start_date]
+
+    if broker_df.empty:
+        return pd.DataFrame()
+
+    # Get all unique dates
+    all_dates = sorted(broker_df['date'].unique())
+
+    streak_history = []
+
+    for broker in broker_codes:
+        b_data = broker_df[broker_df['broker_code'] == broker].sort_values('date')
+
+        if b_data.empty:
+            continue
+
+        # Calculate running streak for each day
+        current_accum_streak = 0
+        current_dist_streak = 0
+
+        for date in all_dates:
+            day_data = b_data[b_data['date'] == date]
+
+            if day_data.empty:
+                # No activity - reset streaks
+                current_accum_streak = 0
+                current_dist_streak = 0
+                streak_value = 0
+            else:
+                net_value = day_data['net_value'].iloc[0]
+
+                if net_value > 0:
+                    # Accumulation
+                    current_accum_streak += 1
+                    current_dist_streak = 0
+                    streak_value = current_accum_streak
+                elif net_value < 0:
+                    # Distribution
+                    current_dist_streak += 1
+                    current_accum_streak = 0
+                    streak_value = -current_dist_streak
+                else:
+                    # Neutral - reset
+                    current_accum_streak = 0
+                    current_dist_streak = 0
+                    streak_value = 0
+
+            streak_history.append({
+                'date': date,
+                'broker_code': broker,
+                'streak': streak_value,
+                'net_value': day_data['net_value'].iloc[0] if not day_data.empty else 0
+            })
+
+    return pd.DataFrame(streak_history)
+
+
+def create_broker_streak_chart(stock_code='CDIA', selected_brokers=None, days=30):
+    """
+    Create interactive area chart showing accumulation/distribution streak history
+    for sensitive brokers.
+    """
+    try:
+        # Get sensitive brokers if none selected
+        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+        all_sensitive = []
+        if broker_sens and broker_sens.get('brokers'):
+            all_sensitive = [b['broker_code'] for b in broker_sens['brokers'][:10]]
+
+        if not all_sensitive:
+            return html.Div("Tidak ada data broker sensitif", className="text-muted text-center py-3")
+
+        # Default to top 3 if no selection
+        if not selected_brokers:
+            selected_brokers = all_sensitive[:3]
+
+        # Calculate streak history
+        streak_df = calculate_broker_streak_history(stock_code, selected_brokers, days)
+
+        if streak_df.empty:
+            return html.Div("Tidak ada data streak", className="text-muted text-center py-3")
+
+        # Create figure
+        fig = go.Figure()
+
+        # Color palette
+        colors_positive = ['rgba(0, 255, 136, 0.6)', 'rgba(0, 212, 255, 0.6)', 'rgba(255, 230, 109, 0.6)',
+                          'rgba(78, 205, 196, 0.6)', 'rgba(149, 225, 211, 0.6)']
+        colors_negative = ['rgba(255, 107, 107, 0.6)', 'rgba(255, 159, 64, 0.6)', 'rgba(255, 99, 132, 0.6)',
+                          'rgba(255, 182, 193, 0.6)', 'rgba(255, 140, 0, 0.6)']
+        line_colors = ['#00ff88', '#00d4ff', '#ffe66d', '#4ecdc4', '#95e1d3']
+
+        for i, broker in enumerate(selected_brokers):
+            broker_data = streak_df[streak_df['broker_code'] == broker].sort_values('date')
+
+            if broker_data.empty:
+                continue
+
+            # Separate positive and negative for different colors
+            positive_streak = broker_data['streak'].apply(lambda x: max(0, x))
+            negative_streak = broker_data['streak'].apply(lambda x: min(0, x))
+
+            # Add positive area (accumulation)
+            fig.add_trace(go.Scatter(
+                x=broker_data['date'],
+                y=positive_streak,
+                name=f'{broker} Akumulasi',
+                mode='lines',
+                line=dict(width=2, color=line_colors[i % len(line_colors)]),
+                fill='tozeroy',
+                fillcolor=colors_positive[i % len(colors_positive)],
+                stackgroup=f'positive_{broker}',
+                hovertemplate=f'{broker}<br>Akumulasi: %{{y}} hari<extra></extra>'
+            ))
+
+            # Add negative area (distribution)
+            fig.add_trace(go.Scatter(
+                x=broker_data['date'],
+                y=negative_streak,
+                name=f'{broker} Distribusi',
+                mode='lines',
+                line=dict(width=2, color=colors_negative[i % len(colors_negative)].replace('0.6', '1')),
+                fill='tozeroy',
+                fillcolor=colors_negative[i % len(colors_negative)],
+                stackgroup=f'negative_{broker}',
+                showlegend=False,
+                hovertemplate=f'{broker}<br>Distribusi: %{{y}} hari<extra></extra>'
+            ))
+
+        # Add zero line
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+
+        # Update layout
+        fig.update_layout(
+            template='plotly_dark',
+            height=350,
+            margin=dict(l=10, r=10, t=30, b=30),
+            legend=dict(
+                orientation="h",
+                yanchor="bottom",
+                y=1.02,
+                xanchor="right",
+                x=1,
+                font=dict(size=10)
+            ),
+            hovermode='x unified',
+            yaxis=dict(
+                title="Streak (hari)",
+                title_font=dict(size=10),
+                zeroline=True,
+                zerolinecolor='gray',
+                zerolinewidth=1
+            ),
+            xaxis=dict(
+                title="",
+                tickformat="%d %b"
+            )
+        )
+
+        return dcc.Graph(figure=fig, config={'displayModeBar': False})
+
+    except Exception as e:
+        return html.Div(f"Error: {str(e)}", className="text-danger text-center py-3")
+
+
+def create_broker_streak_section(stock_code='CDIA'):
+    """
+    Create the complete broker streak section with dropdown and chart.
+    """
+    try:
+        # Get sensitive brokers for dropdown
+        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
+        all_sensitive = []
+        if broker_sens and broker_sens.get('brokers'):
+            all_sensitive = [b['broker_code'] for b in broker_sens['brokers'][:10]]
+
+        if not all_sensitive:
+            return html.Div()
+
+        # Create dropdown options
+        dropdown_options = [{'label': broker, 'value': broker} for broker in all_sensitive]
+        default_selected = all_sensitive[:3]
+
+        return dbc.Card([
+            dbc.CardHeader([
+                html.Div([
+                    html.I(className="fas fa-chart-area me-2 text-info"),
+                    html.Strong("Streak History - Broker Sensitif", className="text-info"),
+                ], className="d-flex align-items-center")
+            ], className="bg-transparent border-info"),
+            dbc.CardBody([
+                # Broker Selection Dropdown
+                html.Div([
+                    html.Small("Pilih Broker:", className="text-muted me-2"),
+                    dcc.Dropdown(
+                        id='streak-broker-dropdown',
+                        options=dropdown_options,
+                        value=default_selected,
+                        multi=True,
+                        placeholder="Pilih broker untuk ditampilkan...",
+                        style={
+                            'backgroundColor': '#1a1a2e',
+                            'color': '#ffffff',
+                            'border': '1px solid #3d3d5c'
+                        },
+                        className="dash-dropdown-dark"
+                    )
+                ], className="mb-3"),
+
+                # Chart Container
+                html.Div(id='streak-chart-container', children=create_broker_streak_chart(stock_code, default_selected)),
+
+                # Info Section
+                html.Div([
+                    html.Hr(className="my-2", style={"opacity": "0.2"}),
+                    html.Small([
+                        html.I(className="fas fa-info-circle me-1 text-info"),
+                        html.Strong("Cara Membaca: "),
+                        "Area hijau ke atas = streak akumulasi (broker beli berturut-turut). ",
+                        "Area merah ke bawah = streak distribusi (broker jual berturut-turut). ",
+                        "Semakin tinggi/dalam area, semakin panjang streak."
+                    ], className="text-muted", style={"fontSize": "10px"}),
+                    html.Br(),
+                    html.Small([
+                        html.I(className="fas fa-lightbulb me-1 text-warning"),
+                        html.Strong("Insight: "),
+                        "Perhatikan broker yang konsisten akumulasi (streak panjang) - ini menunjukkan conviction kuat."
+                    ], className="text-muted", style={"fontSize": "10px"})
+                ], className="mt-2")
+            ])
+        ], className="mb-3", style={"borderColor": "var(--bs-info)"})
+
+    except Exception as e:
+        return html.Div()
+
+
 def create_broker_watchlist(stock_code='CDIA'):
     """
     Section 5: Broker Watchlist
@@ -6331,6 +6579,9 @@ def create_broker_movement_page(stock_code='CDIA'):
 
         # Broker Watchlist Container
         html.Div(id="movement-watchlist-container", children=create_broker_watchlist(stock_code)),
+
+        # Broker Streak History Chart (Interactive)
+        html.Div(id="movement-streak-container", children=create_broker_streak_section(stock_code)),
 
         # Refresh Button with last refresh time
         html.Div([
@@ -9705,6 +9956,7 @@ def update_broker_detail(broker_code, stock_code):
 @app.callback(
     [Output("movement-alert-container", "children"),
      Output("movement-watchlist-container", "children"),
+     Output("movement-streak-container", "children"),
      Output("movement-last-refresh", "children")],
     [Input("movement-refresh-btn", "n_clicks"), Input('stock-selector', 'value')],
     prevent_initial_call=True
@@ -9716,8 +9968,26 @@ def refresh_movement_page(n_clicks, stock_code):
     return (
         create_broker_movement_alert(stock_code),
         create_broker_watchlist(stock_code),
+        create_broker_streak_section(stock_code),
         f"Last refresh: {datetime.now().strftime('%H:%M:%S')}"
     )
+
+
+# Streak chart dropdown callback - update chart when broker selection changes
+@app.callback(
+    Output("streak-chart-container", "children"),
+    [Input("streak-broker-dropdown", "value"), Input('stock-selector', 'value')],
+    prevent_initial_call=True
+)
+def update_streak_chart(selected_brokers, stock_code):
+    if not stock_code:
+        stocks = get_available_stocks()
+        stock_code = stocks[0] if stocks else 'PANI'
+
+    if not selected_brokers:
+        return html.Div("Pilih minimal 1 broker untuk melihat grafik", className="text-muted text-center py-3")
+
+    return create_broker_streak_chart(stock_code, selected_brokers)
 
 # Sensitive Broker page refresh callback
 @app.callback(
