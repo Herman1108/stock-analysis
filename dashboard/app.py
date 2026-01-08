@@ -95,6 +95,179 @@ def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool =
         return html.Span(broker_code, className=broker_class)
 
 
+# ============================================================
+# TOOLTIP DEFINITIONS - Edukasi user dengan penjelasan singkat
+# ============================================================
+TERM_DEFINITIONS = {
+    # Broker & Flow Terms
+    'broker_sensitivity': 'Skor seberapa sering broker tertentu berhasil memprediksi pergerakan harga. Broker dengan sensitivity tinggi = "smart money".',
+    'foreign_flow': 'Aliran dana investor asing (net buy - net sell). Positif = asing masuk (bullish), Negatif = asing keluar (bearish).',
+    'net_flow': 'Selisih antara nilai beli dan jual. Positif = lebih banyak beli, Negatif = lebih banyak jual.',
+    'net_lot': 'Selisih lot beli dan lot jual suatu broker dalam periode tertentu.',
+
+    # Analysis Terms
+    'cpr': 'Close Position Ratio - posisi harga penutupan dalam range harian. >60% = pembeli dominan, <40% = penjual dominan.',
+    'accumulation': 'Fase di mana pelaku besar mengumpulkan saham secara bertahap sebelum harga naik.',
+    'distribution': 'Fase di mana pelaku besar melepas saham secara bertahap sebelum harga turun.',
+    'markup': 'Fase kenaikan harga setelah akumulasi selesai.',
+
+    # Validation Terms
+    'uvdv_ratio': 'Up Volume vs Down Volume - perbandingan volume saat harga naik vs turun.',
+    'persistence': 'Konsistensi broker dalam membeli/menjual berturut-turut. ≥5 hari = niat serius.',
+    'elasticity': 'Hubungan antara perubahan volume dan perubahan harga. Volume↑ + Harga stabil = absorpsi.',
+    'rotation': 'Jumlah broker yang selaras (sama-sama beli atau jual).',
+
+    # Price Terms
+    'support': 'Level harga di mana tekanan beli cukup kuat untuk menahan penurunan.',
+    'resistance': 'Level harga di mana tekanan jual cukup kuat untuk menahan kenaikan.',
+    'entry_zone': 'Area harga ideal untuk masuk posisi (biasanya lower 40% dari range).',
+    'invalidation': 'Level harga yang jika ditembus, sinyal dianggap gagal. Tutup posisi jika tembus.',
+
+    # Fundamental Terms
+    'per': 'Price to Earning Ratio - harga saham dibagi laba per saham. <15 = murah, >25 = mahal.',
+    'pbv': 'Price to Book Value - harga saham dibagi nilai buku. <1 = di bawah nilai aset.',
+    'roe': 'Return on Equity - laba bersih dibagi ekuitas. Semakin tinggi semakin efisien.',
+    'npm': 'Net Profit Margin - laba bersih dibagi pendapatan. Ukuran profitabilitas.',
+
+    # Decision Terms
+    'confidence': 'Tingkat keyakinan sinyal berdasarkan jumlah validasi yang lolos (0-6 kriteria).',
+    'decision_rule': 'Rekomendasi aksi berdasarkan gabungan semua analisis: WAIT/ENTRY/ADD/HOLD/EXIT.',
+
+    # Volume Terms
+    'rvol': 'Relative Volume - volume hari ini dibanding rata-rata. >1.5x = volume tinggi.',
+    'volume_absorption': 'Volume tinggi tanpa pergerakan harga signifikan = ada yang menyerap.',
+}
+
+def with_tooltip(text: str, term_key: str, placement: str = 'top') -> html.Span:
+    """
+    Wrap text dengan tooltip penjelasan.
+
+    Args:
+        text: Teks yang ditampilkan
+        term_key: Key dari TERM_DEFINITIONS
+        placement: Posisi tooltip (top/bottom/left/right)
+
+    Returns:
+        html.Span dengan tooltip
+    """
+    definition = TERM_DEFINITIONS.get(term_key, '')
+    if not definition:
+        return html.Span(text)
+
+    return html.Span([
+        html.Span(
+            text,
+            style={
+                'borderBottom': '1px dotted #6c757d',
+                'cursor': 'help'
+            },
+            title=definition
+        ),
+        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '10px', 'color': '#6c757d', 'cursor': 'help'}, title=definition)
+    ])
+
+def tooltip_badge(text: str, term_key: str, color: str = 'secondary') -> dbc.Badge:
+    """
+    Create a badge with tooltip.
+    """
+    definition = TERM_DEFINITIONS.get(term_key, '')
+    return dbc.Badge(
+        text,
+        color=color,
+        className="me-1",
+        style={'cursor': 'help'},
+        title=definition
+    )
+
+
+# ============================================================
+# SKELETON LOADING COMPONENTS - Tampilan saat loading data
+# ============================================================
+def create_skeleton_card(title: str = "Loading...", rows: int = 3, height: str = "auto") -> dbc.Card:
+    """
+    Create a skeleton loading card with animated placeholders.
+
+    Args:
+        title: Card title
+        rows: Number of skeleton rows to show
+        height: Card height
+
+    Returns:
+        dbc.Card with skeleton animation
+    """
+    skeleton_rows = []
+    widths = ["85%", "70%", "60%", "90%", "75%"]
+
+    for i in range(rows):
+        width = widths[i % len(widths)]
+        skeleton_rows.append(
+            html.Div(
+                className="skeleton-line mb-2",
+                style={
+                    "width": width,
+                    "height": "16px",
+                    "backgroundColor": "rgba(255,255,255,0.1)",
+                    "borderRadius": "4px",
+                    "animation": "skeleton-pulse 1.5s ease-in-out infinite"
+                }
+            )
+        )
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.Div(
+                className="skeleton-line",
+                style={
+                    "width": "40%",
+                    "height": "20px",
+                    "backgroundColor": "rgba(255,255,255,0.1)",
+                    "borderRadius": "4px",
+                    "animation": "skeleton-pulse 1.5s ease-in-out infinite"
+                }
+            )
+        ]),
+        dbc.CardBody([
+            html.Div([
+                html.I(className="fas fa-spinner fa-spin me-2 text-info"),
+                html.Span(title, className="text-muted")
+            ], className="text-center mb-3"),
+            *skeleton_rows
+        ])
+    ], className="mb-3", color="dark", style={"height": height} if height != "auto" else {})
+
+
+def create_skeleton_metrics() -> html.Div:
+    """Create skeleton loading for metrics cards."""
+    return dbc.Row([
+        dbc.Col([
+            html.Div([
+                html.Div(className="skeleton-line mb-1", style={"width": "60%", "height": "12px", "backgroundColor": "rgba(255,255,255,0.1)", "borderRadius": "4px", "animation": "skeleton-pulse 1.5s ease-in-out infinite"}),
+                html.Div(className="skeleton-line mb-1", style={"width": "40%", "height": "24px", "backgroundColor": "rgba(255,255,255,0.15)", "borderRadius": "4px", "animation": "skeleton-pulse 1.5s ease-in-out infinite"}),
+                html.Div(className="skeleton-line", style={"width": "80%", "height": "10px", "backgroundColor": "rgba(255,255,255,0.08)", "borderRadius": "4px", "animation": "skeleton-pulse 1.5s ease-in-out infinite"}),
+            ], className="text-center p-2")
+        ], width=4) for _ in range(3)
+    ], className="mb-2")
+
+
+# CSS untuk skeleton animation (akan diinjeksi ke halaman)
+SKELETON_CSS = """
+@keyframes skeleton-pulse {
+    0% { opacity: 0.4; }
+    50% { opacity: 0.7; }
+    100% { opacity: 0.4; }
+}
+.skeleton-line {
+    background: linear-gradient(90deg, rgba(255,255,255,0.1) 25%, rgba(255,255,255,0.2) 50%, rgba(255,255,255,0.1) 75%);
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.5s infinite;
+}
+@keyframes skeleton-shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+"""
+
+
 def create_submenu_nav(current_page: str, stock_code: str = 'CDIA') -> html.Div:
     """
     Create consistent submenu navigation buttons for Analysis subpages.
@@ -4949,9 +5122,18 @@ def create_key_metrics_compact(stock_code='CDIA'):
         volume_analysis = full_analysis.get('volume_analysis', {})
         sr_analysis = analyze_support_resistance(stock_code)
 
-        def metric_card(title, value, subtitle, color="info"):
+        def metric_card(title, value, subtitle, color="info", tooltip_key=None):
+            # Title with optional tooltip
+            if tooltip_key and tooltip_key in TERM_DEFINITIONS:
+                title_element = html.Small([
+                    html.Span(title, style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS[tooltip_key]),
+                    html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
+                ], className="text-muted", style={"fontSize": "10px"})
+            else:
+                title_element = html.Small(title, className="text-muted", style={"fontSize": "10px"})
+
             return html.Div([
-                html.Small(title, className="text-muted", style={"fontSize": "10px"}),
+                title_element,
                 html.H5(value, className=f"text-{color} mb-0"),
                 html.Small(subtitle, className="text-muted", style={"fontSize": "9px"})
             ], className="text-center p-2 rounded metric-box")
@@ -4991,7 +5173,8 @@ def create_key_metrics_compact(stock_code='CDIA'):
                             "Broker Sensitivity",
                             f"{sens_score:.0f}%",
                             html.Span(["Top: ", colored_broker(top_brokers[0], with_badge=True)] + ([", ", colored_broker(top_brokers[1], with_badge=True)] if len(top_brokers) > 1 else [])) if top_brokers else "N/A",
-                            "info" if sens_score > 50 else "warning"
+                            "info" if sens_score > 50 else "warning",
+                            tooltip_key="broker_sensitivity"
                         )
                     ], width=4),
                     dbc.Col([
@@ -4999,15 +5182,17 @@ def create_key_metrics_compact(stock_code='CDIA'):
                             "Foreign Flow",
                             f"{foreign_score:.0f}",
                             foreign_signal[:10] if foreign_signal else "N/A",
-                            "success" if foreign_score > 0 else ("danger" if foreign_score < 0 else "secondary")
+                            "success" if foreign_score > 0 else ("danger" if foreign_score < 0 else "secondary"),
+                            tooltip_key="foreign_flow"
                         )
                     ], width=4),
                     dbc.Col([
                         metric_card(
-                            "Volume",
-                            f"RVOL {rvol:.1f}x",
+                            "Volume (RVOL)",
+                            f"{rvol:.1f}x",
                             vpt_signal[:10] if vpt_signal else "N/A",
-                            "success" if rvol > 1.2 else ("warning" if rvol > 0.8 else "danger")
+                            "success" if rvol > 1.2 else ("warning" if rvol > 0.8 else "danger"),
+                            tooltip_key="rvol"
                         )
                     ], width=4),
                 ], className="mb-2"),
@@ -6780,8 +6965,42 @@ def create_analysis_page(stock_code='CDIA'):
             html.P("Pastikan data sudah diupload dengan benar")
         ])
 
+    # Generate one-line insight based on analysis
+    overall_signal = summary.get('overall_signal', 'NETRAL')
+    conf_level = confidence.get('level', 'LOW')
+    pass_rate = confidence.get('pass_rate', 0)
+    action = decision.get('action', 'WAIT')
+
+    if overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
+        insight_text = f"🟢 {stock_code} menunjukkan pola akumulasi kuat ({pass_rate:.0f}% validasi lolos). Perhatikan zona entry."
+        insight_color = "success"
+    elif overall_signal == 'AKUMULASI':
+        insight_text = f"🟡 {stock_code} menunjukkan sinyal akumulasi awal. Pantau konsistensi broker flow."
+        insight_color = "info"
+    elif overall_signal == 'DISTRIBUSI' and conf_level in ['HIGH', 'VERY_HIGH']:
+        insight_text = f"🔴 {stock_code} dalam fase distribusi kuat ({pass_rate:.0f}% validasi). Hati-hati posisi beli baru."
+        insight_color = "danger"
+    elif overall_signal == 'DISTRIBUSI':
+        insight_text = f"🟠 {stock_code} menunjukkan sinyal distribusi. Pertimbangkan pengurangan posisi."
+        insight_color = "warning"
+    else:
+        insight_text = f"⏳ {stock_code} dalam fase netral. Tidak ada sinyal kuat - observasi dulu."
+        insight_color = "secondary"
+
     # ========== BUILD THE PAGE ==========
     return html.Div([
+        # === ONE-LINE INSIGHT BAR (TOP HEADLINE) ===
+        dbc.Alert([
+            html.Div([
+                html.I(className="fas fa-lightbulb me-2 text-warning"),
+                html.Strong("Quick Insight: ", className="me-1"),
+                html.Span(insight_text),
+            ], className="d-flex align-items-center flex-wrap")
+        ], color=insight_color, className="mb-3 py-2", style={
+            "borderLeft": f"4px solid var(--bs-{insight_color})",
+            "backgroundColor": f"rgba(var(--bs-{insight_color}-rgb), 0.1)"
+        }),
+
         # === PAGE HEADER WITH SUBMENU NAVIGATION ===
         html.Div([
             html.H4([
@@ -6883,19 +7102,28 @@ def create_analysis_page(stock_code='CDIA'):
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.Small("PER", className="text-muted d-block"),
+                                    html.Small([
+                                        html.Span("PER", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['per']),
+                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
+                                    ], className="text-muted d-block"),
                                     html.H4(f"{fundamental.get('per', 0):.1f}x" if fundamental.get('has_data') else "N/A", className="mb-0 text-info"),
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("PBV", className="text-muted d-block"),
+                                    html.Small([
+                                        html.Span("PBV", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['pbv']),
+                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
+                                    ], className="text-muted d-block"),
                                     html.H4(f"{fundamental.get('pbvr', 0):.1f}x" if fundamental.get('has_data') else "N/A", className="mb-0 text-info"),
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("ROE", className="text-muted d-block"),
+                                    html.Small([
+                                        html.Span("ROE", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['roe']),
+                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
+                                    ], className="text-muted d-block"),
                                     html.H4(f"{fundamental.get('roe', 0)*100:.1f}%" if fundamental.get('has_data') else "N/A", className="mb-0 text-info"),
                                 ], className="text-center")
                             ], width=4),
@@ -6923,13 +7151,13 @@ def create_analysis_page(stock_code='CDIA'):
                             html.Div([
                                 html.Div([
                                     html.Span(f"Rp {sr.get('support_20d', 0):,.0f}", className="small text-success"),
-                                    html.Span(" Support", className="small text-muted")
+                                    html.Span(" Support", className="small text-muted", style={'cursor': 'help'}, title=TERM_DEFINITIONS['support'])
                                 ], className="text-start", style={"width": "33%"}),
                                 html.Div([
                                     html.Span(f"Rp {current_price:,.0f}", className="small text-warning fw-bold"),
                                 ], className="text-center", style={"width": "34%"}),
                                 html.Div([
-                                    html.Span("Resistance ", className="small text-muted"),
+                                    html.Span("Resistance ", className="small text-muted", style={'cursor': 'help'}, title=TERM_DEFINITIONS['resistance']),
                                     html.Span(f"Rp {sr.get('resistance_20d', 0):,.0f}", className="small text-danger")
                                 ], className="text-end", style={"width": "33%"}),
                             ], className="d-flex justify-content-between mb-1") if sr.get('has_data') else None,
@@ -6962,7 +7190,10 @@ def create_analysis_page(stock_code='CDIA'):
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.H6([html.I(className="fas fa-cubes me-2 text-warning"), "Accumulation"], className="mb-0 d-inline"),
+                        html.H6([
+                            html.I(className="fas fa-cubes me-2 text-warning"),
+                            html.Span("Accumulation", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['accumulation'])
+                        ], className="mb-0 d-inline"),
                         dcc.Link(html.Small("Detail →", className="float-end text-info"), href="/accumulation")
                     ]),
                     dbc.CardBody([
@@ -6972,26 +7203,36 @@ def create_analysis_page(stock_code='CDIA'):
                                     html.Small("Sinyal", className="text-muted d-block"),
                                     dbc.Badge(
                                         summary.get('overall_signal', 'NETRAL'),
-                                        color="success" if summary.get('overall_signal') == 'AKUMULASI' else "danger" if summary.get('overall_signal') == 'DISTRIBUSI' else "secondary"
+                                        color="success" if summary.get('overall_signal') == 'AKUMULASI' else "danger" if summary.get('overall_signal') == 'DISTRIBUSI' else "secondary",
+                                        title=TERM_DEFINITIONS['accumulation'] if summary.get('overall_signal') == 'AKUMULASI' else TERM_DEFINITIONS['distribution'] if summary.get('overall_signal') == 'DISTRIBUSI' else '',
+                                        style={'cursor': 'help'}
                                     ),
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Validasi", className="text-muted d-block"),
+                                    html.Small([
+                                        html.Span("Validasi", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['confidence']),
+                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
+                                    ], className="text-muted d-block"),
                                     html.H4(f"{confidence.get('passed', 0)}/6", className=f"mb-0 text-{'success' if confidence.get('pass_rate', 0) >= 60 else 'warning' if confidence.get('pass_rate', 0) >= 40 else 'danger'}"),
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("CPR", className="text-muted d-block"),
+                                    html.Small([
+                                        html.Span("CPR", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['cpr']),
+                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
+                                    ], className="text-muted d-block"),
                                     html.H4(f"{validations.get('cpr', {}).get('avg_cpr', 0)*100:.0f}%", className="mb-0 text-info"),
                                 ], className="text-center")
                             ], width=4),
                         ], className="mb-2"),
                         html.Hr(className="my-2"),
                         html.Div([
-                            html.Small("Confidence: ", className="text-muted"),
+                            html.Small([
+                                html.Span("Confidence: ", style={'cursor': 'help'}, title=TERM_DEFINITIONS['confidence'])
+                            ], className="text-muted"),
                             dbc.Badge(confidence.get('level', 'N/A'), color="success" if confidence.get('level') in ['HIGH', 'VERY_HIGH'] else "warning" if confidence.get('level') == 'MEDIUM' else "secondary")
                         ], className="text-center")
                     ])
@@ -7702,8 +7943,83 @@ def create_broker_consistency_table(df):
 # PAGE: DASHBOARD (Dynamic)
 # ============================================================
 
+def create_one_line_insight(stock_code: str) -> html.Div:
+    """
+    Generate a one-line insight bar for quick market context.
+    This appears at the top of dashboard for immediate understanding.
+    """
+    try:
+        # Get unified analysis for insight
+        unified = get_unified_analysis_summary(stock_code)
+        accum = unified.get('accumulation', {})
+        decision = unified.get('decision', {})
+        sr = unified.get('support_resistance', {})
+
+        summary = accum.get('summary', {})
+        confidence = accum.get('confidence', {})
+        overall_signal = summary.get('overall_signal', 'NETRAL')
+        conf_level = confidence.get('level', 'LOW')
+        pass_rate = confidence.get('pass_rate', 0)
+
+        current_price = sr.get('current_price', 0)
+        action = decision.get('action', 'WAIT')
+
+        # Generate contextual insight
+        if overall_signal == 'AKUMULASI' and conf_level in ['HIGH', 'VERY_HIGH']:
+            insight = f"🟢 {stock_code} menunjukkan pola akumulasi kuat ({pass_rate:.0f}% validasi lolos). Perhatikan zona entry."
+            color = "success"
+            icon = "fas fa-arrow-trend-up"
+        elif overall_signal == 'AKUMULASI':
+            insight = f"🟡 {stock_code} menunjukkan sinyal akumulasi awal. Pantau konsistensi broker flow."
+            color = "info"
+            icon = "fas fa-chart-line"
+        elif overall_signal == 'DISTRIBUSI' and conf_level in ['HIGH', 'VERY_HIGH']:
+            insight = f"🔴 {stock_code} dalam fase distribusi kuat ({pass_rate:.0f}% validasi). Hati-hati posisi beli baru."
+            color = "danger"
+            icon = "fas fa-arrow-trend-down"
+        elif overall_signal == 'DISTRIBUSI':
+            insight = f"🟠 {stock_code} menunjukkan sinyal distribusi. Pertimbangkan pengurangan posisi."
+            color = "warning"
+            icon = "fas fa-exclamation-triangle"
+        else:
+            insight = f"⏳ {stock_code} dalam fase netral. Tidak ada sinyal kuat - observasi dulu."
+            color = "secondary"
+            icon = "fas fa-clock"
+
+        # Add action hint
+        action_hints = {
+            'ENTRY': " → Peluang entry di zona support.",
+            'ADD': " → Layak tambah posisi.",
+            'HOLD': " → Tahan posisi yang ada.",
+            'EXIT': " → Pertimbangkan profit taking.",
+            'WAIT': " → Tunggu konfirmasi lebih lanjut."
+        }
+        insight += action_hints.get(action, "")
+
+    except Exception as e:
+        insight = f"📊 Sistem sedang menganalisis {stock_code}. Silakan tunggu..."
+        color = "secondary"
+        icon = "fas fa-spinner fa-spin"
+
+    return html.Div([
+        dbc.Alert([
+            html.Div([
+                html.I(className=f"{icon} me-2"),
+                html.Strong("Insight: ", className="me-1"),
+                html.Span(insight),
+            ], className="d-flex align-items-center flex-wrap")
+        ], color=color, className="mb-3 py-2", style={
+            "borderLeft": f"4px solid var(--bs-{color})",
+            "backgroundColor": f"rgba(var(--bs-{color}-rgb), 0.1)"
+        })
+    ])
+
+
 def create_dashboard_page(stock_code='CDIA'):
     return html.Div([
+        # === ONE-LINE INSIGHT BAR (NEW) ===
+        create_one_line_insight(stock_code),
+
         # Header with submenu navigation
         dbc.Row([
             dbc.Col([
@@ -8821,7 +9137,15 @@ def create_app_layout():
         dcc.Location(id='url', refresh=False),
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         create_navbar(),
-        dbc.Container(id='page-content', fluid=True)
+        # Wrap page-content with Loading component for better UX
+        dcc.Loading(
+            id="page-loading",
+            type="circle",
+            fullscreen=False,
+            children=dbc.Container(id='page-content', fluid=True),
+            style={"minHeight": "400px"},
+            color="#17a2b8"
+        )
     ], id='main-container')
 
 app.layout = create_app_layout()
