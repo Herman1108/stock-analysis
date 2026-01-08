@@ -7119,11 +7119,11 @@ def create_analysis_page(stock_code='CDIA'):
 
     # ========== BUILD THE PAGE ==========
     return html.Div([
-        # === ONE-LINE INSIGHT BAR (TOP HEADLINE) ===
+        # === ONE-LINE INSIGHT BAR (TOP HEADLINE) - INDONESIAN ===
         dbc.Alert([
             html.Div([
                 html.I(className="fas fa-lightbulb me-2 text-warning"),
-                html.Strong("Quick Insight: ", className="me-1"),
+                html.Strong("Insight Hari Ini: ", className="me-1"),
                 html.Span(insight_text),
             ], className="d-flex align-items-center flex-wrap")
         ], color=insight_color, className="mb-3 py-2", style={
@@ -7135,7 +7135,7 @@ def create_analysis_page(stock_code='CDIA'):
         html.Div([
             html.H4([
                 html.I(className="fas fa-chart-pie me-2"),
-                f"Analysis Dashboard - {stock_code}"
+                f"Analisis Detail - {stock_code}"
             ], className="mb-0 d-inline-block me-3"),
             dcc.Link(dbc.Button([html.I(className="fas fa-chart-line me-2"), "Fundamental"], color="success", size="sm", className="me-2"), href="/fundamental"),
             dcc.Link(dbc.Button([html.I(className="fas fa-layer-group me-2"), "Support & Resistance"], color="info", size="sm", className="me-2"), href="/support-resistance"),
@@ -7169,25 +7169,25 @@ def create_analysis_page(stock_code='CDIA'):
                             html.P(decision.get('reason', ''), className="mb-3"),
                         ]),
 
-                        # Key Points & Warnings
+                        # Poin Utama & Peringatan (Indonesian)
                         dbc.Row([
                             dbc.Col([
-                                html.H6([html.I(className="fas fa-check-circle text-success me-2"), "Key Points"], className="mb-2"),
+                                html.H6([html.I(className="fas fa-check-circle text-success me-2"), "Poin Utama"], className="mb-2"),
                                 html.Div([
                                     html.Div([
                                         html.Span(kp.get('icon', ''), className="me-2"),
                                         html.Span(kp.get('text', ''), className=f"text-{kp.get('color', 'muted')} small")
                                     ], className="mb-1") for kp in key_points[:4]
-                                ]) if key_points else html.Small("Tidak ada key points", className="text-muted")
+                                ]) if key_points else html.Small("Tidak ada poin utama", className="text-muted")
                             ], md=6),
                             dbc.Col([
-                                html.H6([html.I(className="fas fa-exclamation-triangle text-warning me-2"), "Warnings"], className="mb-2"),
+                                html.H6([html.I(className="fas fa-exclamation-triangle text-warning me-2"), "Peringatan"], className="mb-2"),
                                 html.Div([
                                     html.Div([
                                         html.Span(w.get('icon', ''), className="me-2"),
                                         html.Span(w.get('text', ''), className=f"text-{w.get('color', 'muted')} small")
                                     ], className="mb-1") for w in warnings[:4]
-                                ]) if warnings else html.Small("Tidak ada warning", className="text-muted")
+                                ]) if warnings else html.Small("Tidak ada peringatan", className="text-muted")
                             ], md=6),
                         ])
                     ], md=9)
@@ -7195,13 +7195,13 @@ def create_analysis_page(stock_code='CDIA'):
             ])
         ], className="mb-4", style={"border": f"3px solid var(--bs-{decision.get('color', 'secondary')})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
 
-        # === IMPULSE/MOMENTUM ALERT (tertinggi prioritas) ===
+        # === IMPULSE/MOMENTUM ALERT (tertinggi prioritas) - INDONESIAN ===
         dbc.Alert([
             dbc.Row([
                 dbc.Col([
                     html.Div([
                         html.Span("⚡", style={"fontSize": "32px"}),
-                        html.Strong(f" MOMENTUM {impulse_signal.get('strength', '')} DETECTED", className="text-danger fs-5 ms-2"),
+                        html.Strong(f" MOMENTUM TERDETEKSI ({impulse_signal.get('strength', '')})", className="text-danger fs-5 ms-2"),
                     ], className="d-flex align-items-center"),
                     html.P([
                         html.Strong("Pergerakan agresif tanpa fase akumulasi. "),
@@ -7212,7 +7212,7 @@ def create_analysis_page(stock_code='CDIA'):
                 ], md=8),
                 dbc.Col([
                     html.Div([
-                        html.Small("Trigger Conditions", className="text-muted d-block"),
+                        html.Small("Kondisi Pemicu", className="text-muted d-block"),
                         html.Div([
                             dbc.Badge("✓ Vol 2x" if impulse_signal.get('metrics', {}).get('is_volume_spike') else "○ Vol 2x",
                                       color="success" if impulse_signal.get('metrics', {}).get('is_volume_spike') else "secondary", className="me-1"),
@@ -7227,7 +7227,7 @@ def create_analysis_page(stock_code='CDIA'):
         ], color="danger", className="mb-3", style={"backgroundColor": "rgba(220,53,69,0.15)", "border": "2px solid #dc3545"})
         if impulse_signal.get('impulse_detected') else html.Div(),
 
-        # === NEAR IMPULSE ALERT (hampir impulse) ===
+        # === NEAR IMPULSE ALERT (hampir impulse) - INDONESIAN ===
         dbc.Alert([
             dbc.Row([
                 dbc.Col([
@@ -7235,19 +7235,19 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Span("👁️", style={"fontSize": "28px"}),
                         html.Strong(f" HAMPIR IMPULSE ({impulse_signal.get('trigger_conditions', {}).get('conditions_met', 0)}/3 kondisi)", className="text-info fs-6 ms-2"),
                     ], className="d-flex align-items-center"),
-                    html.P("Satu atau dua kondisi belum terpenuhi. Pantau volume dan price action besok.", className="mb-0 small"),
+                    html.P("Satu atau dua kondisi belum terpenuhi. Pantau volume dan pergerakan harga besok.", className="mb-0 small"),
                 ], md=12),
             ]),
         ], color="info", className="mb-3", style={"backgroundColor": "rgba(23,162,184,0.15)", "border": "1px solid #17a2b8"})
         if impulse_signal.get('near_impulse') and not impulse_signal.get('impulse_detected') else html.Div(),
 
-        # === MARKUP TRIGGER ALERT (setelah akumulasi) ===
+        # === MARKUP TRIGGER ALERT (setelah akumulasi) - INDONESIAN ===
         dbc.Alert([
             dbc.Row([
                 dbc.Col([
                     html.Div([
                         html.Span("🔥", style={"fontSize": "28px"}),
-                        html.Strong(" MARKUP TRIGGER DETECTED", className="text-warning fs-5 ms-2"),
+                        html.Strong(" MARKUP TERDETEKSI", className="text-warning fs-5 ms-2"),
                     ], className="d-flex align-items-center"),
                     html.P([
                         "Harga breakout ", html.Strong(f"+{markup_trigger.get('breakout_pct', 0):.1f}%"),
@@ -7256,7 +7256,7 @@ def create_analysis_page(stock_code='CDIA'):
                 ], md=9),
                 dbc.Col([
                     html.Div([
-                        html.Small("Volume Spike", className="text-muted d-block"),
+                        html.Small("Lonjakan Volume", className="text-muted d-block"),
                         dbc.Badge(f"+{markup_trigger.get('volume_spike_pct', 0):.0f}%" if markup_trigger.get('volume_spike') else "Normal",
                                   color="success" if markup_trigger.get('volume_spike') else "secondary"),
                     ]),
