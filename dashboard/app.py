@@ -5017,11 +5017,16 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
         total_flow = today_buy + today_sell
         accum_ratio = (today_buy / total_flow * 100) if total_flow > 0 else 50
 
-        # Foreign flow
-        foreign_today = foreign_flow.get('latest_value', 0) / 1e9
-        foreign_yesterday = foreign_flow.get('prev_value', 0) / 1e9
-        foreign_signal = foreign_flow.get('signal', 'NEUTRAL')
-        foreign_streak = foreign_flow.get('streak_days', 0)
+        # Foreign flow - use correct keys from calculate_foreign_flow_momentum
+        # latest_foreign is already in billions
+        foreign_today = foreign_flow.get('latest_foreign', 0)
+        # Calculate yesterday from today - momentum (momentum is the difference)
+        foreign_momentum = foreign_flow.get('momentum', 0)
+        foreign_yesterday = foreign_today - foreign_momentum
+        foreign_signal = foreign_flow.get('direction_label', 'FLAT')  # INFLOW/OUTFLOW/FLAT
+        foreign_consistency = foreign_flow.get('consistency', 0)  # Positive = inflow, negative = outflow
+        foreign_streak = abs(foreign_consistency)  # Streak count
+        foreign_streak_direction = 'beli' if foreign_consistency > 0 else 'jual'
 
         # Weekly trend (last 5 days)
         weekly_data = []
@@ -5047,7 +5052,7 @@ def create_quick_sentiment_summary(stock_code='CDIA'):
             "Pembeli mendominasi" if accum_ratio > 55 else "Penjual mendominasi"
         )
         streak_subtitle = "Belum ada tren beli/jual beruntun" if foreign_streak == 0 else (
-            f"Tren {'beli' if 'INFLOW' in foreign_signal else 'jual'} {foreign_streak} hari berturut"
+            f"Tren {foreign_streak_direction} {foreign_streak} hari berturut"
         )
 
         return dbc.Card([
