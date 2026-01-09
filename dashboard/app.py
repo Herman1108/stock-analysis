@@ -3219,12 +3219,12 @@ def get_member_stats():
     query = """
         SELECT
             COUNT(*) FILTER (WHERE member_type = 'trial' AND is_verified = TRUE AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP)) as active_trial,
-            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND is_verified = TRUE AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP)) as active_subscribe,
+            COUNT(*) FILTER (WHERE member_type IN ('subscribe', 'admin') AND is_verified = TRUE AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP)) as active_subscribe,
             COUNT(*) FILTER (WHERE member_type = 'trial' AND (member_end < CURRENT_TIMESTAMP OR is_verified = FALSE)) as expired_trial,
-            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND (member_end < CURRENT_TIMESTAMP OR is_verified = FALSE)) as expired_subscribe,
+            COUNT(*) FILTER (WHERE member_type IN ('subscribe', 'admin') AND (member_end < CURRENT_TIMESTAMP OR is_verified = FALSE)) as expired_subscribe,
             COUNT(*) FILTER (WHERE last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'trial') as online_trial,
-            COUNT(*) FILTER (WHERE last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'subscribe') as online_subscribe,
-            COUNT(*) FILTER (WHERE member_type IN ('trial', 'subscribe')) as total_members
+            COUNT(*) FILTER (WHERE last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type IN ('subscribe', 'admin')) as online_subscribe,
+            COUNT(*) FILTER (WHERE member_type IN ('trial', 'subscribe', 'admin')) as total_members
         FROM users
         WHERE member_type IN ('trial', 'subscribe', 'admin')
     """
@@ -3240,25 +3240,47 @@ def get_member_stats():
 
 def get_members_by_type(member_type: str):
     """Get users filtered by type with expiry info"""
-    query = """
-        SELECT id, email, username as name, member_type, member_start as start_date, member_end as end_date,
-            is_verified as is_active, last_login as last_online, created_at,
-            CASE
-                WHEN member_end IS NULL THEN NULL
-                WHEN member_end < CURRENT_TIMESTAMP THEN 0
-                ELSE EXTRACT(DAY FROM (member_end - CURRENT_TIMESTAMP))
-            END as days_remaining,
-            CASE
-                WHEN last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN TRUE
-                ELSE FALSE
-            END as is_online
-        FROM users
-        WHERE member_type = %s
-        ORDER BY
-            CASE WHEN is_verified AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP) THEN 0 ELSE 1 END,
-            member_end ASC
-    """
-    return execute_query(query, (member_type,), use_cache=False) or []
+    # For 'subscribe' tab, also show admin users
+    if member_type == 'subscribe':
+        query = """
+            SELECT id, email, username as name, member_type, member_start as start_date, member_end as end_date,
+                is_verified as is_active, last_login as last_online, created_at,
+                CASE
+                    WHEN member_end IS NULL THEN NULL
+                    WHEN member_end < CURRENT_TIMESTAMP THEN 0
+                    ELSE EXTRACT(DAY FROM (member_end - CURRENT_TIMESTAMP))
+                END as days_remaining,
+                CASE
+                    WHEN last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN TRUE
+                    ELSE FALSE
+                END as is_online
+            FROM users
+            WHERE member_type IN ('subscribe', 'admin')
+            ORDER BY
+                CASE WHEN is_verified AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP) THEN 0 ELSE 1 END,
+                member_end ASC
+        """
+        return execute_query(query, use_cache=False) or []
+    else:
+        query = """
+            SELECT id, email, username as name, member_type, member_start as start_date, member_end as end_date,
+                is_verified as is_active, last_login as last_online, created_at,
+                CASE
+                    WHEN member_end IS NULL THEN NULL
+                    WHEN member_end < CURRENT_TIMESTAMP THEN 0
+                    ELSE EXTRACT(DAY FROM (member_end - CURRENT_TIMESTAMP))
+                END as days_remaining,
+                CASE
+                    WHEN last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN TRUE
+                    ELSE FALSE
+                END as is_online
+            FROM users
+            WHERE member_type = %s
+            ORDER BY
+                CASE WHEN is_verified AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP) THEN 0 ELSE 1 END,
+                member_end ASC
+        """
+        return execute_query(query, (member_type,), use_cache=False) or []
 
 def add_member(email: str, name: str, member_type: str):
     """Add new member to users table - trial gets 7 days, subscribe gets 30 days"""
