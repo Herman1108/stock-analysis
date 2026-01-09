@@ -8,6 +8,17 @@ from datetime import datetime
 from typing import Tuple, List, Dict
 from database import get_cursor, execute_query
 
+def safe_float(val) -> float:
+    """
+    Safely convert value to float, handling '-', empty, and NaN values
+    """
+    if pd.isna(val) or val == '' or val == '-' or str(val).strip() == '-':
+        return 0.0
+    try:
+        return float(str(val).strip().replace(',', ''))
+    except (ValueError, TypeError):
+        return 0.0
+
 def parse_value_string(val_str) -> float:
     """
     Parse string nilai dengan suffix B/M/K ke numeric
@@ -134,7 +145,7 @@ def read_excel_data(file_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
                 buy_broker = col0_str.upper()
                 buy_val = parse_value_string(row[1])
                 buy_lot = parse_value_string(row[2])
-                buy_avg = float(row[3]) if pd.notna(row[3]) else 0
+                buy_avg = safe_float(row[3])
 
                 # Tambahkan data buy
                 if buy_broker and buy_broker != '-':
@@ -156,7 +167,7 @@ def read_excel_data(file_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
                 sell_broker = col4_str
                 sell_val = parse_value_string(row[5])
                 sell_lot = parse_value_string(row[6])
-                sell_avg = float(row[7]) if pd.notna(row[7]) else 0
+                sell_avg = safe_float(row[7])
 
                 # Cari apakah broker sudah ada untuk tanggal ini
                 found = False

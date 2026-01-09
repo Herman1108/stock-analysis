@@ -12473,15 +12473,20 @@ def display_page(pathname, search, selected_stock):
      Output('upload-password-error', 'children'),
      Output('admin-session', 'data')],
     [Input('upload-password-submit', 'n_clicks'),
-     Input('admin-session', 'data')],
+     Input('admin-session', 'data'),
+     Input('user-session', 'data')],
     [State('upload-password-input', 'value')],
-    prevent_initial_call=False
+    prevent_initial_call=True
 )
-def validate_upload_password(n_clicks, session_data, password):
+def validate_upload_password(n_clicks, session_data, user_session, password):
     ctx = dash.callback_context
     triggered = ctx.triggered[0]['prop_id'] if ctx.triggered else None
 
-    # Check if already logged in from session
+    # Check if user is logged in as admin/superuser - auto unlock upload
+    if user_session and user_session.get('member_type') == 'admin':
+        return {'display': 'none'}, {'display': 'block'}, "", {'logged_in': True}
+
+    # Check if already logged in from admin session (password)
     if session_data and session_data.get('logged_in'):
         return {'display': 'none'}, {'display': 'block'}, "", session_data
 
