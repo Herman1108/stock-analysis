@@ -1553,37 +1553,81 @@ body.light-mode .navbar .btn-warning:hover {
 }
 
 /* ============================================
-   STOCK DROPDOWN MOBILE FIX
-   Ensure dropdown menu is visible on mobile
+   STOCK DROPDOWN - CRITICAL MOBILE FIX
+   Force dropdown menu to be visible on all devices
    ============================================ */
-@media screen and (max-width: 767px) {
-  /* Container positioning */
-  .stock-dropdown {
-    position: relative !important;
-    z-index: 9999 !important;
+
+/* Global - ensure all containers allow overflow */
+.navbar,
+.navbar *,
+.navbar-expand-lg,
+.container,
+.container-fluid {
+  overflow: visible !important;
+}
+
+/* Stock dropdown container */
+.stock-dropdown {
+  position: relative !important;
+  z-index: 10000 !important;
+}
+
+/* The dropdown menu itself */
+.stock-dropdown .Select-menu-outer {
+  position: absolute !important;
+  top: 100% !important;
+  left: 0 !important;
+  width: 140px !important;
+  max-height: 250px !important;
+  overflow-y: auto !important;
+  z-index: 100000 !important;
+  background-color: #16213e !important;
+  border: 1px solid #0f3460 !important;
+  border-radius: 4px !important;
+  box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Options container */
+.stock-dropdown .Select-menu {
+  max-height: 240px !important;
+  overflow-y: auto !important;
+}
+
+/* Individual option styling */
+.stock-dropdown .Select-option {
+  padding: 10px 12px !important;
+  font-size: 14px !important;
+  color: #fff !important;
+  background-color: #16213e !important;
+  cursor: pointer !important;
+  display: block !important;
+  visibility: visible !important;
+}
+
+/* Light mode dropdown */
+body.light-mode .stock-dropdown .Select-menu-outer {
+  background-color: #ffffff !important;
+  border: 1px solid #ccc !important;
+}
+
+body.light-mode .stock-dropdown .Select-option {
+  background-color: #ffffff !important;
+  color: #333 !important;
+}
+
+/* Mobile specific - larger touch targets */
+@media screen and (max-width: 991px) {
+  .stock-dropdown .Select-option {
+    padding: 14px 12px !important;
+    min-height: 48px !important;
+    font-size: 16px !important;
   }
 
-  /* Dropdown menu must be visible above other elements */
   .stock-dropdown .Select-menu-outer {
-    z-index: 99999 !important;
+    width: 150px !important;
     max-height: 300px !important;
   }
-
-  /* Individual options - larger touch targets for mobile */
-  .stock-dropdown .Select-option,
-  .stock-dropdown .VirtualizedSelectOption {
-    padding: 12px 10px !important;
-    font-size: 14px !important;
-    min-height: 44px !important;
-  }
-}
-
-/* Ensure navbar doesn't clip dropdown */
-.navbar {
-  overflow: visible !important;
-}
-
-.navbar .navbar-collapse,
-.navbar .d-flex {
-  overflow: visible !important;
 }
