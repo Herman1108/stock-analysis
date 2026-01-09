@@ -12332,14 +12332,67 @@ def create_selling_pressure_chart(position_df, current_price):
 # ============================================================
 
 # Render navbar sekali di layout (tidak re-render setiap URL change)
+def create_login_required_content():
+    """Create content shown when login is required"""
+    return html.Div([
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.I(className="fas fa-lock fa-4x text-warning mb-4"),
+                            ], className="text-center"),
+                            html.H3("Login Diperlukan", className="text-center mb-3"),
+                            html.P([
+                                "Anda harus login terlebih dahulu untuk mengakses halaman ini."
+                            ], className="text-center text-muted mb-4"),
+                            html.Div([
+                                dcc.Link(
+                                    dbc.Button([
+                                        html.I(className="fas fa-sign-in-alt me-2"),
+                                        "Login Sekarang"
+                                    ], color="primary", size="lg", className="me-3"),
+                                    href="/login"
+                                ),
+                                dcc.Link(
+                                    dbc.Button([
+                                        html.I(className="fas fa-user-plus me-2"),
+                                        "Daftar Akun Baru"
+                                    ], color="success", size="lg", outline=True),
+                                    href="/signup"
+                                ),
+                            ], className="text-center mb-4"),
+                            html.Hr(),
+                            html.P([
+                                html.I(className="fas fa-info-circle me-2 text-info"),
+                                "Dengan mendaftar, Anda akan mendapat akses trial 7 hari gratis!"
+                            ], className="text-center text-muted small mb-0")
+                        ], className="py-5")
+                    ], className="shadow-lg border-0")
+                ], md=6, lg=5, className="mx-auto")
+            ], className="min-vh-75 align-items-center", style={"minHeight": "60vh"})
+        ], className="py-5")
+    ])
+
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
-        dcc.Location(id='url', refresh=False),
+        dcc.Location(id='url', refresh='callback-nav'),  # Enable programmatic navigation
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
         dcc.Store(id='user-session', storage_type='session', data=None),  # User login session
         dcc.Store(id='superadmin-session', storage_type='local', data=None),  # Super admin persistent login
+
+        # Hidden dummy components to prevent callback errors when page components don't exist
+        html.Div([
+            html.Button(id='upload-password-submit', n_clicks=0),
+            dcc.Input(id='upload-password-input', value=''),
+            html.Div(id='upload-password-gate'),
+            html.Div(id='upload-form-container'),
+            html.Div(id='upload-password-error'),
+        ], style={'display': 'none'}),
+
         create_navbar(),
         # Wrap page-content with Loading component for better UX
         dcc.Loading(
@@ -12412,9 +12465,10 @@ app.clientside_callback(
 
 @app.callback(
     Output('page-content', 'children'),
-    [Input('url', 'pathname'), Input('url', 'search'), Input('stock-selector', 'value')]
+    [Input('url', 'pathname'), Input('url', 'search'), Input('stock-selector', 'value')],
+    [State('user-session', 'data'), State('superadmin-session', 'data')]
 )
-def display_page(pathname, search, selected_stock):
+def display_page(pathname, search, selected_stock, user_session, superadmin_session):
     """Main routing callback - triggers on URL change OR stock selection change"""
     # Get default stock if none selected
     if not selected_stock:
@@ -12427,6 +12481,20 @@ def display_page(pathname, search, selected_stock):
         from urllib.parse import parse_qs
         params = parse_qs(search.lstrip('?'))
         token = params.get('token', [None])[0]
+
+    # Check if user is logged in
+    is_logged_in = False
+    if user_session and user_session.get('email'):
+        is_logged_in = True
+    elif superadmin_session and superadmin_session.get('email'):
+        is_logged_in = True
+
+    # Public pages (no login required)
+    public_pages = ['/', '/login', '/signup', '/verify']
+
+    # Protected pages require login
+    if pathname not in public_pages and not is_logged_in:
+        return create_login_required_content()
 
     # Route to appropriate page
     if pathname == '/':
@@ -13180,7 +13248,8 @@ def handle_signup(n_clicks, email, username, password, confirm):
 @app.callback(
     [Output('login-feedback', 'children'),
      Output('user-session', 'data'),
-     Output('superadmin-session', 'data')],
+     Output('superadmin-session', 'data'),
+     Output('url', 'pathname', allow_duplicate=True)],
     [Input('login-submit', 'n_clicks'),
      Input('resend-verification-btn', 'n_clicks')],
     [State('login-email', 'value'),
@@ -13199,7 +13268,7 @@ def handle_login_and_resend(login_clicks, resend_clicks, email, password, curren
     # Handle resend verification
     if triggered_id == 'resend-verification-btn' and resend_clicks:
         if not email:
-            return dbc.Alert("Masukkan email Anda terlebih dahulu!", color="warning"), dash.no_update, dash.no_update
+            return dbc.Alert("Masukkan email Anda terlebih dahulu!", color="warning"), dash.no_update, dash.no_update, dash.no_update
 
         result = resend_verification(email)
 
@@ -13207,17 +13276,17 @@ def handle_login_and_resend(login_clicks, resend_clicks, email, password, curren
             return dbc.Alert([
                 html.I(className="fas fa-envelope me-2"),
                 result['message']
-            ], color="success"), dash.no_update, dash.no_update
+            ], color="success"), dash.no_update, dash.no_update, dash.no_update
         else:
             return dbc.Alert([
                 html.I(className="fas fa-exclamation-circle me-2"),
                 result['error']
-            ], color="danger"), dash.no_update, dash.no_update
+            ], color="danger"), dash.no_update, dash.no_update, dash.no_update
 
     # Handle login
     if triggered_id == 'login-submit' and login_clicks:
         if not email or not password:
-            return dbc.Alert("Email dan password harus diisi!", color="warning"), dash.no_update, dash.no_update
+            return dbc.Alert("Email dan password harus diisi!", color="warning"), dash.no_update, dash.no_update, dash.no_update
 
         result = login_user(email, password)
 
@@ -13236,19 +13305,21 @@ def handle_login_and_resend(login_clicks, resend_clicks, email, password, curren
                 return (
                     dbc.Alert([
                         html.I(className="fas fa-crown me-2 text-warning"),
-                        f"Login berhasil! Selamat datang, Super Admin {user['username']}!"
+                        f"Login berhasil! Mengalihkan ke halaman utama..."
                     ], color="success"),
                     session_data,
-                    session_data  # Save to persistent local storage
+                    session_data,  # Save to persistent local storage
+                    '/'  # Redirect to landing page
                 )
             else:
                 return (
                     dbc.Alert([
                         html.I(className="fas fa-check-circle me-2"),
-                        f"Login berhasil! Selamat datang, {user['username']}."
+                        f"Login berhasil! Mengalihkan ke halaman utama..."
                     ], color="success"),
                     session_data,
-                    dash.no_update  # Don't save to persistent storage for regular users
+                    dash.no_update,  # Don't save to persistent storage for regular users
+                    '/'  # Redirect to landing page
                 )
         else:
             return (
@@ -13256,6 +13327,7 @@ def handle_login_and_resend(login_clicks, resend_clicks, email, password, curren
                     html.I(className="fas fa-exclamation-circle me-2"),
                     result['error']
                 ], color="danger"),
+                dash.no_update,
                 dash.no_update,
                 dash.no_update
             )
