@@ -12062,10 +12062,27 @@ def update_member_online_chart(n_intervals, refresh_clicks):
         stats = get_member_stats()
         trial_online = stats.get('online_trial', 0) or 0
         subscribe_online = stats.get('online_subscribe', 0) or 0
-        trial_offline = (stats.get('active_trial', 0) or 0) - trial_online
-        subscribe_offline = (stats.get('active_subscribe', 0) or 0) - subscribe_online
+        trial_offline = max(0, (stats.get('active_trial', 0) or 0) - trial_online)
+        subscribe_offline = max(0, (stats.get('active_subscribe', 0) or 0) - subscribe_online)
 
         fig = go.Figure()
+
+        # Check if all values are 0
+        total = trial_online + trial_offline + subscribe_online + subscribe_offline
+        if total == 0:
+            fig.add_annotation(
+                text="Belum ada member aktif",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=20, r=20, t=20, b=20),
+            )
+            return fig
 
         # Create donut chart
         labels = ['Trial Online', 'Trial Offline', 'Subscribe Online', 'Subscribe Offline']
@@ -12104,18 +12121,21 @@ def update_member_online_chart(n_intervals, refresh_clicks):
 )
 def extend_member_subscription(n_clicks_list):
     ctx = dash.callback_context
-    if not ctx.triggered or not any(n_clicks_list):
+    if not ctx.triggered or not n_clicks_list or not any(n for n in n_clicks_list if n):
         raise dash.exceptions.PreventUpdate
 
     # Get the triggered button's member ID
     triggered = ctx.triggered[0]
     prop_id = triggered['prop_id']
 
-    import json
-    button_info = json.loads(prop_id.replace('.n_clicks', ''))
-    member_id = button_info['index']
+    if prop_id == '.' or '.n_clicks' not in prop_id:
+        raise dash.exceptions.PreventUpdate
 
+    import json
     try:
+        button_info = json.loads(prop_id.replace('.n_clicks', ''))
+        member_id = button_info['index']
+
         result = extend_member(member_id, 30)
         if result:
             return dbc.Alert([
@@ -12134,17 +12154,20 @@ def extend_member_subscription(n_clicks_list):
 )
 def deactivate_member_callback(n_clicks_list):
     ctx = dash.callback_context
-    if not ctx.triggered or not any(n_clicks_list):
+    if not ctx.triggered or not n_clicks_list or not any(n for n in n_clicks_list if n):
         raise dash.exceptions.PreventUpdate
 
     triggered = ctx.triggered[0]
     prop_id = triggered['prop_id']
 
-    import json
-    button_info = json.loads(prop_id.replace('.n_clicks', ''))
-    member_id = button_info['index']
+    if prop_id == '.' or '.n_clicks' not in prop_id:
+        raise dash.exceptions.PreventUpdate
 
+    import json
     try:
+        button_info = json.loads(prop_id.replace('.n_clicks', ''))
+        member_id = button_info['index']
+
         result = deactivate_member(member_id)
         if result:
             return dbc.Alert([
