@@ -3086,7 +3086,7 @@ def login_user(email: str, password: str) -> dict:
 
     # Update last login
     update_query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
-    execute_query(update_query, (user['id'],), use_cache=False)
+    execute_query(update_query, (user['id'],), fetch=False, use_cache=False)
 
     return {
         'success': True,
