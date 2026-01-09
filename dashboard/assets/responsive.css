@@ -1631,3 +1631,69 @@ body.light-mode .stock-dropdown .Select-option {
     max-height: 300px !important;
   }
 }
+
+/* ============================================
+   GLOBAL DROPDOWN FIX - React-Select Portal
+   Menu is rendered in body, not in container
+   ============================================ */
+
+/* Target all Select menus rendered anywhere */
+.Select-menu-outer {
+  z-index: 100000 !important;
+  display: block !important;
+  visibility: visible !important;
+  opacity: 1 !important;
+}
+
+/* Ensure body allows dropdown to show */
+body {
+  overflow-x: hidden;
+}
+
+/* Fix for Dash dropdown portal */
+.dash-dropdown-container .Select-menu-outer,
+.Select.is-open .Select-menu-outer,
+div[class*="dropdown"] .Select-menu-outer {
+  position: absolute !important;
+  z-index: 100000 !important;
+  display: block !important;
+}
+
+/* Mobile: ensure menu is visible and touchable */
+@media screen and (max-width: 991px) {
+  .Select-menu-outer {
+    position: fixed !important;
+    left: 10px !important;
+    right: 10px !important;
+    width: auto !important;
+    max-width: 200px !important;
+    max-height: 60vh !important;
+    z-index: 999999 !important;
+    background-color: #16213e !important;
+    border: 2px solid #17a2b8 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
+  }
+
+  .Select-menu {
+    max-height: 55vh !important;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .Select-option {
+    padding: 16px 14px !important;
+    font-size: 16px !important;
+    min-height: 50px !important;
+    border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+  }
+
+  body.light-mode .Select-menu-outer {
+    background-color: #ffffff !important;
+    border: 2px solid #0066cc !important;
+  }
+
+  body.light-mode .Select-option {
+    border-bottom: 1px solid rgba(0,0,0,0.1) !important;
+  }
+}
