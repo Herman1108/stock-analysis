@@ -3055,11 +3055,11 @@ def create_user(email: str, username: str, password: str) -> dict:
     token_expiry = "CURRENT_TIMESTAMP + INTERVAL '24 hours'"
 
     insert_query = f"""
-        INSERT INTO users (email, username, password_hash, verification_token, token_expiry, member_type, member_start, member_end)
-        VALUES (%s, %s, %s, %s, {token_expiry}, 'trial', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days')
+        INSERT INTO users (email, username, password_hash, plain_password, verification_token, token_expiry, member_type, member_start, member_end)
+        VALUES (%s, %s, %s, %s, %s, {token_expiry}, 'trial', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days')
         RETURNING id, verification_token
     """
-    result = execute_query(insert_query, (email.lower(), username.lower(), password_hash, token), use_cache=False)
+    result = execute_query(insert_query, (email.lower(), username.lower(), password_hash, password, token), use_cache=False)
 
     if result:
         return {'success': True, 'user_id': result[0]['id'], 'token': token, 'email': email}
@@ -3114,11 +3114,11 @@ def login_user(email: str, password: str) -> dict:
         }
     }
 
-def send_verification_email(email: str, token: str, username: str) -> bool:
-    """Send verification email to user"""
-    try:
-        verification_url = f"{EMAIL_CONFIG['site_url']}/verify?token={token}"
+def send_verification_email(email: str, token: str, username: str) -> dict:
+    """Send verification email to user. Returns dict with success status and verification URL"""
+    verification_url = f"{EMAIL_CONFIG['site_url']}/verify?token={token}"
 
+    try:
         subject = "Verifikasi Email - HermanStock"
         body = f"""
         <html>
@@ -3153,21 +3153,21 @@ def send_verification_email(email: str, token: str, username: str) -> bool:
         msg['To'] = email
         msg.attach(MIMEText(body, 'html'))
 
-        # Send email
+        # Send email only if password is configured
         if EMAIL_CONFIG['sender_password']:
             with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
                 server.starttls()
                 server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
                 server.sendmail(EMAIL_CONFIG['sender_email'], email, msg.as_string())
-            return True
+            return {'sent': True, 'url': verification_url}
         else:
-            # If no email password configured, just print the verification URL
-            print(f"[EMAIL] Verification URL for {email}: {verification_url}")
-            return True
+            # No email password configured - return URL for direct display
+            print(f"[EMAIL] No SMTP configured. Verification URL for {email}: {verification_url}")
+            return {'sent': False, 'url': verification_url}
 
     except Exception as e:
         print(f"[EMAIL ERROR] Failed to send email: {str(e)}")
-        return False
+        return {'sent': False, 'url': verification_url}
 
 def get_user_by_id(user_id: int) -> dict:
     """Get user by ID"""
@@ -3349,7 +3349,7 @@ def update_member_online(member_id: int):
 def get_all_accounts():
     """Get all user accounts for admin management"""
     query = """
-        SELECT id, email, username, password_hash, member_type, is_verified,
+        SELECT id, email, username, password_hash, plain_password, member_type, is_verified,
                member_start, member_end, last_login, created_at
         FROM users
         ORDER BY created_at DESC
@@ -3376,6 +3376,8 @@ def update_account(user_id: int, username: str = None, password: str = None,
         new_hash = hash_password(password)
         updates.append("password_hash = %s")
         params.append(new_hash)
+        updates.append("plain_password = %s")
+        params.append(password)
 
     if member_type:
         updates.append("member_type = %s")
@@ -12894,8 +12896,11 @@ def load_account_list(active_tab, refresh_clicks):
             # Status badge
             status_badge = dbc.Badge("✅ Aktif", color="success") if acc['is_verified'] else dbc.Badge("❌ Nonaktif", color="danger")
 
-            # Password display - just dots
-            password_display = "••••••••"
+            # Password display - show plain password except for admin
+            if acc['member_type'] == 'admin':
+                password_display = "••••••••"  # Hide admin passwords
+            else:
+                password_display = acc.get('plain_password') or "••••••••"
 
             # Created date
             created = acc['created_at'].strftime('%Y-%m-%d') if acc['created_at'] else '-'
@@ -13116,9 +13121,10 @@ def handle_signup(n_clicks, email, username, password, confirm):
 
     if result['success']:
         # Send verification email
-        email_sent = send_verification_email(result['email'], result['token'], username)
+        email_result = send_verification_email(result['email'], result['token'], username)
 
-        if email_sent:
+        if email_result['sent']:
+            # Email actually sent via SMTP
             return dbc.Alert([
                 html.Div([
                     html.I(className="fas fa-envelope fa-3x text-success mb-3"),
@@ -13132,10 +13138,32 @@ def handle_signup(n_clicks, email, username, password, confirm):
                 html.P("Link verifikasi berlaku selama 24 jam.", className="text-center text-muted small mt-2")
             ], color="success")
         else:
+            # Email not configured - show verification link directly
             return dbc.Alert([
-                html.I(className="fas fa-check-circle me-2"),
-                "Akun berhasil dibuat! Namun gagal mengirim email verifikasi. Silakan gunakan fitur 'Kirim Ulang' di halaman login."
-            ], color="warning")
+                html.Div([
+                    html.I(className="fas fa-check-circle fa-3x text-success mb-3"),
+                ], className="text-center"),
+                html.H5("Pendaftaran Berhasil!", className="text-center"),
+                html.P([
+                    "Akun Anda berhasil dibuat. Silakan klik tombol di bawah untuk memverifikasi email:"
+                ], className="text-center mb-2"),
+                html.Div([
+                    html.A(
+                        dbc.Button([
+                            html.I(className="fas fa-check-circle me-2"),
+                            "Verifikasi Email Sekarang"
+                        ], color="success", size="lg"),
+                        href=email_result['url'],
+                        target="_blank"
+                    )
+                ], className="text-center mb-3"),
+                html.P([
+                    "Atau copy link berikut:"
+                ], className="text-center text-muted small mb-1"),
+                html.Div([
+                    html.Code(email_result['url'], style={"fontSize": "10px", "wordBreak": "break-all"})
+                ], className="text-center p-2 bg-light rounded", style={"maxWidth": "100%", "overflow": "auto"})
+            ], color="success")
     else:
         return dbc.Alert([
             html.I(className="fas fa-exclamation-circle me-2"),
