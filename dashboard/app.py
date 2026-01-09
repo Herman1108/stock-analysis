@@ -2620,6 +2620,9 @@ def create_navbar():
                 dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
                 dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white me-1"), href="/discussion")),
                 dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
+                # Auth buttons
+                dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white me-1"), href="/login")),
+                dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark"), href="/signup")),
             ], className="ms-auto d-none d-lg-flex", navbar=True),
 
             # Mobile dropdown menu - only visible when hamburger clicked
@@ -2630,6 +2633,9 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/analysis", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white mb-1 w-100"), href="/discussion", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/upload", refresh=True)),
+                    html.Hr(className="my-2", style={"borderColor": "white"}),
+                    dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white mb-1 w-100"), href="/login", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark mb-1 w-100"), href="/signup", refresh=True)),
                 ], className="p-2 flex-column d-lg-none", navbar=True, style={"backgroundColor": "#fd7e14", "borderRadius": "8px"}),
                 id="navbar-collapse",
                 is_open=False,
@@ -2954,6 +2960,235 @@ def check_profanity(text: str) -> dict:
             return {'level': 3, 'word': word, 'action': 'warning'}
 
     return {'level': 0, 'word': None, 'action': 'ok'}
+
+# ============================================================
+# USER AUTHENTICATION FUNCTIONS
+# ============================================================
+
+import hashlib
+import secrets
+import re
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
+
+# Email configuration - UPDATE THESE WITH YOUR SMTP SETTINGS
+EMAIL_CONFIG = {
+    'smtp_server': 'smtp.gmail.com',
+    'smtp_port': 587,
+    'sender_email': 'haborherman@gmail.com',  # Your Gmail address
+    'sender_password': '',  # App password (need to set up)
+    'site_url': 'https://www.hermanstock.com'
+}
+
+def hash_password(password: str) -> str:
+    """Hash password using SHA256 with salt"""
+    salt = secrets.token_hex(16)
+    password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+    return f"{salt}:{password_hash}"
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify password against stored hash"""
+    try:
+        salt, hash_value = stored_hash.split(':')
+        password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+        return password_hash == hash_value
+    except:
+        return False
+
+def validate_password(password: str) -> tuple:
+    """Validate password requirements - min 6 chars, must have letters and numbers"""
+    if len(password) < 6:
+        return False, "Password minimal 6 karakter"
+    if not re.search(r'[a-zA-Z]', password):
+        return False, "Password harus mengandung huruf"
+    if not re.search(r'[0-9]', password):
+        return False, "Password harus mengandung angka"
+    return True, "OK"
+
+def validate_email(email: str) -> bool:
+    """Validate email format"""
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    return re.match(pattern, email) is not None
+
+def generate_verification_token() -> str:
+    """Generate a random verification token"""
+    return secrets.token_urlsafe(32)
+
+def create_user(email: str, username: str, password: str) -> dict:
+    """Create a new user with verification token"""
+    # Validate inputs
+    if not validate_email(email):
+        return {'success': False, 'error': 'Format email tidak valid'}
+
+    is_valid, msg = validate_password(password)
+    if not is_valid:
+        return {'success': False, 'error': msg}
+
+    if len(username) < 3:
+        return {'success': False, 'error': 'Username minimal 3 karakter'}
+
+    # Check if email or username already exists
+    check_query = "SELECT id FROM users WHERE email = %s OR username = %s"
+    existing = execute_query(check_query, (email.lower(), username.lower()), use_cache=False)
+    if existing:
+        return {'success': False, 'error': 'Email atau username sudah terdaftar'}
+
+    # Create user
+    password_hash = hash_password(password)
+    token = generate_verification_token()
+    token_expiry = "CURRENT_TIMESTAMP + INTERVAL '24 hours'"
+
+    insert_query = f"""
+        INSERT INTO users (email, username, password_hash, verification_token, token_expiry, member_type, member_start, member_end)
+        VALUES (%s, %s, %s, %s, {token_expiry}, 'trial', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '7 days')
+        RETURNING id, verification_token
+    """
+    result = execute_query(insert_query, (email.lower(), username.lower(), password_hash, token), use_cache=False)
+
+    if result:
+        return {'success': True, 'user_id': result[0]['id'], 'token': token, 'email': email}
+    return {'success': False, 'error': 'Gagal membuat akun'}
+
+def verify_user_email(token: str) -> dict:
+    """Verify user email with token"""
+    # Find user with valid token
+    query = """
+        UPDATE users
+        SET is_verified = TRUE, verification_token = NULL, token_expiry = NULL
+        WHERE verification_token = %s AND token_expiry > CURRENT_TIMESTAMP AND is_verified = FALSE
+        RETURNING id, email, username
+    """
+    result = execute_query(query, (token,), use_cache=False)
+
+    if result:
+        return {'success': True, 'user': result[0]}
+    return {'success': False, 'error': 'Token tidak valid atau sudah kadaluarsa'}
+
+def login_user(email: str, password: str) -> dict:
+    """Login user and return user data"""
+    query = """
+        SELECT id, email, username, password_hash, is_verified, member_type, member_end
+        FROM users WHERE email = %s
+    """
+    result = execute_query(query, (email.lower(),), use_cache=False)
+
+    if not result:
+        return {'success': False, 'error': 'Email tidak terdaftar'}
+
+    user = result[0]
+
+    if not verify_password(password, user['password_hash']):
+        return {'success': False, 'error': 'Password salah'}
+
+    if not user['is_verified']:
+        return {'success': False, 'error': 'Email belum diverifikasi. Cek inbox email Anda.'}
+
+    # Update last login
+    update_query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
+    execute_query(update_query, (user['id'],), use_cache=False)
+
+    return {
+        'success': True,
+        'user': {
+            'id': user['id'],
+            'email': user['email'],
+            'username': user['username'],
+            'member_type': user['member_type'],
+            'member_end': user['member_end']
+        }
+    }
+
+def send_verification_email(email: str, token: str, username: str) -> bool:
+    """Send verification email to user"""
+    try:
+        verification_url = f"{EMAIL_CONFIG['site_url']}/verify?token={token}"
+
+        subject = "Verifikasi Email - HermanStock"
+        body = f"""
+        <html>
+        <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+            <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+                <h2 style="color: #17a2b8;">Selamat Datang di HermanStock!</h2>
+                <p>Halo <strong>{username}</strong>,</p>
+                <p>Terima kasih telah mendaftar di HermanStock. Silakan klik tombol di bawah untuk memverifikasi email Anda:</p>
+                <p style="text-align: center; margin: 30px 0;">
+                    <a href="{verification_url}"
+                       style="background-color: #17a2b8; color: white; padding: 12px 30px;
+                              text-decoration: none; border-radius: 5px; font-weight: bold;">
+                        Verifikasi Email
+                    </a>
+                </p>
+                <p>Atau copy link berikut ke browser Anda:</p>
+                <p style="background: #f5f5f5; padding: 10px; word-break: break-all;">{verification_url}</p>
+                <p><strong>Link ini akan kadaluarsa dalam 24 jam.</strong></p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+                <p style="color: #666; font-size: 12px;">
+                    Jika Anda tidak mendaftar di HermanStock, abaikan email ini.
+                </p>
+            </div>
+        </body>
+        </html>
+        """
+
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_CONFIG['sender_email']
+        msg['To'] = email
+        msg.attach(MIMEText(body, 'html'))
+
+        # Send email
+        if EMAIL_CONFIG['sender_password']:
+            with smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port']) as server:
+                server.starttls()
+                server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
+                server.sendmail(EMAIL_CONFIG['sender_email'], email, msg.as_string())
+            return True
+        else:
+            # If no email password configured, just print the verification URL
+            print(f"[EMAIL] Verification URL for {email}: {verification_url}")
+            return True
+
+    except Exception as e:
+        print(f"[EMAIL ERROR] Failed to send email: {str(e)}")
+        return False
+
+def get_user_by_id(user_id: int) -> dict:
+    """Get user by ID"""
+    query = """
+        SELECT id, email, username, member_type, member_start, member_end, is_verified, last_login
+        FROM users WHERE id = %s
+    """
+    result = execute_query(query, (user_id,), use_cache=False)
+    return result[0] if result else None
+
+def resend_verification(email: str) -> dict:
+    """Resend verification email"""
+    # Check if user exists and is not verified
+    query = "SELECT id, username, is_verified FROM users WHERE email = %s"
+    result = execute_query(query, (email.lower(),), use_cache=False)
+
+    if not result:
+        return {'success': False, 'error': 'Email tidak terdaftar'}
+
+    user = result[0]
+    if user['is_verified']:
+        return {'success': False, 'error': 'Email sudah diverifikasi'}
+
+    # Generate new token
+    token = generate_verification_token()
+    update_query = """
+        UPDATE users SET verification_token = %s, token_expiry = CURRENT_TIMESTAMP + INTERVAL '24 hours'
+        WHERE id = %s
+    """
+    execute_query(update_query, (token, user['id']), use_cache=False)
+
+    # Send email
+    if send_verification_email(email, token, user['username']):
+        return {'success': True, 'message': 'Email verifikasi telah dikirim ulang'}
+    return {'success': False, 'error': 'Gagal mengirim email'}
+
 
 # ============================================================
 # MEMBER MANAGEMENT FUNCTIONS
@@ -3791,6 +4026,214 @@ def create_upload_page():
             dcc.Interval(id='member-stats-interval', interval=60000, n_intervals=0),  # Every 60 seconds
         ])
     ])
+
+
+# ============================================================
+# PAGE: SIGN UP
+# ============================================================
+
+def create_signup_page():
+    """Create sign up page"""
+    return html.Div([
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4([
+                                html.I(className="fas fa-user-plus me-2"),
+                                "Daftar Akun Baru"
+                            ], className="mb-0 text-center")
+                        ]),
+                        dbc.CardBody([
+                            # Email
+                            dbc.Label("Email", html_for="signup-email"),
+                            dbc.Input(
+                                id="signup-email",
+                                type="email",
+                                placeholder="email@example.com",
+                                className="mb-3"
+                            ),
+
+                            # Username
+                            dbc.Label("Username", html_for="signup-username"),
+                            dbc.Input(
+                                id="signup-username",
+                                type="text",
+                                placeholder="Username (min 3 karakter)",
+                                className="mb-3"
+                            ),
+
+                            # Password
+                            dbc.Label("Password", html_for="signup-password"),
+                            dbc.Input(
+                                id="signup-password",
+                                type="password",
+                                placeholder="Min 6 karakter, huruf + angka",
+                                className="mb-1"
+                            ),
+                            html.Small("Password harus minimal 6 karakter, mengandung huruf dan angka",
+                                      className="text-muted d-block mb-3"),
+
+                            # Confirm Password
+                            dbc.Label("Konfirmasi Password", html_for="signup-confirm"),
+                            dbc.Input(
+                                id="signup-confirm",
+                                type="password",
+                                placeholder="Ulangi password",
+                                className="mb-3"
+                            ),
+
+                            # Submit button
+                            dbc.Button([
+                                html.I(className="fas fa-paper-plane me-2"),
+                                "Daftar"
+                            ], id="signup-submit", color="success", className="w-100 mb-3"),
+
+                            # Feedback
+                            html.Div(id="signup-feedback"),
+
+                            html.Hr(),
+
+                            # Login link
+                            html.P([
+                                "Sudah punya akun? ",
+                                dcc.Link("Login di sini", href="/login", className="text-info")
+                            ], className="text-center mb-0")
+                        ])
+                    ], className="shadow")
+                ], md=6, lg=4, className="mx-auto")
+            ], className="min-vh-75 align-items-center justify-content-center")
+        ], className="py-5")
+    ])
+
+
+# ============================================================
+# PAGE: LOGIN
+# ============================================================
+
+def create_login_page():
+    """Create login page"""
+    return html.Div([
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.H4([
+                                html.I(className="fas fa-sign-in-alt me-2"),
+                                "Login"
+                            ], className="mb-0 text-center")
+                        ]),
+                        dbc.CardBody([
+                            # Email
+                            dbc.Label("Email", html_for="login-email"),
+                            dbc.Input(
+                                id="login-email",
+                                type="email",
+                                placeholder="email@example.com",
+                                className="mb-3"
+                            ),
+
+                            # Password
+                            dbc.Label("Password", html_for="login-password"),
+                            dbc.Input(
+                                id="login-password",
+                                type="password",
+                                placeholder="Password Anda",
+                                className="mb-3"
+                            ),
+
+                            # Submit button
+                            dbc.Button([
+                                html.I(className="fas fa-sign-in-alt me-2"),
+                                "Login"
+                            ], id="login-submit", color="primary", className="w-100 mb-3"),
+
+                            # Feedback
+                            html.Div(id="login-feedback"),
+
+                            html.Hr(),
+
+                            # Signup link
+                            html.P([
+                                "Belum punya akun? ",
+                                dcc.Link("Daftar di sini", href="/signup", className="text-info")
+                            ], className="text-center mb-2"),
+
+                            # Resend verification
+                            html.P([
+                                "Belum menerima email verifikasi? ",
+                                dbc.Button("Kirim Ulang", id="resend-verification-btn",
+                                          color="link", size="sm", className="p-0")
+                            ], className="text-center small mb-0")
+                        ])
+                    ], className="shadow")
+                ], md=6, lg=4, className="mx-auto")
+            ], className="min-vh-75 align-items-center justify-content-center")
+        ], className="py-5")
+    ])
+
+
+# ============================================================
+# PAGE: EMAIL VERIFICATION
+# ============================================================
+
+def create_verify_page(token: str = None):
+    """Create email verification page"""
+    if not token:
+        return html.Div([
+            dbc.Container([
+                dbc.Alert([
+                    html.I(className="fas fa-exclamation-triangle me-2"),
+                    "Token verifikasi tidak valid."
+                ], color="danger", className="text-center")
+            ], className="py-5")
+        ])
+
+    # Try to verify
+    result = verify_user_email(token)
+
+    if result['success']:
+        return html.Div([
+            dbc.Container([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-check-circle fa-5x text-success mb-3"),
+                        ], className="text-center"),
+                        html.H3("Email Berhasil Diverifikasi!", className="text-center text-success"),
+                        html.P(f"Selamat {result['user']['username']}, akun Anda sudah aktif.",
+                              className="text-center text-muted"),
+                        html.P("Anda mendapatkan akses Trial selama 7 hari.", className="text-center"),
+                        html.Div([
+                            dbc.Button([
+                                html.I(className="fas fa-sign-in-alt me-2"),
+                                "Login Sekarang"
+                            ], href="/login", color="success", className="me-2"),
+                        ], className="text-center mt-4")
+                    ])
+                ], className="shadow")
+            ], className="py-5", style={"maxWidth": "500px", "margin": "0 auto"})
+        ])
+    else:
+        return html.Div([
+            dbc.Container([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-times-circle fa-5x text-danger mb-3"),
+                        ], className="text-center"),
+                        html.H3("Verifikasi Gagal", className="text-center text-danger"),
+                        html.P(result['error'], className="text-center text-muted"),
+                        html.Div([
+                            dbc.Button("Kembali ke Login", href="/login", color="secondary"),
+                        ], className="text-center mt-4")
+                    ])
+                ], className="shadow")
+            ], className="py-5", style={"maxWidth": "500px", "margin": "0 auto"})
+        ])
+
 
 # ============================================================
 # HELPER: ACCUMULATION/DISTRIBUTION VALIDATION CARD (15 Elements)
@@ -11682,6 +12125,7 @@ def create_app_layout():
         dcc.Location(id='url', refresh=False),
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
+        dcc.Store(id='user-session', storage_type='session', data=None),  # User login session
         create_navbar(),
         # Wrap page-content with Loading component for better UX
         dcc.Loading(
@@ -11754,14 +12198,21 @@ app.clientside_callback(
 
 @app.callback(
     Output('page-content', 'children'),
-    [Input('url', 'pathname'), Input('stock-selector', 'value')]
+    [Input('url', 'pathname'), Input('url', 'search'), Input('stock-selector', 'value')]
 )
-def display_page(pathname, selected_stock):
+def display_page(pathname, search, selected_stock):
     """Main routing callback - triggers on URL change OR stock selection change"""
     # Get default stock if none selected
     if not selected_stock:
         stocks = get_available_stocks()
         selected_stock = stocks[0] if stocks else 'PANI'
+
+    # Parse query string for token
+    token = None
+    if search:
+        from urllib.parse import parse_qs
+        params = parse_qs(search.lstrip('?'))
+        token = params.get('token', [None])[0]
 
     # Route to appropriate page
     if pathname == '/':
@@ -11792,6 +12243,12 @@ def display_page(pathname, selected_stock):
         return create_support_resistance_page(selected_stock)
     elif pathname == '/accumulation':
         return create_accumulation_page(selected_stock)
+    elif pathname == '/signup':
+        return create_signup_page()
+    elif pathname == '/login':
+        return create_login_page()
+    elif pathname == '/verify':
+        return create_verify_page(token)
     else:
         return create_landing_page()
 
@@ -12177,6 +12634,130 @@ def deactivate_member_callback(n_clicks_list):
         return dbc.Alert("Gagal menonaktifkan", color="danger")
     except Exception as e:
         return dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# ============================================================
+# USER AUTHENTICATION CALLBACKS
+# ============================================================
+
+# Sign Up callback
+@app.callback(
+    Output('signup-feedback', 'children'),
+    [Input('signup-submit', 'n_clicks')],
+    [State('signup-email', 'value'),
+     State('signup-username', 'value'),
+     State('signup-password', 'value'),
+     State('signup-confirm', 'value')],
+    prevent_initial_call=True
+)
+def handle_signup(n_clicks, email, username, password, confirm):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    # Validate inputs
+    if not all([email, username, password, confirm]):
+        return dbc.Alert("Semua field harus diisi!", color="warning")
+
+    if password != confirm:
+        return dbc.Alert("Password dan konfirmasi tidak cocok!", color="danger")
+
+    # Create user
+    result = create_user(email, username, password)
+
+    if result['success']:
+        # Send verification email
+        email_sent = send_verification_email(result['email'], result['token'], username)
+
+        if email_sent:
+            return dbc.Alert([
+                html.Div([
+                    html.I(className="fas fa-envelope fa-3x text-success mb-3"),
+                ], className="text-center"),
+                html.H5("Pendaftaran Berhasil!", className="text-center"),
+                html.P([
+                    "Email verifikasi telah dikirim ke ",
+                    html.Strong(email),
+                    ". Silakan cek inbox (dan folder spam) untuk memverifikasi akun Anda."
+                ], className="text-center mb-0"),
+                html.P("Link verifikasi berlaku selama 24 jam.", className="text-center text-muted small mt-2")
+            ], color="success")
+        else:
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                "Akun berhasil dibuat! Namun gagal mengirim email verifikasi. Silakan gunakan fitur 'Kirim Ulang' di halaman login."
+            ], color="warning")
+    else:
+        return dbc.Alert([
+            html.I(className="fas fa-exclamation-circle me-2"),
+            result['error']
+        ], color="danger")
+
+
+# Login callback
+@app.callback(
+    [Output('login-feedback', 'children'),
+     Output('user-session', 'data')],
+    [Input('login-submit', 'n_clicks')],
+    [State('login-email', 'value'),
+     State('login-password', 'value'),
+     State('user-session', 'data')],
+    prevent_initial_call=True
+)
+def handle_login(n_clicks, email, password, current_session):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    if not email or not password:
+        return dbc.Alert("Email dan password harus diisi!", color="warning"), current_session
+
+    result = login_user(email, password)
+
+    if result['success']:
+        user = result['user']
+        session_data = {
+            'user_id': user['id'],
+            'email': user['email'],
+            'username': user['username'],
+            'member_type': user['member_type'],
+            'logged_in': True
+        }
+        return dbc.Alert([
+            html.I(className="fas fa-check-circle me-2"),
+            f"Login berhasil! Selamat datang, {user['username']}. Redirect ke dashboard..."
+        ], color="success"), session_data
+    else:
+        return dbc.Alert([
+            html.I(className="fas fa-exclamation-circle me-2"),
+            result['error']
+        ], color="danger"), current_session
+
+
+# Resend verification email callback
+@app.callback(
+    Output('login-feedback', 'children', allow_duplicate=True),
+    [Input('resend-verification-btn', 'n_clicks')],
+    [State('login-email', 'value')],
+    prevent_initial_call=True
+)
+def handle_resend_verification(n_clicks, email):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    if not email:
+        return dbc.Alert("Masukkan email Anda terlebih dahulu!", color="warning")
+
+    result = resend_verification(email)
+
+    if result['success']:
+        return dbc.Alert([
+            html.I(className="fas fa-envelope me-2"),
+            result['message']
+        ], color="success")
+    else:
+        return dbc.Alert([
+            html.I(className="fas fa-exclamation-circle me-2"),
+            result['error']
+        ], color="danger")
 
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('stock-selector', 'value')])
