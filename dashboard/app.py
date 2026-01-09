@@ -12470,17 +12470,21 @@ app.clientside_callback(
 )
 def display_page(pathname, search, selected_stock, user_session, superadmin_session):
     """Main routing callback - triggers on URL change OR stock selection change"""
-    # Get default stock if none selected
-    if not selected_stock:
-        stocks = get_available_stocks()
-        selected_stock = stocks[0] if stocks else 'PANI'
-
-    # Parse query string for token
+    # Parse query string for token and stock
     token = None
+    stock_from_url = None
     if search:
         from urllib.parse import parse_qs
         params = parse_qs(search.lstrip('?'))
         token = params.get('token', [None])[0]
+        stock_from_url = params.get('stock', [None])[0]
+
+    # Use stock from URL if provided, otherwise use dropdown selection
+    if stock_from_url:
+        selected_stock = stock_from_url
+    elif not selected_stock:
+        stocks = get_available_stocks()
+        selected_stock = stocks[0] if stocks else 'PANI'
 
     # Check if user is logged in
     is_logged_in = False
