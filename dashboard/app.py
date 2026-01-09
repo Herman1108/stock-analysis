@@ -12694,65 +12694,91 @@ def handle_signup(n_clicks, email, username, password, confirm):
         ], color="danger")
 
 
-# Login callback - with super admin persistent login
+# Login callback - with super admin persistent login and resend verification
 @app.callback(
     [Output('login-feedback', 'children'),
      Output('user-session', 'data'),
      Output('superadmin-session', 'data')],
-    [Input('login-submit', 'n_clicks')],
+    [Input('login-submit', 'n_clicks'),
+     Input('resend-verification-btn', 'n_clicks')],
     [State('login-email', 'value'),
      State('login-password', 'value'),
      State('user-session', 'data'),
      State('superadmin-session', 'data')],
     prevent_initial_call=True
 )
-def handle_login(n_clicks, email, password, current_session, superadmin_data):
-    if not n_clicks:
+def handle_login_and_resend(login_clicks, resend_clicks, email, password, current_session, superadmin_data):
+    ctx = dash.callback_context
+    if not ctx.triggered:
         raise dash.exceptions.PreventUpdate
 
-    if not email or not password:
-        return dbc.Alert("Email dan password harus diisi!", color="warning"), dash.no_update, dash.no_update
+    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
 
-    result = login_user(email, password)
+    # Handle resend verification
+    if triggered_id == 'resend-verification-btn' and resend_clicks:
+        if not email:
+            return dbc.Alert("Masukkan email Anda terlebih dahulu!", color="warning"), dash.no_update, dash.no_update
 
-    if result['success']:
-        user = result['user']
-        session_data = {
-            'user_id': user['id'],
-            'email': user['email'],
-            'username': user['username'],
-            'member_type': user['member_type'],
-            'logged_in': True
-        }
+        result = resend_verification(email)
 
-        # If admin, save to persistent local storage
-        if user['member_type'] == 'admin':
-            return (
-                dbc.Alert([
-                    html.I(className="fas fa-crown me-2 text-warning"),
-                    f"Login berhasil! Selamat datang, Super Admin {user['username']}!"
-                ], color="success"),
-                session_data,
-                session_data  # Save to persistent local storage
-            )
+        if result['success']:
+            return dbc.Alert([
+                html.I(className="fas fa-envelope me-2"),
+                result['message']
+            ], color="success"), dash.no_update, dash.no_update
+        else:
+            return dbc.Alert([
+                html.I(className="fas fa-exclamation-circle me-2"),
+                result['error']
+            ], color="danger"), dash.no_update, dash.no_update
+
+    # Handle login
+    if triggered_id == 'login-submit' and login_clicks:
+        if not email or not password:
+            return dbc.Alert("Email dan password harus diisi!", color="warning"), dash.no_update, dash.no_update
+
+        result = login_user(email, password)
+
+        if result['success']:
+            user = result['user']
+            session_data = {
+                'user_id': user['id'],
+                'email': user['email'],
+                'username': user['username'],
+                'member_type': user['member_type'],
+                'logged_in': True
+            }
+
+            # If admin, save to persistent local storage
+            if user['member_type'] == 'admin':
+                return (
+                    dbc.Alert([
+                        html.I(className="fas fa-crown me-2 text-warning"),
+                        f"Login berhasil! Selamat datang, Super Admin {user['username']}!"
+                    ], color="success"),
+                    session_data,
+                    session_data  # Save to persistent local storage
+                )
+            else:
+                return (
+                    dbc.Alert([
+                        html.I(className="fas fa-check-circle me-2"),
+                        f"Login berhasil! Selamat datang, {user['username']}."
+                    ], color="success"),
+                    session_data,
+                    dash.no_update  # Don't save to persistent storage for regular users
+                )
         else:
             return (
                 dbc.Alert([
-                    html.I(className="fas fa-check-circle me-2"),
-                    f"Login berhasil! Selamat datang, {user['username']}."
-                ], color="success"),
-                session_data,
-                dash.no_update  # Don't save to persistent storage for regular users
+                    html.I(className="fas fa-exclamation-circle me-2"),
+                    result['error']
+                ], color="danger"),
+                dash.no_update,
+                dash.no_update
             )
-    else:
-        return (
-            dbc.Alert([
-                html.I(className="fas fa-exclamation-circle me-2"),
-                result['error']
-            ], color="danger"),
-            dash.no_update,
-            dash.no_update
-        )
+
+    raise dash.exceptions.PreventUpdate
 
 
 # Auto-login callback for super admin (checks local storage on page load)
@@ -12767,34 +12793,6 @@ def auto_login_superadmin(pathname, superadmin_data):
     if superadmin_data and isinstance(superadmin_data, dict) and superadmin_data.get('logged_in') and superadmin_data.get('member_type') == 'admin':
         return superadmin_data
     raise dash.exceptions.PreventUpdate
-
-
-# Resend verification email callback
-@app.callback(
-    Output('login-feedback', 'children', allow_duplicate=True),
-    [Input('resend-verification-btn', 'n_clicks')],
-    [State('login-email', 'value')],
-    prevent_initial_call=True
-)
-def handle_resend_verification(n_clicks, email):
-    if not n_clicks:
-        raise dash.exceptions.PreventUpdate
-
-    if not email:
-        return dbc.Alert("Masukkan email Anda terlebih dahulu!", color="warning")
-
-    result = resend_verification(email)
-
-    if result['success']:
-        return dbc.Alert([
-            html.I(className="fas fa-envelope me-2"),
-            result['message']
-        ], color="success")
-    else:
-        return dbc.Alert([
-            html.I(className="fas fa-exclamation-circle me-2"),
-            result['error']
-        ], color="danger")
 
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('stock-selector', 'value')])
