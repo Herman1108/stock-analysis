@@ -2955,6 +2955,140 @@ def check_profanity(text: str) -> dict:
 
     return {'level': 0, 'word': None, 'action': 'ok'}
 
+# ============================================================
+# MEMBER MANAGEMENT FUNCTIONS
+# ============================================================
+
+def get_all_members():
+    """Get all members with calculated status"""
+    query = """
+        SELECT *,
+            CASE
+                WHEN end_date IS NULL THEN FALSE
+                WHEN end_date < CURRENT_TIMESTAMP THEN TRUE
+                ELSE FALSE
+            END as is_expired,
+            CASE
+                WHEN end_date IS NULL THEN NULL
+                ELSE EXTRACT(DAY FROM (end_date - CURRENT_TIMESTAMP))
+            END as days_remaining
+        FROM members
+        ORDER BY created_at DESC
+    """
+    return execute_query(query, use_cache=False) or []
+
+def get_member_stats():
+    """Get member statistics for dashboard"""
+    query = """
+        SELECT
+            COUNT(*) FILTER (WHERE member_type = 'trial' AND is_active = TRUE AND (end_date IS NULL OR end_date >= CURRENT_TIMESTAMP)) as active_trial,
+            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND is_active = TRUE AND (end_date IS NULL OR end_date >= CURRENT_TIMESTAMP)) as active_subscribe,
+            COUNT(*) FILTER (WHERE member_type = 'trial' AND (end_date < CURRENT_TIMESTAMP OR is_active = FALSE)) as expired_trial,
+            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND (end_date < CURRENT_TIMESTAMP OR is_active = FALSE)) as expired_subscribe,
+            COUNT(*) FILTER (WHERE last_online >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'trial') as online_trial,
+            COUNT(*) FILTER (WHERE last_online >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'subscribe') as online_subscribe,
+            COUNT(*) as total_members
+        FROM members
+    """
+    result = execute_query(query, use_cache=False)
+    if result and len(result) > 0:
+        return result[0]
+    return {
+        'active_trial': 0, 'active_subscribe': 0,
+        'expired_trial': 0, 'expired_subscribe': 0,
+        'online_trial': 0, 'online_subscribe': 0,
+        'total_members': 0
+    }
+
+def get_members_by_type(member_type: str):
+    """Get members filtered by type with expiry info"""
+    query = """
+        SELECT *,
+            CASE
+                WHEN end_date IS NULL THEN NULL
+                WHEN end_date < CURRENT_TIMESTAMP THEN 0
+                ELSE EXTRACT(DAY FROM (end_date - CURRENT_TIMESTAMP))
+            END as days_remaining,
+            CASE
+                WHEN last_online >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN TRUE
+                ELSE FALSE
+            END as is_online
+        FROM members
+        WHERE member_type = %s
+        ORDER BY
+            CASE WHEN is_active AND (end_date IS NULL OR end_date >= CURRENT_TIMESTAMP) THEN 0 ELSE 1 END,
+            end_date ASC
+    """
+    return execute_query(query, (member_type,), use_cache=False) or []
+
+def add_member(email: str, name: str, member_type: str):
+    """Add new member - trial gets 7 days, subscribe gets 30 days"""
+    from datetime import timedelta
+
+    days = 7 if member_type == 'trial' else 30
+    query = """
+        INSERT INTO members (email, name, member_type, start_date, end_date, is_active)
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '%s days', TRUE)
+        ON CONFLICT (email) DO UPDATE SET
+            name = EXCLUDED.name,
+            member_type = EXCLUDED.member_type,
+            start_date = CURRENT_TIMESTAMP,
+            end_date = CURRENT_TIMESTAMP + INTERVAL '%s days',
+            is_active = TRUE
+        RETURNING id
+    """
+    # Use string formatting for interval since parameterized intervals are tricky
+    query = f"""
+        INSERT INTO members (email, name, member_type, start_date, end_date, is_active)
+        VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '{days} days', TRUE)
+        ON CONFLICT (email) DO UPDATE SET
+            name = EXCLUDED.name,
+            member_type = EXCLUDED.member_type,
+            start_date = CURRENT_TIMESTAMP,
+            end_date = CURRENT_TIMESTAMP + INTERVAL '{days} days',
+            is_active = TRUE
+        RETURNING id
+    """
+    return execute_query(query, (email, name, member_type), use_cache=False)
+
+def extend_member(member_id: int, days: int = 30):
+    """Extend member subscription by days"""
+    query = f"""
+        UPDATE members
+        SET end_date = CASE
+                WHEN end_date < CURRENT_TIMESTAMP THEN CURRENT_TIMESTAMP + INTERVAL '{days} days'
+                ELSE end_date + INTERVAL '{days} days'
+            END,
+            is_active = TRUE
+        WHERE id = %s
+        RETURNING id
+    """
+    return execute_query(query, (member_id,), use_cache=False)
+
+def deactivate_member(member_id: int):
+    """Deactivate a member"""
+    query = "UPDATE members SET is_active = FALSE WHERE id = %s RETURNING id"
+    return execute_query(query, (member_id,), use_cache=False)
+
+def update_member_online(member_id: int):
+    """Update member's last online timestamp"""
+    query = "UPDATE members SET last_online = CURRENT_TIMESTAMP WHERE id = %s"
+    return execute_query(query, (member_id,), use_cache=False)
+
+def get_member_history_data():
+    """Get member join history for chart (last 30 days)"""
+    query = """
+        SELECT
+            DATE(created_at) as join_date,
+            member_type,
+            COUNT(*) as count
+        FROM members
+        WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+        GROUP BY DATE(created_at), member_type
+        ORDER BY join_date
+    """
+    return execute_query(query, use_cache=False) or []
+
 def get_forum_threads(stock_code: str = None, limit: int = 50):
     """Get forum threads, pinned first, then by score"""
     if stock_code:
@@ -3418,99 +3552,243 @@ def create_upload_page():
 
         # Upload Form (hidden until password correct)
         html.Div(id='upload-form-container', style={'display': 'none'}, children=[
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader(html.H5("Upload Excel File", className="mb-0")),
-                        dbc.CardBody([
-                            # Stock Code Input
-                            dbc.Row([
-                                dbc.Col([
-                                    dbc.Label("Kode Saham:"),
-                                    dbc.Input(
-                                        id='upload-stock-code',
-                                        type='text',
-                                        placeholder='Contoh: CDIA, BBCA, TLKM',
-                                        value='',
-                                        className="mb-3"
-                                    ),
-                                ], width=4),
-                            ]),
-
-                            # File Upload with Loading
-                            dcc.Loading(
-                                id="upload-loading",
-                                type="circle",
-                                color="#0d6efd",
-                                children=[
-                                    dcc.Upload(
-                                        id='upload-data',
-                                        children=html.Div([
-                                            html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
-                                            html.Br(),
-                                            'Drag and Drop atau ',
-                                            html.A('Klik untuk Upload', className="text-primary")
+            # Tabs for Upload and Member Management
+            dbc.Tabs([
+                # TAB 1: UPLOAD DATA
+                dbc.Tab(label="📤 Upload Data", tab_id="tab-upload", children=[
+                    html.Div(className="pt-3", children=[
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardHeader(html.H5("Upload Excel File", className="mb-0")),
+                                    dbc.CardBody([
+                                        # Stock Code Input
+                                        dbc.Row([
+                                            dbc.Col([
+                                                dbc.Label("Kode Saham:"),
+                                                dbc.Input(
+                                                    id='upload-stock-code',
+                                                    type='text',
+                                                    placeholder='Contoh: CDIA, BBCA, TLKM',
+                                                    value='',
+                                                    className="mb-3"
+                                                ),
+                                            ], width=4),
                                         ]),
-                                        className="upload-area",
-                                        style={
-                                            'width': '100%',
-                                            'height': '120px',
-                                            'lineHeight': '40px',
-                                            'borderWidth': '2px',
-                                            'borderStyle': 'dashed',
-                                            'borderRadius': '10px',
-                                            'textAlign': 'center',
-                                            'padding': '20px',
-                                            'margin': '10px 0',
-                                            'cursor': 'pointer'
-                                        },
-                                        multiple=False,
-                                        accept='.xlsx,.xls'
-                                    ),
-                                    html.Div(id='upload-status', className="mt-3"),
-                                ]
-                            ),
 
-                            html.Hr(),
+                                        # File Upload with Loading
+                                        dcc.Loading(
+                                            id="upload-loading",
+                                            type="circle",
+                                            color="#0d6efd",
+                                            children=[
+                                                dcc.Upload(
+                                                    id='upload-data',
+                                                    children=html.Div([
+                                                        html.I(className="fas fa-cloud-upload-alt fa-2x mb-2"),
+                                                        html.Br(),
+                                                        'Drag and Drop atau ',
+                                                        html.A('Klik untuk Upload', className="text-primary")
+                                                    ]),
+                                                    className="upload-area",
+                                                    style={
+                                                        'width': '100%',
+                                                        'height': '120px',
+                                                        'lineHeight': '40px',
+                                                        'borderWidth': '2px',
+                                                        'borderStyle': 'dashed',
+                                                        'borderRadius': '10px',
+                                                        'textAlign': 'center',
+                                                        'padding': '20px',
+                                                        'margin': '10px 0',
+                                                        'cursor': 'pointer'
+                                                    },
+                                                    multiple=False,
+                                                    accept='.xlsx,.xls'
+                                                ),
+                                                html.Div(id='upload-status', className="mt-3"),
+                                            ]
+                                        ),
 
-                            # Format Info
-                            dbc.Alert([
-                                html.H6("Format Excel yang Diharapkan:", className="alert-heading"),
-                                html.P("File Excel harus memiliki format seperti berikut:", className="mb-2"),
-                                html.Ul([
-                                    html.Li([html.Strong("Kolom A-H: "), "Data Broker Summary (Buy/Sell)"]),
-                                    html.Li("Kolom A: Buy Broker Code"),
-                                    html.Li("Kolom B: Buy Value (contoh: 35.7B, 500M)"),
-                                    html.Li("Kolom C: Buy Lot"),
-                                    html.Li("Kolom D: Buy Avg Price"),
-                                    html.Li("Kolom E: Sell Broker Code"),
-                                    html.Li("Kolom F: Sell Value"),
-                                    html.Li("Kolom G: Sell Lot"),
-                                    html.Li("Kolom H: Sell Avg Price"),
-                                    html.Li([html.Strong("Kolom L-X: "), "Data Harga (Date, Close, Change, Volume, dll)"]),
-                                ], className="small"),
-                                html.P([
-                                    "Contoh file: ",
-                                    html.Code("C:\\doc Herman\\cdia.xlsx")
-                                ], className="mb-0 small")
-                            ], color="info"),
+                                        html.Hr(),
+
+                                        # Format Info
+                                        dbc.Alert([
+                                            html.H6("Format Excel yang Diharapkan:", className="alert-heading"),
+                                            html.P("File Excel harus memiliki format seperti berikut:", className="mb-2"),
+                                            html.Ul([
+                                                html.Li([html.Strong("Kolom A-H: "), "Data Broker Summary (Buy/Sell)"]),
+                                                html.Li("Kolom A: Buy Broker Code"),
+                                                html.Li("Kolom B: Buy Value (contoh: 35.7B, 500M)"),
+                                                html.Li("Kolom C: Buy Lot"),
+                                                html.Li("Kolom D: Buy Avg Price"),
+                                                html.Li("Kolom E: Sell Broker Code"),
+                                                html.Li("Kolom F: Sell Value"),
+                                                html.Li("Kolom G: Sell Lot"),
+                                                html.Li("Kolom H: Sell Avg Price"),
+                                                html.Li([html.Strong("Kolom L-X: "), "Data Harga (Date, Close, Change, Volume, dll)"]),
+                                            ], className="small"),
+                                            html.P([
+                                                "Contoh file: ",
+                                                html.Code("C:\\doc Herman\\cdia.xlsx")
+                                            ], className="mb-0 small")
+                                        ], color="info"),
+                                    ])
+                                ])
+                            ], width=8),
+
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardHeader(html.H5("Data yang Tersedia", className="mb-0")),
+                                    dbc.CardBody(id='available-stocks-list')
+                                ])
+                            ], width=4),
+                        ], className="mb-4"),
+
+                        # Import History/Log
+                        dbc.Card([
+                            dbc.CardHeader("Import Log"),
+                            dbc.CardBody(id='import-log')
                         ])
                     ])
-                ], width=8),
+                ]),
 
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardHeader(html.H5("Data yang Tersedia", className="mb-0")),
-                        dbc.CardBody(id='available-stocks-list')
+                # TAB 2: MEMBER MANAGEMENT
+                dbc.Tab(label="👥 Member Management", tab_id="tab-members", children=[
+                    html.Div(className="pt-3", children=[
+                        # Member Stats Cards
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.Div([
+                                            html.I(className="fas fa-user-clock fa-2x text-warning"),
+                                        ], className="float-end"),
+                                        html.H6("Trial Members", className="text-muted"),
+                                        html.H3(id="stat-trial-active", className="mb-0"),
+                                        html.Small(id="stat-trial-online", className="text-success"),
+                                    ])
+                                ], color="dark", outline=True)
+                            ], md=3),
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.Div([
+                                            html.I(className="fas fa-user-check fa-2x text-success"),
+                                        ], className="float-end"),
+                                        html.H6("Subscribe Members", className="text-muted"),
+                                        html.H3(id="stat-subscribe-active", className="mb-0"),
+                                        html.Small(id="stat-subscribe-online", className="text-success"),
+                                    ])
+                                ], color="dark", outline=True)
+                            ], md=3),
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.Div([
+                                            html.I(className="fas fa-user-times fa-2x text-danger"),
+                                        ], className="float-end"),
+                                        html.H6("Expired Members", className="text-muted"),
+                                        html.H3(id="stat-expired-total", className="mb-0"),
+                                        html.Small("Trial + Subscribe", className="text-muted"),
+                                    ])
+                                ], color="dark", outline=True)
+                            ], md=3),
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardBody([
+                                        html.Div([
+                                            html.I(className="fas fa-users fa-2x text-info"),
+                                        ], className="float-end"),
+                                        html.H6("Total Members", className="text-muted"),
+                                        html.H3(id="stat-total-members", className="mb-0"),
+                                        html.Small("All time", className="text-muted"),
+                                    ])
+                                ], color="dark", outline=True)
+                            ], md=3),
+                        ], className="mb-4"),
+
+                        # Add Member Form
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H5([html.I(className="fas fa-user-plus me-2"), "Tambah Member Baru"], className="mb-0")
+                            ]),
+                            dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Email"),
+                                        dbc.Input(id="new-member-email", type="email", placeholder="email@example.com"),
+                                    ], md=3),
+                                    dbc.Col([
+                                        dbc.Label("Nama"),
+                                        dbc.Input(id="new-member-name", type="text", placeholder="Nama lengkap"),
+                                    ], md=3),
+                                    dbc.Col([
+                                        dbc.Label("Tipe Member"),
+                                        dbc.Select(
+                                            id="new-member-type",
+                                            options=[
+                                                {"label": "🕐 Trial (7 hari)", "value": "trial"},
+                                                {"label": "⭐ Subscribe (30 hari)", "value": "subscribe"},
+                                            ],
+                                            value="trial"
+                                        ),
+                                    ], md=3),
+                                    dbc.Col([
+                                        dbc.Label(" "),
+                                        dbc.Button([
+                                            html.I(className="fas fa-plus me-2"),
+                                            "Tambah Member"
+                                        ], id="add-member-btn", color="success", className="w-100 mt-1"),
+                                    ], md=3),
+                                ]),
+                                html.Div(id="add-member-feedback", className="mt-2"),
+                            ])
+                        ], className="mb-4"),
+
+                        # Member Graph
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardHeader("Grafik Member (30 Hari Terakhir)"),
+                                    dbc.CardBody([
+                                        dcc.Graph(id="member-history-chart", style={"height": "300px"})
+                                    ])
+                                ])
+                            ], md=6),
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardHeader("Status Member Online"),
+                                    dbc.CardBody([
+                                        dcc.Graph(id="member-online-chart", style={"height": "300px"})
+                                    ])
+                                ])
+                            ], md=6),
+                        ], className="mb-4"),
+
+                        # Member Lists in Tabs
+                        dbc.Card([
+                            dbc.CardHeader([
+                                dbc.Tabs([
+                                    dbc.Tab(label="🕐 Trial Members", tab_id="subtab-trial"),
+                                    dbc.Tab(label="⭐ Subscribe Members", tab_id="subtab-subscribe"),
+                                ], id="member-list-tabs", active_tab="subtab-trial")
+                            ]),
+                            dbc.CardBody([
+                                html.Div(id="member-list-container"),
+                                dbc.Button([
+                                    html.I(className="fas fa-sync me-2"),
+                                    "Refresh Data"
+                                ], id="refresh-members-btn", color="secondary", size="sm", className="mt-3"),
+                            ])
+                        ])
                     ])
-                ], width=4),
-            ], className="mb-4"),
+                ]),
 
-            # Import History/Log
-            dbc.Card([
-                dbc.CardHeader("Import Log"),
-                dbc.CardBody(id='import-log')
-            ])
+            ], id="admin-tabs", active_tab="tab-upload"),
+
+            # Interval for auto-refresh member stats
+            dcc.Interval(id='member-stats-interval', interval=60000, n_intervals=0),  # Every 60 seconds
         ])
     ])
 
@@ -11403,6 +11681,7 @@ def create_app_layout():
     return html.Div([
         dcc.Location(id='url', refresh=False),
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
+        dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
         create_navbar(),
         # Wrap page-content with Loading component for better UX
         dcc.Loading(
@@ -11516,29 +11795,366 @@ def display_page(pathname, selected_stock):
     else:
         return create_landing_page()
 
-# Password validation callback for upload page
+# Password validation callback for upload page - with session persistence
 @app.callback(
     [Output('upload-password-gate', 'style'),
      Output('upload-form-container', 'style'),
-     Output('upload-password-error', 'children')],
-    [Input('upload-password-submit', 'n_clicks')],
+     Output('upload-password-error', 'children'),
+     Output('admin-session', 'data')],
+    [Input('upload-password-submit', 'n_clicks'),
+     Input('admin-session', 'data')],
     [State('upload-password-input', 'value')],
+    prevent_initial_call=False
+)
+def validate_upload_password(n_clicks, session_data, password):
+    ctx = dash.callback_context
+    triggered = ctx.triggered[0]['prop_id'] if ctx.triggered else None
+
+    # Check if already logged in from session
+    if session_data and session_data.get('logged_in'):
+        return {'display': 'none'}, {'display': 'block'}, "", session_data
+
+    # If triggered by password submit button
+    if triggered == 'upload-password-submit.n_clicks' and n_clicks:
+        if password == UPLOAD_PASSWORD:
+            # Password correct - show upload form, hide password gate, save to session
+            return {'display': 'none'}, {'display': 'block'}, "", {'logged_in': True}
+        else:
+            # Password incorrect
+            return (
+                {'display': 'block'},
+                {'display': 'none'},
+                dbc.Alert("Password salah! Silakan coba lagi.", color="danger", className="mt-2"),
+                {'logged_in': False}
+            )
+
+    # Default - show password gate
+    return {'display': 'block'}, {'display': 'none'}, "", session_data or {'logged_in': False}
+
+
+# ============================================================
+# MEMBER MANAGEMENT CALLBACKS
+# ============================================================
+
+# Update member stats
+@app.callback(
+    [Output('stat-trial-active', 'children'),
+     Output('stat-trial-online', 'children'),
+     Output('stat-subscribe-active', 'children'),
+     Output('stat-subscribe-online', 'children'),
+     Output('stat-expired-total', 'children'),
+     Output('stat-total-members', 'children')],
+    [Input('member-stats-interval', 'n_intervals'),
+     Input('refresh-members-btn', 'n_clicks'),
+     Input('add-member-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def update_member_stats(n_intervals, refresh_clicks, add_clicks):
+    try:
+        stats = get_member_stats()
+        trial_active = stats.get('active_trial', 0) or 0
+        subscribe_active = stats.get('active_subscribe', 0) or 0
+        trial_online = stats.get('online_trial', 0) or 0
+        subscribe_online = stats.get('online_subscribe', 0) or 0
+        expired_trial = stats.get('expired_trial', 0) or 0
+        expired_subscribe = stats.get('expired_subscribe', 0) or 0
+        total = stats.get('total_members', 0) or 0
+
+        return (
+            f"{trial_active} aktif",
+            f"🟢 {trial_online} online" if trial_online > 0 else "⚪ 0 online",
+            f"{subscribe_active} aktif",
+            f"🟢 {subscribe_online} online" if subscribe_online > 0 else "⚪ 0 online",
+            f"{expired_trial + expired_subscribe}",
+            f"{total}"
+        )
+    except Exception as e:
+        return "0", "0 online", "0", "0 online", "0", "0"
+
+# Add new member
+@app.callback(
+    Output('add-member-feedback', 'children'),
+    [Input('add-member-btn', 'n_clicks')],
+    [State('new-member-email', 'value'),
+     State('new-member-name', 'value'),
+     State('new-member-type', 'value')],
     prevent_initial_call=True
 )
-def validate_upload_password(n_clicks, password):
+def add_new_member(n_clicks, email, name, member_type):
     if not n_clicks:
-        return {'display': 'block'}, {'display': 'none'}, ""
+        raise dash.exceptions.PreventUpdate
 
-    if password == UPLOAD_PASSWORD:
-        # Password correct - show upload form, hide password gate
-        return {'display': 'none'}, {'display': 'block'}, ""
-    else:
-        # Password incorrect
-        return (
-            {'display': 'block'},
-            {'display': 'none'},
-            dbc.Alert("Password salah! Silakan coba lagi.", color="danger", className="mt-2")
+    if not email or not name:
+        return dbc.Alert("Email dan nama wajib diisi!", color="warning")
+
+    try:
+        result = add_member(email, name, member_type)
+        if result:
+            days = 7 if member_type == 'trial' else 30
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                f"Member {name} berhasil ditambahkan sebagai {member_type} ({days} hari)"
+            ], color="success")
+        else:
+            return dbc.Alert("Gagal menambahkan member", color="danger")
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
+
+# Member list display
+@app.callback(
+    Output('member-list-container', 'children'),
+    [Input('member-list-tabs', 'active_tab'),
+     Input('refresh-members-btn', 'n_clicks'),
+     Input('add-member-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def update_member_list(active_tab, refresh_clicks, add_clicks):
+    member_type = 'trial' if active_tab == 'subtab-trial' else 'subscribe'
+
+    try:
+        members = get_members_by_type(member_type)
+
+        if not members:
+            return dbc.Alert(f"Belum ada member {member_type}", color="secondary")
+
+        # Create table
+        rows = []
+        for m in members:
+            days_remaining = m.get('days_remaining')
+            is_online = m.get('is_online', False)
+            is_active = m.get('is_active', False)
+            end_date = m.get('end_date')
+
+            # Status badge
+            if not is_active or (days_remaining is not None and days_remaining <= 0):
+                status_badge = dbc.Badge("Expired", color="danger")
+            elif days_remaining is not None and days_remaining <= 3:
+                status_badge = dbc.Badge(f"{int(days_remaining)}d left", color="warning")
+            else:
+                status_badge = dbc.Badge("Active", color="success")
+
+            # Online indicator
+            online_indicator = html.Span("🟢", title="Online") if is_online else html.Span("⚪", title="Offline")
+
+            # Format dates
+            start_str = m['start_date'].strftime("%d %b %Y") if m.get('start_date') else "-"
+            end_str = end_date.strftime("%d %b %Y") if end_date else "-"
+
+            rows.append(html.Tr([
+                html.Td(online_indicator),
+                html.Td(m['name']),
+                html.Td(m['email']),
+                html.Td(start_str),
+                html.Td(end_str),
+                html.Td([
+                    status_badge,
+                    html.Span(f" ({int(days_remaining)}d)" if days_remaining and days_remaining > 0 else "", className="small text-muted ms-1")
+                ]),
+                html.Td([
+                    dbc.Button([html.I(className="fas fa-plus")], id={"type": "extend-member", "index": m['id']},
+                              color="success", size="sm", className="me-1", title="Perpanjang 30 hari"),
+                    dbc.Button([html.I(className="fas fa-ban")], id={"type": "deactivate-member", "index": m['id']},
+                              color="danger", size="sm", title="Nonaktifkan"),
+                ])
+            ]))
+
+        return dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("", style={"width": "30px"}),
+                html.Th("Nama"),
+                html.Th("Email"),
+                html.Th("Start"),
+                html.Th("End"),
+                html.Th("Status"),
+                html.Th("Action", style={"width": "100px"}),
+            ])),
+            html.Tbody(rows)
+        ], striped=True, hover=True, size="sm", className="mb-0")
+
+    except Exception as e:
+        return dbc.Alert(f"Error loading members: {str(e)}", color="danger")
+
+# Member history chart
+@app.callback(
+    Output('member-history-chart', 'figure'),
+    [Input('member-stats-interval', 'n_intervals'),
+     Input('refresh-members-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def update_member_history_chart(n_intervals, refresh_clicks):
+    try:
+        import plotly.graph_objects as go
+        from datetime import datetime, timedelta
+
+        history = get_member_history_data()
+
+        # Create empty figure if no data
+        if not history:
+            fig = go.Figure()
+            fig.add_annotation(
+                text="Belum ada data member",
+                xref="paper", yref="paper",
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=14, color="gray")
+            )
+            fig.update_layout(
+                template="plotly_dark",
+                paper_bgcolor='rgba(0,0,0,0)',
+                plot_bgcolor='rgba(0,0,0,0)',
+                margin=dict(l=20, r=20, t=20, b=20),
+            )
+            return fig
+
+        # Process data for chart
+        import pandas as pd
+        df = pd.DataFrame(history)
+
+        fig = go.Figure()
+
+        # Trial members
+        trial_data = df[df['member_type'] == 'trial'] if 'member_type' in df.columns else pd.DataFrame()
+        if not trial_data.empty:
+            fig.add_trace(go.Bar(
+                x=trial_data['join_date'],
+                y=trial_data['count'],
+                name='Trial',
+                marker_color='#ffc107'
+            ))
+
+        # Subscribe members
+        subscribe_data = df[df['member_type'] == 'subscribe'] if 'member_type' in df.columns else pd.DataFrame()
+        if not subscribe_data.empty:
+            fig.add_trace(go.Bar(
+                x=subscribe_data['join_date'],
+                y=subscribe_data['count'],
+                name='Subscribe',
+                marker_color='#28a745'
+            ))
+
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=20, r=20, t=20, b=20),
+            barmode='group',
+            showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+            xaxis_title="Tanggal Join",
+            yaxis_title="Jumlah Member"
         )
+        return fig
+    except Exception as e:
+        fig = go.Figure()
+        fig.add_annotation(text=f"Error: {str(e)}", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+
+# Member online chart (pie chart)
+@app.callback(
+    Output('member-online-chart', 'figure'),
+    [Input('member-stats-interval', 'n_intervals'),
+     Input('refresh-members-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def update_member_online_chart(n_intervals, refresh_clicks):
+    try:
+        import plotly.graph_objects as go
+
+        stats = get_member_stats()
+        trial_online = stats.get('online_trial', 0) or 0
+        subscribe_online = stats.get('online_subscribe', 0) or 0
+        trial_offline = (stats.get('active_trial', 0) or 0) - trial_online
+        subscribe_offline = (stats.get('active_subscribe', 0) or 0) - subscribe_online
+
+        fig = go.Figure()
+
+        # Create donut chart
+        labels = ['Trial Online', 'Trial Offline', 'Subscribe Online', 'Subscribe Offline']
+        values = [trial_online, trial_offline, subscribe_online, subscribe_offline]
+        colors = ['#ffc107', '#6c757d', '#28a745', '#495057']
+
+        fig.add_trace(go.Pie(
+            labels=labels,
+            values=values,
+            hole=0.4,
+            marker_colors=colors,
+            textinfo='value+label',
+            textposition='outside'
+        ))
+
+        fig.update_layout(
+            template="plotly_dark",
+            paper_bgcolor='rgba(0,0,0,0)',
+            plot_bgcolor='rgba(0,0,0,0)',
+            margin=dict(l=20, r=20, t=20, b=20),
+            showlegend=False,
+            annotations=[dict(text='Online', x=0.5, y=0.5, font_size=14, showarrow=False)]
+        )
+        return fig
+    except Exception as e:
+        import plotly.graph_objects as go
+        fig = go.Figure()
+        fig.add_annotation(text=f"Error: {str(e)}", xref="paper", yref="paper", x=0.5, y=0.5, showarrow=False)
+        return fig
+
+# Extend member subscription
+@app.callback(
+    Output('add-member-feedback', 'children', allow_duplicate=True),
+    [Input({"type": "extend-member", "index": ALL}, "n_clicks")],
+    prevent_initial_call=True
+)
+def extend_member_subscription(n_clicks_list):
+    ctx = dash.callback_context
+    if not ctx.triggered or not any(n_clicks_list):
+        raise dash.exceptions.PreventUpdate
+
+    # Get the triggered button's member ID
+    triggered = ctx.triggered[0]
+    prop_id = triggered['prop_id']
+
+    import json
+    button_info = json.loads(prop_id.replace('.n_clicks', ''))
+    member_id = button_info['index']
+
+    try:
+        result = extend_member(member_id, 30)
+        if result:
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                f"Member ID {member_id} diperpanjang 30 hari"
+            ], color="success")
+        return dbc.Alert("Gagal memperpanjang", color="danger")
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
+
+# Deactivate member
+@app.callback(
+    Output('add-member-feedback', 'children', allow_duplicate=True),
+    [Input({"type": "deactivate-member", "index": ALL}, "n_clicks")],
+    prevent_initial_call=True
+)
+def deactivate_member_callback(n_clicks_list):
+    ctx = dash.callback_context
+    if not ctx.triggered or not any(n_clicks_list):
+        raise dash.exceptions.PreventUpdate
+
+    triggered = ctx.triggered[0]
+    prop_id = triggered['prop_id']
+
+    import json
+    button_info = json.loads(prop_id.replace('.n_clicks', ''))
+    member_id = button_info['index']
+
+    try:
+        result = deactivate_member(member_id)
+        if result:
+            return dbc.Alert([
+                html.I(className="fas fa-ban me-2"),
+                f"Member ID {member_id} dinonaktifkan"
+            ], color="warning")
+        return dbc.Alert("Gagal menonaktifkan", color="danger")
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
+
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('stock-selector', 'value')])
 def update_broker_options(pathname, stock_code):
