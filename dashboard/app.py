@@ -3195,35 +3195,38 @@ def resend_verification(email: str) -> dict:
 # ============================================================
 
 def get_all_members():
-    """Get all members with calculated status"""
+    """Get all members (users) with calculated status"""
     query = """
-        SELECT *,
+        SELECT id, email, username as name, member_type, member_start as start_date,
+            member_end as end_date, is_verified as is_active, last_login as last_online, created_at,
             CASE
-                WHEN end_date IS NULL THEN FALSE
-                WHEN end_date < CURRENT_TIMESTAMP THEN TRUE
+                WHEN member_end IS NULL THEN FALSE
+                WHEN member_end < CURRENT_TIMESTAMP THEN TRUE
                 ELSE FALSE
             END as is_expired,
             CASE
-                WHEN end_date IS NULL THEN NULL
-                ELSE EXTRACT(DAY FROM (end_date - CURRENT_TIMESTAMP))
+                WHEN member_end IS NULL THEN NULL
+                ELSE EXTRACT(DAY FROM (member_end - CURRENT_TIMESTAMP))
             END as days_remaining
-        FROM members
+        FROM users
+        WHERE member_type IN ('trial', 'subscribe', 'admin')
         ORDER BY created_at DESC
     """
     return execute_query(query, use_cache=False) or []
 
 def get_member_stats():
-    """Get member statistics for dashboard"""
+    """Get member statistics from users table"""
     query = """
         SELECT
-            COUNT(*) FILTER (WHERE member_type = 'trial' AND is_active = TRUE AND (end_date IS NULL OR end_date >= CURRENT_TIMESTAMP)) as active_trial,
-            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND is_active = TRUE AND (end_date IS NULL OR end_date >= CURRENT_TIMESTAMP)) as active_subscribe,
-            COUNT(*) FILTER (WHERE member_type = 'trial' AND (end_date < CURRENT_TIMESTAMP OR is_active = FALSE)) as expired_trial,
-            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND (end_date < CURRENT_TIMESTAMP OR is_active = FALSE)) as expired_subscribe,
-            COUNT(*) FILTER (WHERE last_online >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'trial') as online_trial,
-            COUNT(*) FILTER (WHERE last_online >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'subscribe') as online_subscribe,
-            COUNT(*) as total_members
-        FROM members
+            COUNT(*) FILTER (WHERE member_type = 'trial' AND is_verified = TRUE AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP)) as active_trial,
+            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND is_verified = TRUE AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP)) as active_subscribe,
+            COUNT(*) FILTER (WHERE member_type = 'trial' AND (member_end < CURRENT_TIMESTAMP OR is_verified = FALSE)) as expired_trial,
+            COUNT(*) FILTER (WHERE member_type = 'subscribe' AND (member_end < CURRENT_TIMESTAMP OR is_verified = FALSE)) as expired_subscribe,
+            COUNT(*) FILTER (WHERE last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'trial') as online_trial,
+            COUNT(*) FILTER (WHERE last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' AND member_type = 'subscribe') as online_subscribe,
+            COUNT(*) FILTER (WHERE member_type IN ('trial', 'subscribe')) as total_members
+        FROM users
+        WHERE member_type IN ('trial', 'subscribe', 'admin')
     """
     result = execute_query(query, use_cache=False)
     if result and len(result) > 0:
@@ -3236,65 +3239,56 @@ def get_member_stats():
     }
 
 def get_members_by_type(member_type: str):
-    """Get members filtered by type with expiry info"""
+    """Get users filtered by type with expiry info"""
     query = """
-        SELECT *,
+        SELECT id, email, username as name, member_type, member_start as start_date, member_end as end_date,
+            is_verified as is_active, last_login as last_online, created_at,
             CASE
-                WHEN end_date IS NULL THEN NULL
-                WHEN end_date < CURRENT_TIMESTAMP THEN 0
-                ELSE EXTRACT(DAY FROM (end_date - CURRENT_TIMESTAMP))
+                WHEN member_end IS NULL THEN NULL
+                WHEN member_end < CURRENT_TIMESTAMP THEN 0
+                ELSE EXTRACT(DAY FROM (member_end - CURRENT_TIMESTAMP))
             END as days_remaining,
             CASE
-                WHEN last_online >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN TRUE
+                WHEN last_login >= CURRENT_TIMESTAMP - INTERVAL '15 minutes' THEN TRUE
                 ELSE FALSE
             END as is_online
-        FROM members
+        FROM users
         WHERE member_type = %s
         ORDER BY
-            CASE WHEN is_active AND (end_date IS NULL OR end_date >= CURRENT_TIMESTAMP) THEN 0 ELSE 1 END,
-            end_date ASC
+            CASE WHEN is_verified AND (member_end IS NULL OR member_end >= CURRENT_TIMESTAMP) THEN 0 ELSE 1 END,
+            member_end ASC
     """
     return execute_query(query, (member_type,), use_cache=False) or []
 
 def add_member(email: str, name: str, member_type: str):
-    """Add new member - trial gets 7 days, subscribe gets 30 days"""
-    from datetime import timedelta
-
+    """Add new member to users table - trial gets 7 days, subscribe gets 30 days"""
     days = 7 if member_type == 'trial' else 30
-    query = """
-        INSERT INTO members (email, name, member_type, start_date, end_date, is_active)
-        VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '%s days', TRUE)
-        ON CONFLICT (email) DO UPDATE SET
-            name = EXCLUDED.name,
-            member_type = EXCLUDED.member_type,
-            start_date = CURRENT_TIMESTAMP,
-            end_date = CURRENT_TIMESTAMP + INTERVAL '%s days',
-            is_active = TRUE
-        RETURNING id
-    """
-    # Use string formatting for interval since parameterized intervals are tricky
+    # Generate a random password for new member (they can reset later)
+    temp_password = secrets.token_urlsafe(8)
+    password_hash_val = hash_password(temp_password)
+
     query = f"""
-        INSERT INTO members (email, name, member_type, start_date, end_date, is_active)
-        VALUES (%s, %s, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '{days} days', TRUE)
+        INSERT INTO users (email, username, password_hash, is_verified, member_type, member_start, member_end)
+        VALUES (%s, %s, %s, TRUE, %s, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP + INTERVAL '{days} days')
         ON CONFLICT (email) DO UPDATE SET
-            name = EXCLUDED.name,
+            username = EXCLUDED.username,
             member_type = EXCLUDED.member_type,
-            start_date = CURRENT_TIMESTAMP,
-            end_date = CURRENT_TIMESTAMP + INTERVAL '{days} days',
-            is_active = TRUE
+            member_start = CURRENT_TIMESTAMP,
+            member_end = CURRENT_TIMESTAMP + INTERVAL '{days} days',
+            is_verified = TRUE
         RETURNING id
     """
-    return execute_query(query, (email, name, member_type), use_cache=False)
+    return execute_query(query, (email.lower(), name, password_hash_val, member_type), use_cache=False)
 
 def extend_member(member_id: int, days: int = 30):
     """Extend member subscription by days"""
     query = f"""
-        UPDATE members
-        SET end_date = CASE
-                WHEN end_date < CURRENT_TIMESTAMP THEN CURRENT_TIMESTAMP + INTERVAL '{days} days'
-                ELSE end_date + INTERVAL '{days} days'
+        UPDATE users
+        SET member_end = CASE
+                WHEN member_end < CURRENT_TIMESTAMP THEN CURRENT_TIMESTAMP + INTERVAL '{days} days'
+                ELSE member_end + INTERVAL '{days} days'
             END,
-            is_active = TRUE
+            is_verified = TRUE
         WHERE id = %s
         RETURNING id
     """
@@ -3302,13 +3296,13 @@ def extend_member(member_id: int, days: int = 30):
 
 def deactivate_member(member_id: int):
     """Deactivate a member"""
-    query = "UPDATE members SET is_active = FALSE WHERE id = %s RETURNING id"
+    query = "UPDATE users SET is_verified = FALSE WHERE id = %s RETURNING id"
     return execute_query(query, (member_id,), use_cache=False)
 
 def update_member_online(member_id: int):
     """Update member's last online timestamp"""
-    query = "UPDATE members SET last_online = CURRENT_TIMESTAMP WHERE id = %s"
-    return execute_query(query, (member_id,), use_cache=False)
+    query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
+    execute_query(query, (member_id,), fetch=False, use_cache=False)
 
 def get_member_history_data():
     """Get member join history for chart (last 30 days)"""
@@ -3317,8 +3311,9 @@ def get_member_history_data():
             DATE(created_at) as join_date,
             member_type,
             COUNT(*) as count
-        FROM members
+        FROM users
         WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+            AND member_type IN ('trial', 'subscribe')
         GROUP BY DATE(created_at), member_type
         ORDER BY join_date
     """
