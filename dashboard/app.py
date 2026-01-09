@@ -12699,77 +12699,74 @@ def handle_signup(n_clicks, email, username, password, confirm):
     [Output('login-feedback', 'children'),
      Output('user-session', 'data'),
      Output('superadmin-session', 'data')],
-    [Input('login-submit', 'n_clicks'),
-     Input('superadmin-session', 'data')],
+    [Input('login-submit', 'n_clicks')],
     [State('login-email', 'value'),
      State('login-password', 'value'),
-     State('user-session', 'data')],
-    prevent_initial_call=False
+     State('user-session', 'data'),
+     State('superadmin-session', 'data')],
+    prevent_initial_call=True
 )
-def handle_login(n_clicks, superadmin_data, email, password, current_session):
-    ctx = dash.callback_context
-    triggered = ctx.triggered[0]['prop_id'] if ctx.triggered else None
+def handle_login(n_clicks, email, password, current_session, superadmin_data):
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
 
-    # Check if super admin is already logged in (from local storage)
-    if superadmin_data and superadmin_data.get('logged_in') and superadmin_data.get('member_type') == 'admin':
-        # Auto-login from persistent storage
-        return (
-            dbc.Alert([
-                html.I(className="fas fa-crown me-2 text-warning"),
-                f"Selamat datang kembali, {superadmin_data.get('username', 'Admin')}!"
-            ], color="success"),
-            superadmin_data,  # Also set to user-session
-            superadmin_data   # Keep in superadmin-session
-        )
+    if not email or not password:
+        return dbc.Alert("Email dan password harus diisi!", color="warning"), dash.no_update, dash.no_update
 
-    # If triggered by login button
-    if triggered == 'login-submit.n_clicks' and n_clicks:
-        if not email or not password:
-            return dbc.Alert("Email dan password harus diisi!", color="warning"), current_session, dash.no_update
+    result = login_user(email, password)
 
-        result = login_user(email, password)
+    if result['success']:
+        user = result['user']
+        session_data = {
+            'user_id': user['id'],
+            'email': user['email'],
+            'username': user['username'],
+            'member_type': user['member_type'],
+            'logged_in': True
+        }
 
-        if result['success']:
-            user = result['user']
-            session_data = {
-                'user_id': user['id'],
-                'email': user['email'],
-                'username': user['username'],
-                'member_type': user['member_type'],
-                'logged_in': True
-            }
-
-            # If admin, save to persistent local storage
-            if user['member_type'] == 'admin':
-                return (
-                    dbc.Alert([
-                        html.I(className="fas fa-crown me-2 text-warning"),
-                        f"Login berhasil! Selamat datang, Super Admin {user['username']}!"
-                    ], color="success"),
-                    session_data,
-                    session_data  # Save to persistent local storage
-                )
-            else:
-                return (
-                    dbc.Alert([
-                        html.I(className="fas fa-check-circle me-2"),
-                        f"Login berhasil! Selamat datang, {user['username']}."
-                    ], color="success"),
-                    session_data,
-                    dash.no_update  # Don't save to persistent storage for regular users
-                )
+        # If admin, save to persistent local storage
+        if user['member_type'] == 'admin':
+            return (
+                dbc.Alert([
+                    html.I(className="fas fa-crown me-2 text-warning"),
+                    f"Login berhasil! Selamat datang, Super Admin {user['username']}!"
+                ], color="success"),
+                session_data,
+                session_data  # Save to persistent local storage
+            )
         else:
             return (
                 dbc.Alert([
-                    html.I(className="fas fa-exclamation-circle me-2"),
-                    result['error']
-                ], color="danger"),
-                current_session,
-                dash.no_update
+                    html.I(className="fas fa-check-circle me-2"),
+                    f"Login berhasil! Selamat datang, {user['username']}."
+                ], color="success"),
+                session_data,
+                dash.no_update  # Don't save to persistent storage for regular users
             )
+    else:
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-exclamation-circle me-2"),
+                result['error']
+            ], color="danger"),
+            dash.no_update,
+            dash.no_update
+        )
 
-    # Default - no action
-    return dash.no_update, current_session, dash.no_update
+
+# Auto-login callback for super admin (checks local storage on page load)
+@app.callback(
+    Output('user-session', 'data', allow_duplicate=True),
+    [Input('url', 'pathname')],
+    [State('superadmin-session', 'data')],
+    prevent_initial_call=True
+)
+def auto_login_superadmin(pathname, superadmin_data):
+    """Auto-login super admin from persistent local storage"""
+    if superadmin_data and isinstance(superadmin_data, dict) and superadmin_data.get('logged_in') and superadmin_data.get('member_type') == 'admin':
+        return superadmin_data
+    raise dash.exceptions.PreventUpdate
 
 
 # Resend verification email callback
