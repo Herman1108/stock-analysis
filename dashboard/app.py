@@ -2620,9 +2620,16 @@ def create_navbar():
                 dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
                 dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white me-1"), href="/discussion")),
                 dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
-                # Auth buttons
-                dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white me-1"), href="/login")),
-                dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark"), href="/signup")),
+                # Auth buttons - Login/Daftar (shown when not logged in)
+                html.Div([
+                    dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white me-1"), href="/login"),
+                    dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark"), href="/signup"),
+                ], id="auth-buttons-desktop", className="d-flex"),
+                # Logout button (shown when logged in)
+                html.Div([
+                    html.Span(id="user-display-desktop", className="text-light me-2 small"),
+                    dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-desktop", color="danger", size="sm", className="fw-bold text-white"),
+                ], id="logout-section-desktop", className="d-flex align-items-center", style={"display": "none"}),
             ], className="ms-auto d-none d-lg-flex", navbar=True),
 
             # Mobile dropdown menu - only visible when hamburger clicked
@@ -2634,8 +2641,16 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white mb-1 w-100"), href="/discussion", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/upload", refresh=True)),
                     html.Hr(className="my-2", style={"borderColor": "white"}),
-                    dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white mb-1 w-100"), href="/login", refresh=True)),
-                    dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark mb-1 w-100"), href="/signup", refresh=True)),
+                    # Auth buttons - Login/Daftar (shown when not logged in)
+                    html.Div([
+                        dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white mb-1 w-100"), href="/login", refresh=True),
+                        dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark mb-1 w-100"), href="/signup", refresh=True),
+                    ], id="auth-buttons-mobile"),
+                    # Logout button (shown when logged in)
+                    html.Div([
+                        html.Div(id="user-display-mobile", className="text-white small mb-1 text-center"),
+                        dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-mobile", color="danger", size="sm", className="fw-bold text-white w-100"),
+                    ], id="logout-section-mobile", style={"display": "none"}),
                 ], className="p-2 flex-column d-lg-none", navbar=True, style={"backgroundColor": "#fd7e14", "borderRadius": "8px"}),
                 id="navbar-collapse",
                 is_open=False,
@@ -3325,6 +3340,71 @@ def update_member_online(member_id: int):
     """Update member's last online timestamp"""
     query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
     execute_query(query, (member_id,), fetch=False, use_cache=False)
+
+
+# ============================================================
+# ACCOUNT MANAGEMENT FUNCTIONS (for Admin)
+# ============================================================
+
+def get_all_accounts():
+    """Get all user accounts for admin management"""
+    query = """
+        SELECT id, email, username, password_hash, member_type, is_verified,
+               member_start, member_end, last_login, created_at
+        FROM users
+        ORDER BY created_at DESC
+    """
+    return execute_query(query, use_cache=False) or []
+
+def get_account_by_id(user_id: int):
+    """Get single account by ID"""
+    query = "SELECT * FROM users WHERE id = %s"
+    result = execute_query(query, (user_id,), use_cache=False)
+    return result[0] if result else None
+
+def update_account(user_id: int, username: str = None, password: str = None,
+                   member_type: str = None, is_verified: bool = None):
+    """Update user account - only update provided fields"""
+    updates = []
+    params = []
+
+    if username:
+        updates.append("username = %s")
+        params.append(username)
+
+    if password:
+        new_hash = hash_password(password)
+        updates.append("password_hash = %s")
+        params.append(new_hash)
+
+    if member_type:
+        updates.append("member_type = %s")
+        params.append(member_type)
+
+    if is_verified is not None:
+        updates.append("is_verified = %s")
+        params.append(is_verified)
+
+    if not updates:
+        return None
+
+    params.append(user_id)
+    query = f"UPDATE users SET {', '.join(updates)} WHERE id = %s RETURNING id"
+    return execute_query(query, tuple(params), use_cache=False)
+
+def delete_account(user_id: int):
+    """Delete user account"""
+    query = "DELETE FROM users WHERE id = %s RETURNING id"
+    return execute_query(query, (user_id,), use_cache=False)
+
+def get_password_display(password_hash: str) -> str:
+    """Extract readable info from password hash for display (NOT the actual password)"""
+    # Password hash format: salt:hash
+    # We can't recover the password, so just show that it's set
+    if password_hash and ':' in password_hash:
+        return "••••••••"  # Just show dots to indicate password is set
+    return "(tidak ada)"
+
 
 def get_member_history_data():
     """Get member join history for chart (last 30 days)"""
@@ -4034,6 +4114,120 @@ def create_upload_page():
                                 ], id="refresh-members-btn", color="secondary", size="sm", className="mt-3"),
                             ])
                         ])
+                    ])
+                ]),
+
+                # TAB 3: LIST MEMBER (Account Management)
+                dbc.Tab(label="📋 List Member", tab_id="tab-list-member", children=[
+                    html.Div(className="pt-3", children=[
+                        # Header with refresh button
+                        dbc.Row([
+                            dbc.Col([
+                                html.H5([
+                                    html.I(className="fas fa-users-cog me-2"),
+                                    "Daftar Akun Member"
+                                ], className="mb-0"),
+                            ], md=8),
+                            dbc.Col([
+                                dbc.Button([
+                                    html.I(className="fas fa-sync me-2"),
+                                    "Refresh"
+                                ], id="refresh-account-list-btn", color="primary", size="sm", className="float-end"),
+                            ], md=4),
+                        ], className="mb-3"),
+
+                        # Feedback div
+                        html.Div(id="account-action-feedback", className="mb-3"),
+
+                        # Account List Table
+                        dbc.Card([
+                            dbc.CardBody([
+                                html.Div(id="account-list-container", children=[
+                                    dbc.Spinner(color="primary", size="sm"),
+                                    " Loading..."
+                                ])
+                            ])
+                        ]),
+
+                        # Edit Account Modal
+                        dbc.Modal([
+                            dbc.ModalHeader(dbc.ModalTitle([
+                                html.I(className="fas fa-user-edit me-2"),
+                                "Edit Akun Member"
+                            ])),
+                            dbc.ModalBody([
+                                dcc.Store(id="edit-account-id", data=None),
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Email"),
+                                        dbc.Input(id="edit-account-email", type="email", disabled=True),
+                                    ], className="mb-3"),
+                                ]),
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Username"),
+                                        dbc.Input(id="edit-account-username", type="text"),
+                                    ], className="mb-3"),
+                                ]),
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Password Baru (kosongkan jika tidak ingin mengubah)"),
+                                        dbc.Input(id="edit-account-password", type="text", placeholder="Password baru..."),
+                                    ], className="mb-3"),
+                                ]),
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Tipe Member"),
+                                        dbc.Select(
+                                            id="edit-account-type",
+                                            options=[
+                                                {"label": "🕐 Trial", "value": "trial"},
+                                                {"label": "⭐ Subscribe", "value": "subscribe"},
+                                                {"label": "👑 Admin", "value": "admin"},
+                                            ]
+                                        ),
+                                    ], md=6),
+                                    dbc.Col([
+                                        dbc.Label("Status"),
+                                        dbc.Select(
+                                            id="edit-account-status",
+                                            options=[
+                                                {"label": "✅ Aktif (Verified)", "value": "true"},
+                                                {"label": "❌ Nonaktif", "value": "false"},
+                                            ]
+                                        ),
+                                    ], md=6),
+                                ]),
+                                html.Div(id="edit-account-feedback", className="mt-3"),
+                            ]),
+                            dbc.ModalFooter([
+                                dbc.Button("Batal", id="cancel-edit-account-btn", color="secondary"),
+                                dbc.Button([
+                                    html.I(className="fas fa-save me-2"),
+                                    "Simpan"
+                                ], id="save-edit-account-btn", color="success"),
+                            ]),
+                        ], id="edit-account-modal", is_open=False, size="lg"),
+
+                        # Delete Confirmation Modal
+                        dbc.Modal([
+                            dbc.ModalHeader(dbc.ModalTitle([
+                                html.I(className="fas fa-exclamation-triangle me-2 text-danger"),
+                                "Konfirmasi Hapus"
+                            ])),
+                            dbc.ModalBody([
+                                dcc.Store(id="delete-account-id", data=None),
+                                html.P(id="delete-confirm-text"),
+                                html.P("Tindakan ini tidak dapat dibatalkan!", className="text-danger fw-bold"),
+                            ]),
+                            dbc.ModalFooter([
+                                dbc.Button("Batal", id="cancel-delete-account-btn", color="secondary"),
+                                dbc.Button([
+                                    html.I(className="fas fa-trash me-2"),
+                                    "Hapus"
+                                ], id="confirm-delete-account-btn", color="danger"),
+                            ]),
+                        ], id="delete-account-modal", is_open=False),
                     ])
                 ]),
 
@@ -12655,6 +12849,244 @@ def deactivate_member_callback(n_clicks_list):
 
 
 # ============================================================
+# ACCOUNT LIST MANAGEMENT CALLBACKS
+# ============================================================
+
+# Load account list
+@app.callback(
+    Output('account-list-container', 'children'),
+    [Input('admin-tabs', 'active_tab'),
+     Input('refresh-account-list-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def load_account_list(active_tab, refresh_clicks):
+    """Load account list table for List Member tab"""
+    if active_tab != 'tab-list-member':
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        accounts = get_all_accounts()
+
+        if not accounts:
+            return dbc.Alert("Belum ada akun member terdaftar.", color="secondary")
+
+        # Build table
+        table_header = html.Thead(html.Tr([
+            html.Th("#", style={"width": "40px"}),
+            html.Th("Email"),
+            html.Th("Username"),
+            html.Th("Password", style={"width": "100px"}),
+            html.Th("Tipe", style={"width": "100px"}),
+            html.Th("Status", style={"width": "80px"}),
+            html.Th("Created", style={"width": "100px"}),
+            html.Th("Aksi", style={"width": "150px"}),
+        ]))
+
+        table_rows = []
+        for idx, acc in enumerate(accounts, 1):
+            # Type badge
+            type_badge = {
+                'admin': dbc.Badge("👑 Admin", color="warning", className="me-1"),
+                'subscribe': dbc.Badge("⭐ Subscribe", color="success", className="me-1"),
+                'trial': dbc.Badge("🕐 Trial", color="secondary", className="me-1"),
+            }.get(acc['member_type'], dbc.Badge(acc['member_type'], color="light"))
+
+            # Status badge
+            status_badge = dbc.Badge("✅ Aktif", color="success") if acc['is_verified'] else dbc.Badge("❌ Nonaktif", color="danger")
+
+            # Password display - just dots
+            password_display = "••••••••"
+
+            # Created date
+            created = acc['created_at'].strftime('%Y-%m-%d') if acc['created_at'] else '-'
+
+            table_rows.append(html.Tr([
+                html.Td(idx),
+                html.Td(acc['email'], style={"fontSize": "12px"}),
+                html.Td(acc['username']),
+                html.Td(password_display, className="text-muted"),
+                html.Td(type_badge),
+                html.Td(status_badge),
+                html.Td(created, style={"fontSize": "11px"}),
+                html.Td([
+                    dbc.Button([html.I(className="fas fa-edit")], id={"type": "edit-account-btn", "index": acc['id']},
+                              color="primary", size="sm", className="me-1", title="Edit"),
+                    dbc.Button([html.I(className="fas fa-trash")], id={"type": "delete-account-btn", "index": acc['id']},
+                              color="danger", size="sm", title="Hapus"),
+                ]),
+            ]))
+
+        table_body = html.Tbody(table_rows)
+        return dbc.Table([table_header, table_body], bordered=True, hover=True, responsive=True,
+                        className="table-sm", style={"fontSize": "13px"})
+
+    except Exception as e:
+        return dbc.Alert(f"Error loading accounts: {str(e)}", color="danger")
+
+
+# Open edit modal
+@app.callback(
+    [Output('edit-account-modal', 'is_open'),
+     Output('edit-account-id', 'data'),
+     Output('edit-account-email', 'value'),
+     Output('edit-account-username', 'value'),
+     Output('edit-account-password', 'value'),
+     Output('edit-account-type', 'value'),
+     Output('edit-account-status', 'value')],
+    [Input({"type": "edit-account-btn", "index": ALL}, "n_clicks"),
+     Input('cancel-edit-account-btn', 'n_clicks')],
+    [State('edit-account-modal', 'is_open')],
+    prevent_initial_call=True
+)
+def open_edit_account_modal(edit_clicks, cancel_click, is_open):
+    """Open edit modal and populate with account data"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+
+    triggered = ctx.triggered[0]
+    prop_id = triggered['prop_id']
+
+    # Cancel button
+    if 'cancel-edit-account-btn' in prop_id:
+        return False, None, "", "", "", "trial", "true"
+
+    # Edit button clicked
+    if 'edit-account-btn' in prop_id and any(c for c in (edit_clicks or []) if c):
+        import json
+        try:
+            button_info = json.loads(prop_id.replace('.n_clicks', ''))
+            account_id = button_info['index']
+
+            account = get_account_by_id(account_id)
+            if account:
+                return (
+                    True,  # Open modal
+                    account_id,
+                    account['email'],
+                    account['username'],
+                    "",  # Don't show password
+                    account['member_type'],
+                    "true" if account['is_verified'] else "false"
+                )
+        except Exception as e:
+            print(f"Error opening edit modal: {e}")
+
+    raise dash.exceptions.PreventUpdate
+
+
+# Save account edit
+@app.callback(
+    [Output('edit-account-feedback', 'children'),
+     Output('account-action-feedback', 'children', allow_duplicate=True)],
+    [Input('save-edit-account-btn', 'n_clicks')],
+    [State('edit-account-id', 'data'),
+     State('edit-account-username', 'value'),
+     State('edit-account-password', 'value'),
+     State('edit-account-type', 'value'),
+     State('edit-account-status', 'value')],
+    prevent_initial_call=True
+)
+def save_account_edit(n_clicks, account_id, username, password, member_type, status):
+    """Save edited account data"""
+    if not n_clicks or not account_id:
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        is_verified = status == "true"
+        result = update_account(
+            account_id,
+            username=username if username else None,
+            password=password if password else None,
+            member_type=member_type,
+            is_verified=is_verified
+        )
+
+        if result:
+            return (
+                dbc.Alert("Akun berhasil diupdate!", color="success"),
+                dbc.Alert([
+                    html.I(className="fas fa-check-circle me-2"),
+                    "Akun berhasil diupdate. Refresh untuk melihat perubahan."
+                ], color="success", dismissable=True)
+            )
+        return dbc.Alert("Tidak ada perubahan", color="warning"), dash.no_update
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger"), dash.no_update
+
+
+# Open delete confirmation modal
+@app.callback(
+    [Output('delete-account-modal', 'is_open'),
+     Output('delete-account-id', 'data'),
+     Output('delete-confirm-text', 'children')],
+    [Input({"type": "delete-account-btn", "index": ALL}, "n_clicks"),
+     Input('cancel-delete-account-btn', 'n_clicks')],
+    [State('delete-account-modal', 'is_open')],
+    prevent_initial_call=True
+)
+def open_delete_modal(delete_clicks, cancel_click, is_open):
+    """Open delete confirmation modal"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+
+    triggered = ctx.triggered[0]
+    prop_id = triggered['prop_id']
+
+    # Cancel button
+    if 'cancel-delete-account-btn' in prop_id:
+        return False, None, ""
+
+    # Delete button clicked
+    if 'delete-account-btn' in prop_id and any(c for c in (delete_clicks or []) if c):
+        import json
+        try:
+            button_info = json.loads(prop_id.replace('.n_clicks', ''))
+            account_id = button_info['index']
+
+            account = get_account_by_id(account_id)
+            if account:
+                return (
+                    True,  # Open modal
+                    account_id,
+                    f"Apakah Anda yakin ingin menghapus akun '{account['email']}' ({account['username']})?"
+                )
+        except Exception as e:
+            print(f"Error opening delete modal: {e}")
+
+    raise dash.exceptions.PreventUpdate
+
+
+# Confirm delete account
+@app.callback(
+    [Output('delete-account-modal', 'is_open', allow_duplicate=True),
+     Output('account-action-feedback', 'children')],
+    [Input('confirm-delete-account-btn', 'n_clicks')],
+    [State('delete-account-id', 'data')],
+    prevent_initial_call=True
+)
+def confirm_delete_account(n_clicks, account_id):
+    """Delete account after confirmation"""
+    if not n_clicks or not account_id:
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        result = delete_account(account_id)
+        if result:
+            return (
+                False,  # Close modal
+                dbc.Alert([
+                    html.I(className="fas fa-check-circle me-2"),
+                    "Akun berhasil dihapus. Refresh untuk melihat perubahan."
+                ], color="success", dismissable=True)
+            )
+        return False, dbc.Alert("Gagal menghapus akun", color="danger")
+    except Exception as e:
+        return False, dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# ============================================================
 # USER AUTHENTICATION CALLBACKS
 # ============================================================
 
@@ -12810,6 +13242,63 @@ def auto_login_superadmin(pathname, superadmin_data):
     if superadmin_data and isinstance(superadmin_data, dict) and superadmin_data.get('logged_in') and superadmin_data.get('member_type') == 'admin':
         return superadmin_data
     raise dash.exceptions.PreventUpdate
+
+
+# Show/hide login/logout buttons based on user session
+@app.callback(
+    [Output('auth-buttons-desktop', 'style'),
+     Output('logout-section-desktop', 'style'),
+     Output('user-display-desktop', 'children'),
+     Output('auth-buttons-mobile', 'style'),
+     Output('logout-section-mobile', 'style'),
+     Output('user-display-mobile', 'children')],
+    [Input('user-session', 'data')],
+    prevent_initial_call=False
+)
+def toggle_auth_buttons(user_session):
+    """Toggle visibility of login/logout buttons based on session"""
+    if user_session and isinstance(user_session, dict) and user_session.get('logged_in'):
+        username = user_session.get('username', 'User')
+        member_type = user_session.get('member_type', '')
+        badge = "👑 " if member_type == 'admin' else ""
+        display_text = f"{badge}{username}"
+        # Hide login buttons, show logout
+        return (
+            {"display": "none"},  # Hide auth-buttons-desktop
+            {"display": "flex"},  # Show logout-section-desktop
+            display_text,
+            {"display": "none"},  # Hide auth-buttons-mobile
+            {"display": "block"},  # Show logout-section-mobile
+            display_text
+        )
+    else:
+        # Show login buttons, hide logout
+        return (
+            {"display": "flex"},  # Show auth-buttons-desktop
+            {"display": "none"},  # Hide logout-section-desktop
+            "",
+            {"display": "block"},  # Show auth-buttons-mobile
+            {"display": "none"},  # Hide logout-section-mobile
+            ""
+        )
+
+
+# Logout callback
+@app.callback(
+    [Output('user-session', 'data', allow_duplicate=True),
+     Output('superadmin-session', 'data', allow_duplicate=True),
+     Output('url', 'pathname', allow_duplicate=True)],
+    [Input('logout-btn-desktop', 'n_clicks'),
+     Input('logout-btn-mobile', 'n_clicks')],
+    prevent_initial_call=True
+)
+def handle_logout(desktop_clicks, mobile_clicks):
+    """Handle logout - clear all sessions"""
+    if not desktop_clicks and not mobile_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    # Clear sessions and redirect to home
+    return None, None, "/"
 
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('stock-selector', 'value')])
