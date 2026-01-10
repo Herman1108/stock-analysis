@@ -12624,6 +12624,24 @@ def refresh_stock_dropdown(pathname):
     return [{'label': s, 'value': s} for s in stocks]
 
 @app.callback(
+    Output('stock-selector', 'value'),
+    [Input('url', 'search')],
+    [State('stock-selector', 'value')],
+    prevent_initial_call=True
+)
+def sync_dropdown_with_url(search, current_value):
+    """Sync stock-selector dropdown with URL query parameter.
+    When user clicks emiten link from home page (e.g. /analysis?stock=BBCA),
+    the dropdown should update to match."""
+    if search:
+        from urllib.parse import parse_qs
+        params = parse_qs(search.lstrip('?'))
+        stock_from_url = params.get('stock', [None])[0]
+        if stock_from_url:
+            return stock_from_url.upper()
+    return current_value  # Keep current value if no stock in URL
+
+@app.callback(
     Output('page-content', 'children'),
     [Input('url', 'pathname'), Input('url', 'search'), Input('stock-selector', 'value')],
     [State('user-session', 'data'), State('superadmin-session', 'data')]
