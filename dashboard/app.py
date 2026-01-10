@@ -2602,9 +2602,12 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white px-2 py-1"), href="/discussion")),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/upload")),
                 ], className="d-none d-lg-flex", navbar=True, style={"gap": "3px"}),
-            ], className="d-flex align-items-center"),
+            ], className="d-flex align-items-center flex-grow-1"),
 
-            # RIGHT SIDE: Theme + Auth (pushed to right with ms-auto)
+            # SEPARATOR - Visual divider between content and auth
+            html.Div("|", className="d-none d-lg-block text-muted mx-3", style={"fontSize": "1.5rem", "opacity": "0.3"}),
+
+            # RIGHT SIDE: Theme + Auth (grouped together)
             html.Div([
                 # Theme toggle
                 dbc.Button(
@@ -2638,7 +2641,7 @@ def create_navbar():
                     n_clicks=0,
                     style={"border": "none"}
                 ),
-            ], className="d-flex align-items-center ms-auto"),
+            ], className="d-flex align-items-center"),
 
             # Mobile dropdown menu - only visible when hamburger clicked
             dbc.Collapse(
