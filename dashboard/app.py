@@ -12392,6 +12392,42 @@ def create_login_required_content():
         ], className="py-5")
     ])
 
+def create_admin_required_content():
+    """Create content shown when admin access is required"""
+    return html.Div([
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.I(className="fas fa-user-shield fa-4x text-danger mb-4"),
+                            ], className="text-center"),
+                            html.H3("Akses Terbatas", className="text-center mb-3"),
+                            html.P([
+                                "Halaman ini hanya dapat diakses oleh Admin."
+                            ], className="text-center text-muted mb-4"),
+                            html.Div([
+                                dcc.Link(
+                                    dbc.Button([
+                                        html.I(className="fas fa-home me-2"),
+                                        "Kembali ke Home"
+                                    ], color="primary", size="lg"),
+                                    href="/"
+                                ),
+                            ], className="text-center mb-4"),
+                            html.Hr(),
+                            html.P([
+                                html.I(className="fas fa-info-circle me-2 text-info"),
+                                "Hubungi administrator jika Anda memerlukan akses ke halaman ini."
+                            ], className="text-center text-muted small mb-0")
+                        ], className="py-5")
+                    ], className="shadow-lg border-0")
+                ], md=6, lg=5, className="mx-auto")
+            ], className="min-vh-75 align-items-center", style={"minHeight": "60vh"})
+        ], className="py-5")
+    ])
+
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
@@ -12534,19 +12570,30 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     # Clear cache for selected stock to ensure fresh data on stock change
     clear_stock_cache(selected_stock)
 
-    # Check if user is logged in
+    # Check if user is logged in and get member type
     is_logged_in = False
+    is_admin = False
     if user_session and user_session.get('email'):
         is_logged_in = True
+        if user_session.get('member_type') == 'admin':
+            is_admin = True
     elif superadmin_session and superadmin_session.get('email'):
         is_logged_in = True
+        is_admin = True  # Superadmin is always admin
 
     # Public pages (no login required)
     public_pages = ['/', '/login', '/signup', '/verify']
 
+    # Admin-only pages
+    admin_pages = ['/upload']
+
     # Protected pages require login
     if pathname not in public_pages and not is_logged_in:
         return create_login_required_content()
+
+    # Admin pages require admin role
+    if pathname in admin_pages and not is_admin:
+        return create_admin_required_content()
 
     # Route to appropriate page
     if pathname == '/':
