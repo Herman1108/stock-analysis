@@ -781,13 +781,24 @@ def calculate_volume_price_multi_horizon(df: pd.DataFrame) -> dict:
 
         # Absorption detection: volume up + range narrow
         is_absorption = vol_change_pct > 10 and price_range_pct < 8
+        
+        # Determine absorption type based on price direction
+        # Price DOWN + high volume + tight range = AKUMULASI (smart money buying)
+        # Price UP + high volume + tight range = DISTRIBUSI (smart money selling)
+        absorption_type = None
+        if is_absorption:
+            if price_change_pct <= 0:
+                absorption_type = 'AKUMULASI'  # Price down/flat = buying from weak hands
+            else:
+                absorption_type = 'DISTRIBUSI'  # Price up = selling to FOMO buyers
 
         return {
             'volume_change_pct': round(vol_change_pct, 1),
             'price_change_pct': round(price_change_pct, 2),
             'price_range_pct': round(price_range_pct, 2),
             'avg_daily_range': round(avg_daily_range, 2),
-            'is_absorption': is_absorption
+            'is_absorption': is_absorption,
+            'absorption_type': absorption_type
         }
 
     # Calculate for each horizon

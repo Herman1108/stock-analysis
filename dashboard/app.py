@@ -5338,7 +5338,7 @@ def create_validation_card(stock_code: str):
                                 html.Th("Volume Î”", className="text-center", style={"width": "20%"}),
                                 html.Th("Price Î”", className="text-center", style={"width": "20%"}),
                                 html.Th("Range", className="text-center", style={"width": "20%"}),
-                                html.Th("Absorption?", className="text-center", style={"width": "20%"}),
+                                html.Th("AKSI?", className="text-center", style={"width": "20%"}, title="Akumulasi/Distribusi"),
                             ])
                         ]),
                         html.Tbody([
@@ -5361,7 +5361,10 @@ def create_validation_card(stock_code: str):
                                     className="text-center"
                                 ),
                                 html.Td(
-                                    dbc.Badge("Ya", color="success") if vol_price_multi.get('horizons', {}).get('1d', {}).get('is_absorption') else
+                                    dbc.Badge(
+                                        vol_price_multi.get('horizons', {}).get('1d', {}).get('absorption_type', 'Ya'),
+                                        color="success" if vol_price_multi.get('horizons', {}).get('1d', {}).get('absorption_type') == 'AKUMULASI' else "danger"
+                                    ) if vol_price_multi.get('horizons', {}).get('1d', {}).get('is_absorption') else
                                     dbc.Badge("Tidak", color="secondary"),
                                     className="text-center"
                                 ),
@@ -5386,9 +5389,12 @@ def create_validation_card(stock_code: str):
                                     className="text-center fw-bold"
                                 ),
                                 html.Td(
-                                    dbc.Badge("Ya", color="success") if vol_price_multi.get('horizons', {}).get('5d', {}).get('is_absorption') else
+                                    dbc.Badge(
+                                        vol_price_multi.get('horizons', {}).get('5d', {}).get('absorption_type', 'Ya'),
+                                        color="success" if vol_price_multi.get('horizons', {}).get('5d', {}).get('absorption_type') == 'AKUMULASI' else "danger"
+                                    ) if vol_price_multi.get('horizons', {}).get('5d', {}).get('is_absorption') else
                                     dbc.Badge("Tidak", color="secondary"),
-                                    className="text-center"
+                                    className="text-center fw-bold"
                                 ),
                             ], style={"backgroundColor": "rgba(23,162,184,0.15)" if vol_price_multi.get('core_absorption') else "rgba(255,193,7,0.05)", "borderLeft": "3px solid #ffc107"}),
 
@@ -5411,7 +5417,10 @@ def create_validation_card(stock_code: str):
                                     className="text-center"
                                 ),
                                 html.Td(
-                                    dbc.Badge("Ya", color="success") if vol_price_multi.get('horizons', {}).get('10d', {}).get('is_absorption') else
+                                    dbc.Badge(
+                                        vol_price_multi.get('horizons', {}).get('10d', {}).get('absorption_type', 'Ya'),
+                                        color="success" if vol_price_multi.get('horizons', {}).get('10d', {}).get('absorption_type') == 'AKUMULASI' else "danger"
+                                    ) if vol_price_multi.get('horizons', {}).get('10d', {}).get('is_absorption') else
                                     dbc.Badge("Tidak", color="secondary"),
                                     className="text-center"
                                 ),
@@ -5425,6 +5434,11 @@ def create_validation_card(stock_code: str):
                         "Volume Î” = perubahan volume vs periode sebelumnya | ",
                         "Price Î” = perubahan harga close-to-close | ",
                         "Range = high-low sebagai % dari mid price"
+                    ], className="text-muted d-block mb-2"),
+                    html.Small([
+                        html.I(className="fas fa-lightbulb me-1 text-warning"),
+                        html.Strong("AKUMULASI", className="text-success"), " = Volume naik + Harga turun (smart money beli) | ",
+                        html.Strong("DISTRIBUSI", className="text-danger"), " = Volume naik + Harga naik (smart money jual)"
                     ], className="text-muted d-block mb-3"),
 
                     # KESIMPULAN
