@@ -2619,17 +2619,17 @@ def create_navbar():
                     title="Toggle Light/Dark Mode"
                 ),
 
-                # Auth buttons desktop (shown when not logged in)
+                # Auth buttons desktop (shown when not logged in) - visibility controlled by callback
                 html.Div([
                     dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white px-2 py-1"), href="/login"),
                     dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Sign Up"], color="light", size="sm", className="fw-bold text-dark px-2 py-1"), href="/signup"),
-                ], id="auth-buttons-desktop", className="d-none d-lg-flex", style={"gap": "3px"}),
+                ], id="auth-buttons-desktop", className="d-lg-flex", style={"gap": "3px", "display": "none"}),
 
-                # Logout section desktop (shown when logged in)
+                # Logout section desktop (shown when logged in) - visibility controlled by callback
                 html.Div([
                     html.Span(id="user-display-desktop", className="text-light me-2 small"),
                     dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-desktop", color="danger", size="sm", className="fw-bold text-white px-2 py-1"),
-                ], id="logout-section-desktop", className="d-none d-lg-flex align-items-center", style={"display": "none"}),
+                ], id="logout-section-desktop", className="align-items-center", style={"display": "none"}),
 
                 # Hamburger toggle button for mobile
                 dbc.Button(

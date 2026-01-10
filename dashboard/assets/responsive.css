@@ -5,6 +5,17 @@
    MOBILE-FIRST APPROACH
    ============================================ */
 
+/* Auth buttons visibility - override Bootstrap d-lg-flex */
+#auth-buttons-desktop[style*="display: none"],
+#logout-section-desktop[style*="display: none"] {
+  display: none !important;
+}
+
+#auth-buttons-desktop[style*="display: flex"],
+#logout-section-desktop[style*="display: flex"] {
+  display: flex !important;
+}
+
 /* ============================================
    MOBILE STYLES (Default - for phones)
    ============================================ */
