@@ -3109,7 +3109,7 @@ def verify_user_email(token: str) -> dict:
 def login_user(email: str, password: str) -> dict:
     """Login user and return user data"""
     query = """
-        SELECT id, email, username, password_hash, is_verified, member_type, member_end, is_frozen
+        SELECT id, email, username, password_hash, is_verified, member_type, member_end
         FROM users WHERE email = %s
     """
     result = execute_query(query, (email.lower(),), use_cache=False)
@@ -3124,10 +3124,6 @@ def login_user(email: str, password: str) -> dict:
 
     if not user['is_verified']:
         return {'success': False, 'error': 'Email belum diverifikasi. Cek inbox email Anda.'}
-
-    # Check if account is frozen
-    if user.get('is_frozen'):
-        return {'success': False, 'error': 'Akun Anda dibekukan. Hubungi admin untuk informasi lebih lanjut.'}
 
     # Update last login
     update_query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
@@ -3451,17 +3447,20 @@ def delete_account(user_id: int):
 # ============================================================
 
 def get_stock_data_summary():
-    """Get summary of all stock data (rows, brokers, date range)"""
+    """Get summary of all stock data (rows, brokers, date range, row_range)"""
     query = """
         SELECT
-            stock_code,
+            bs.stock_code,
             COUNT(*) as rows,
-            COUNT(DISTINCT broker_code) as brokers,
-            MIN(date) as first_date,
-            MAX(date) as last_date
-        FROM broker_summary
-        GROUP BY stock_code
-        ORDER BY stock_code
+            COUNT(DISTINCT bs.broker_code) as brokers,
+            MIN(bs.date) as first_date,
+            MAX(bs.date) as last_date,
+            (SELECT uh.row_range FROM upload_history uh
+             WHERE uh.stock_code = bs.stock_code
+             ORDER BY uh.uploaded_at DESC LIMIT 1) as row_range
+        FROM broker_summary bs
+        GROUP BY bs.stock_code
+        ORDER BY bs.stock_code
     """
     return execute_query(query, use_cache=False) or []
 
@@ -3469,7 +3468,7 @@ def get_upload_history(limit: int = 5):
     """Get last N upload history records"""
     query = """
         SELECT id, stock_code, uploaded_by, upload_type, rows_uploaded,
-               brokers_count, date_range_start, date_range_end, uploaded_at
+               brokers_count, date_range_start, date_range_end, uploaded_at, row_range
         FROM upload_history
         ORDER BY uploaded_at DESC
         LIMIT %s
@@ -3477,16 +3476,17 @@ def get_upload_history(limit: int = 5):
     return execute_query(query, (limit,), use_cache=False) or []
 
 def add_upload_history(stock_code: str, uploaded_by: str, rows: int, brokers: int,
-                       date_start, date_end, upload_type: str = 'broker_summary'):
+                       date_start, date_end, upload_type: str = 'broker_summary',
+                       row_range: str = 'A-H, L-X'):
     """Add a record to upload history"""
     query = """
         INSERT INTO upload_history (stock_code, uploaded_by, upload_type, rows_uploaded,
-                                    brokers_count, date_range_start, date_range_end)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                    brokers_count, date_range_start, date_range_end, row_range)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         RETURNING id
     """
     return execute_query(query, (stock_code, uploaded_by, upload_type, rows, brokers,
-                                  date_start, date_end), use_cache=False)
+                                  date_start, date_end, row_range), use_cache=False)
 
 def delete_stock_data(stock_code: str):
     """Delete all data for a stock code"""
@@ -3523,6 +3523,41 @@ def toggle_freeze_account(user_id: int, freeze: bool):
     """Freeze or unfreeze a user account"""
     query = "UPDATE users SET is_frozen = %s WHERE id = %s RETURNING id"
     return execute_query(query, (freeze, user_id), use_cache=False)
+
+# ============================================================
+# MAINTENANCE MODE FUNCTIONS
+# ============================================================
+
+def get_maintenance_mode():
+    """Get current maintenance mode status"""
+    query = "SELECT value, updated_at, updated_by FROM system_settings WHERE key = 'maintenance_mode'"
+    result = execute_query(query, use_cache=False)
+    if result:
+        return {
+            'is_on': result[0]['value'] == 'on',
+            'updated_at': result[0]['updated_at'],
+            'updated_by': result[0]['updated_by']
+        }
+    return {'is_on': False, 'updated_at': None, 'updated_by': None}
+
+def set_maintenance_mode(is_on: bool, updated_by: str = None):
+    """Set maintenance mode on or off"""
+    value = 'on' if is_on else 'off'
+    query = """
+        UPDATE system_settings
+        SET value = %s, updated_at = CURRENT_TIMESTAMP, updated_by = %s
+        WHERE key = 'maintenance_mode'
+        RETURNING value
+    """
+    return execute_query(query, (value, updated_by), use_cache=False)
+
+def get_frozen_data_snapshot():
+    """Get the data snapshot timestamp when maintenance was enabled"""
+    query = "SELECT updated_at FROM system_settings WHERE key = 'maintenance_mode' AND value = 'on'"
+    result = execute_query(query, use_cache=False)
+    if result:
+        return result[0]['updated_at']
+    return None
 
 def get_password_display(password_hash: str) -> str:
     """Extract readable info from password hash for display (NOT the actual password)"""
@@ -4404,16 +4439,19 @@ def create_upload_page():
                             ])
                         ], className="mb-4"),
 
-                        # Freeze Accounts Card
+                        # Maintenance Mode Card
                         dbc.Card([
                             dbc.CardHeader([
-                                html.H6([html.I(className="fas fa-user-lock me-2"), "Freeze/Unfreeze Akun"], className="mb-0")
+                                html.H6([html.I(className="fas fa-tools me-2"), "Maintenance Mode"], className="mb-0")
                             ]),
                             dbc.CardBody([
-                                html.P("Freeze akun untuk menonaktifkan sementara (hanya trial & subscribe)", className="text-muted small"),
-                                html.Div(id="freeze-accounts-container", children=[
+                                html.P([
+                                    "Saat maintenance aktif, user biasa melihat data sebelum maintenance. ",
+                                    "Admin & Superuser tetap melihat data real-time."
+                                ], className="text-muted small mb-3"),
+                                html.Div(id="maintenance-mode-container", children=[
                                     dbc.Spinner(color="primary", size="sm"),
-                                    " Loading accounts..."
+                                    " Loading status..."
                                 ])
                             ])
                         ]),
@@ -12662,6 +12700,17 @@ def create_trial_expired_content():
         ], className="py-5")
     ])
 
+def create_maintenance_banner():
+    """Create maintenance mode banner for regular users"""
+    return dbc.Alert([
+        html.Div([
+            html.I(className="fas fa-tools me-2"),
+            html.Strong("Maintenance Mode - "),
+            "Sedang ada pembaruan data. Anda melihat data sebelum maintenance dimulai. ",
+            "Data terbaru akan tersedia setelah maintenance selesai."
+        ], className="d-flex align-items-center")
+    ], color="warning", className="mb-0 rounded-0 text-center", dismissable=False)
+
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
@@ -12882,43 +12931,61 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     if pathname in admin_pages and not is_admin:
         return create_admin_required_content()
 
+    # Check maintenance mode - show banner for non-admin users
+    show_maintenance_banner = False
+    if not is_admin:
+        try:
+            maintenance_status = get_maintenance_mode()
+            show_maintenance_banner = maintenance_status.get('is_on', False)
+        except:
+            pass
+
+    # Helper to wrap page content with maintenance banner if needed
+    def wrap_with_banner(page_content):
+        if show_maintenance_banner:
+            return html.Div([
+                create_maintenance_banner(),
+                page_content
+            ])
+        return page_content
+
     # Route to appropriate page
     if pathname == '/':
-        return create_landing_page()
+        return wrap_with_banner(create_landing_page())
     elif pathname == '/dashboard':
-        return create_dashboard_page(selected_stock)
+        return wrap_with_banner(create_dashboard_page(selected_stock))
     elif pathname == '/analysis':
-        return create_analysis_page(selected_stock)
+        return wrap_with_banner(create_analysis_page(selected_stock))
     elif pathname == '/bandarmology':
-        return create_bandarmology_page(selected_stock)
+        return wrap_with_banner(create_bandarmology_page(selected_stock))
     elif pathname == '/summary':
-        return create_summary_page(selected_stock)
+        return wrap_with_banner(create_summary_page(selected_stock))
     elif pathname == '/position':
-        return create_position_page(selected_stock)
+        return wrap_with_banner(create_position_page(selected_stock))
     elif pathname == '/upload':
-        return create_upload_page()
+        return create_upload_page()  # No banner for admin pages
     elif pathname == '/discussion':
-        return create_discussion_page(selected_stock)
+        return wrap_with_banner(create_discussion_page(selected_stock))
     elif pathname == '/movement':
-        return create_broker_movement_page(selected_stock)
+        return wrap_with_banner(create_broker_movement_page(selected_stock))
     elif pathname == '/sensitive':
-        return create_sensitive_broker_page(selected_stock)
+        return wrap_with_banner(create_sensitive_broker_page(selected_stock))
     elif pathname == '/profile':
-        return create_company_profile_page(selected_stock)
+        return wrap_with_banner(create_company_profile_page(selected_stock))
     elif pathname == '/fundamental':
-        return create_fundamental_page(selected_stock)
+        return wrap_with_banner(create_fundamental_page(selected_stock))
     elif pathname == '/support-resistance':
-        return create_support_resistance_page(selected_stock)
+        return wrap_with_banner(create_support_resistance_page(selected_stock))
     elif pathname == '/accumulation':
-        return create_accumulation_page(selected_stock)
+        return wrap_with_banner(create_accumulation_page(selected_stock))
     elif pathname == '/signup':
-        return create_signup_page()
+        return create_signup_page()  # No banner for auth pages
     elif pathname == '/login':
-        return create_login_page()
+        return create_login_page()  # No banner for auth pages
     elif pathname == '/verify':
-        return create_verify_page(token)
+        return create_verify_page(token)  # No banner for auth pages
     else:
-        return create_landing_page()
+        return wrap_with_banner(create_landing_page())
 
 # Password validation callback for upload page - with session persistence
 @app.callback(
@@ -13593,7 +13660,7 @@ def load_stock_data_summary(active_tab, refresh_clicks):
         table_header = html.Thead(html.Tr([
             html.Th("#"),
             html.Th("Kode"),
-            html.Th("Rows", className="text-end"),
+            html.Th("Row Range"),
             html.Th("Brokers", className="text-end"),
             html.Th("Data Dari"),
             html.Th("Data Sampai"),
@@ -13602,10 +13669,12 @@ def load_stock_data_summary(active_tab, refresh_clicks):
 
         table_rows = []
         for idx, row in enumerate(data, 1):
+            # Row range: from upload_history or default
+            row_range = row.get('row_range') or "A-H, L-X"
             table_rows.append(html.Tr([
                 html.Td(idx),
                 html.Td(dbc.Badge(row['stock_code'], color="info", className="fs-6")),
-                html.Td(f"{row['rows']:,}", className="text-end"),
+                html.Td(dbc.Badge(row_range, color="secondary", className="font-monospace")),
                 html.Td(row['brokers'], className="text-end"),
                 html.Td(row['first_date'].strftime('%Y-%m-%d') if row['first_date'] else '-'),
                 html.Td(row['last_date'].strftime('%Y-%m-%d') if row['last_date'] else '-'),
@@ -13647,7 +13716,7 @@ def load_upload_history(active_tab, refresh_clicks):
             html.Th("#"),
             html.Th("Kode"),
             html.Th("Diupload Oleh"),
-            html.Th("Rows", className="text-end"),
+            html.Th("Row Range"),
             html.Th("Brokers", className="text-end"),
             html.Th("Range Data"),
             html.Th("Waktu Upload"),
@@ -13662,11 +13731,12 @@ def load_upload_history(active_tab, refresh_clicks):
             if row['date_range_start'] and row['date_range_end']:
                 date_range = f"{row['date_range_start'].strftime('%m/%d')} - {row['date_range_end'].strftime('%m/%d')}"
 
+            row_range = row.get('row_range') or "A-H, L-X"
             table_rows.append(html.Tr([
                 html.Td(idx),
                 html.Td(dbc.Badge(row['stock_code'], color="info")),
                 html.Td(row['uploaded_by'] or '-', style={"fontSize": "12px"}),
-                html.Td(f"{row['rows_uploaded']:,}" if row['rows_uploaded'] else '-', className="text-end"),
+                html.Td(dbc.Badge(row_range, color="secondary", className="font-monospace"), style={"fontSize": "11px"}),
                 html.Td(row['brokers_count'] or '-', className="text-end"),
                 html.Td(date_range, style={"fontSize": "11px"}),
                 html.Td(time_str, style={"fontSize": "11px"}),
@@ -13680,61 +13750,44 @@ def load_upload_history(active_tab, refresh_clicks):
         return dbc.Alert(f"Error: {str(e)}", color="danger")
 
 
-# Load freezable accounts
+# Load maintenance mode status
 @app.callback(
-    Output('freeze-accounts-container', 'children'),
+    Output('maintenance-mode-container', 'children'),
     [Input('admin-tabs', 'active_tab'),
      Input('refresh-data-mgmt-btn', 'n_clicks')],
     prevent_initial_call=False
 )
-def load_freezable_accounts(active_tab, refresh_clicks):
-    """Load accounts that can be frozen"""
+def load_maintenance_mode(active_tab, refresh_clicks):
+    """Load maintenance mode status"""
     if active_tab != 'tab-data-mgmt':
         raise dash.exceptions.PreventUpdate
 
     try:
-        accounts = get_freezable_accounts()
+        status = get_maintenance_mode()
+        is_on = status['is_on']
+        updated_at = status['updated_at']
+        updated_by = status['updated_by']
 
-        if not accounts:
-            return dbc.Alert("Tidak ada akun trial/subscribe.", color="secondary")
+        # Status display
+        if is_on:
+            status_badge = dbc.Badge([html.I(className="fas fa-tools me-1"), "MAINTENANCE AKTIF"], color="warning", className="fs-6 py-2 px-3")
+            action_btn = dbc.Button([html.I(className="fas fa-play me-2"), "Selesai Maintenance"], id="toggle-maintenance-btn", color="success", size="lg", className="ms-3")
+            info_text = f"Diaktifkan oleh {updated_by or 'System'}" if updated_by else "Maintenance sedang berlangsung"
+            if updated_at:
+                info_text += f" pada {updated_at.strftime('%Y-%m-%d %H:%M')}"
+        else:
+            status_badge = dbc.Badge([html.I(className="fas fa-check-circle me-1"), "NORMAL"], color="success", className="fs-6 py-2 px-3")
+            action_btn = dbc.Button([html.I(className="fas fa-pause me-2"), "Mulai Maintenance"], id="toggle-maintenance-btn", color="warning", size="lg", className="ms-3")
+            info_text = "Sistem berjalan normal. User melihat data real-time."
 
-        # Build table
-        table_header = html.Thead(html.Tr([
-            html.Th("#"),
-            html.Th("Email"),
-            html.Th("Username"),
-            html.Th("Tipe"),
-            html.Th("Status"),
-            html.Th("Aksi"),
-        ]))
-
-        table_rows = []
-        for idx, acc in enumerate(accounts, 1):
-            type_badge = dbc.Badge("⭐ Subscribe", color="success") if acc['member_type'] == 'subscribe' else dbc.Badge("🕐 Trial", color="secondary")
-
-            if acc['is_frozen']:
-                status_badge = dbc.Badge("🔒 Frozen", color="danger")
-                action_btn = dbc.Button([html.I(className="fas fa-unlock me-1"), "Unfreeze"],
-                                       id={"type": "unfreeze-btn", "index": acc['id']},
-                                       color="success", size="sm")
-            else:
-                status_badge = dbc.Badge("✅ Active", color="success")
-                action_btn = dbc.Button([html.I(className="fas fa-lock me-1"), "Freeze"],
-                                       id={"type": "freeze-btn", "index": acc['id']},
-                                       color="warning", size="sm")
-
-            table_rows.append(html.Tr([
-                html.Td(idx),
-                html.Td(acc['email'], style={"fontSize": "12px"}),
-                html.Td(acc['username']),
-                html.Td(type_badge),
-                html.Td(status_badge),
-                html.Td(action_btn),
-            ]))
-
-        table_body = html.Tbody(table_rows)
-        return dbc.Table([table_header, table_body], bordered=True, hover=True,
-                        responsive=True, className="table-sm", style={"fontSize": "13px"})
+        return html.Div([
+            html.Div([
+                status_badge,
+                action_btn,
+            ], className="d-flex align-items-center mb-3"),
+            html.P(info_text, className="text-muted small mb-0"),
+            dcc.Store(id="maintenance-current-state", data=is_on),
+        ])
 
     except Exception as e:
         return dbc.Alert(f"Error: {str(e)}", color="danger")
@@ -13799,42 +13852,42 @@ def confirm_delete_stock(n_clicks, stock_code):
         return False, dbc.Alert(f"Error: {str(e)}", color="danger")
 
 
-# Handle freeze/unfreeze
+# Handle maintenance mode toggle
 @app.callback(
     Output('data-mgmt-feedback', 'children', allow_duplicate=True),
-    [Input({"type": "freeze-btn", "index": ALL}, "n_clicks"),
-     Input({"type": "unfreeze-btn", "index": ALL}, "n_clicks")],
+    [Input('toggle-maintenance-btn', 'n_clicks')],
+    [State('maintenance-current-state', 'data'),
+     State('user-session', 'data')],
     prevent_initial_call=True
 )
-def handle_freeze_toggle(freeze_clicks, unfreeze_clicks):
-    """Handle freeze/unfreeze button clicks"""
-    ctx = dash.callback_context
-    if not ctx.triggered:
+def handle_maintenance_toggle(n_clicks, current_state, user_session):
+    """Handle maintenance mode toggle"""
+    if not n_clicks:
         raise dash.exceptions.PreventUpdate
-
-    triggered = ctx.triggered[0]
-    if triggered['value'] is None:
-        raise dash.exceptions.PreventUpdate
-
-    triggered_id = triggered['prop_id']
 
     try:
-        import json
-        btn_id = json.loads(triggered_id.split('.')[0])
-        user_id = btn_id['index']
-        action_type = btn_id['type']
+        # Get current user for audit
+        updated_by = None
+        if user_session:
+            updated_by = user_session.get('username') or user_session.get('email')
 
-        freeze = action_type == 'freeze-btn'
-        result = toggle_freeze_account(user_id, freeze)
+        # Toggle the state
+        new_state = not current_state
+        result = set_maintenance_mode(new_state, updated_by)
 
         if result:
-            action_text = "dibekukan (frozen)" if freeze else "diaktifkan kembali"
-            return dbc.Alert([
-                html.I(className="fas fa-check-circle me-2"),
-                f"Akun berhasil {action_text}. Refresh untuk melihat perubahan."
-            ], color="success", dismissable=True)
+            if new_state:
+                return dbc.Alert([
+                    html.I(className="fas fa-tools me-2"),
+                    "Maintenance Mode AKTIF. User biasa sekarang melihat data sebelum maintenance. Refresh untuk update tampilan."
+                ], color="warning", dismissable=True)
+            else:
+                return dbc.Alert([
+                    html.I(className="fas fa-check-circle me-2"),
+                    "Maintenance Mode SELESAI. User sekarang melihat data real-time. Refresh untuk update tampilan."
+                ], color="success", dismissable=True)
 
-        return dbc.Alert("Gagal mengubah status akun", color="danger")
+        return dbc.Alert("Gagal mengubah status maintenance", color="danger")
     except Exception as e:
         return dbc.Alert(f"Error: {str(e)}", color="danger")
 
