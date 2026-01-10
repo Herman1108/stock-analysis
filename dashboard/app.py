@@ -3413,8 +3413,8 @@ def update_account(user_id: int, username: str = None, password: str = None,
         # Update member_end based on new member type
         updates.append("member_start = %s")
         params.append(datetime.now())
-        if member_type == 'admin':
-            # Admin: 100 years (essentially unlimited)
+        if member_type in ['admin', 'superuser']:
+            # Admin/Superuser: 100 years (essentially unlimited)
             updates.append("member_end = %s")
             params.append(datetime.now() + timedelta(days=36500))
         elif member_type == 'subscribe':
@@ -4228,6 +4228,7 @@ def create_upload_page():
                                             options=[
                                                 {"label": "🕐 Trial", "value": "trial"},
                                                 {"label": "⭐ Subscribe", "value": "subscribe"},
+                                                {"label": "🛡️ Superuser", "value": "superuser"},
                                                 {"label": "👑 Admin", "value": "admin"},
                                             ]
                                         ),
@@ -12676,8 +12677,8 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     if user_session and user_session.get('email'):
         is_logged_in = True
         member_type = user_session.get('member_type', 'trial')
-        if member_type == 'admin':
-            is_admin = True
+        if member_type in ['admin', 'superuser']:
+            is_admin = True  # superuser has same access as admin
         elif member_type == 'trial':
             # Check if trial is expired
             member_end = user_session.get('member_end')
@@ -13151,12 +13152,18 @@ def deactivate_member_callback(n_clicks_list):
     Output('account-list-container', 'children'),
     [Input('admin-tabs', 'active_tab'),
      Input('refresh-account-list-btn', 'n_clicks')],
+    [State('user-session', 'data')],
     prevent_initial_call=False
 )
-def load_account_list(active_tab, refresh_clicks):
+def load_account_list(active_tab, refresh_clicks, user_session):
     """Load account list table for List Member tab"""
     if active_tab != 'tab-list-member':
         raise dash.exceptions.PreventUpdate
+
+    # Check if current user is superuser (can't see passwords)
+    is_superuser = False
+    if user_session and user_session.get('member_type') == 'superuser':
+        is_superuser = True
 
     try:
         accounts = get_all_accounts()
@@ -13181,6 +13188,7 @@ def load_account_list(active_tab, refresh_clicks):
             # Type badge
             type_badge = {
                 'admin': dbc.Badge("👑 Admin", color="warning", className="me-1"),
+                'superuser': dbc.Badge("🛡️ Superuser", color="info", className="me-1"),
                 'subscribe': dbc.Badge("⭐ Subscribe", color="success", className="me-1"),
                 'trial': dbc.Badge("🕐 Trial", color="secondary", className="me-1"),
             }.get(acc['member_type'], dbc.Badge(acc['member_type'], color="light"))
@@ -13188,9 +13196,11 @@ def load_account_list(active_tab, refresh_clicks):
             # Status badge
             status_badge = dbc.Badge("✅ Aktif", color="success") if acc['is_verified'] else dbc.Badge("❌ Nonaktif", color="danger")
 
-            # Password display - show plain password except for admin
-            if acc['member_type'] == 'admin':
-                password_display = "••••••••"  # Hide admin passwords
+            # Password display - superuser can't see ANY passwords, admin can only see non-admin passwords
+            if is_superuser:
+                password_display = "••••••••"  # Superuser can't see any passwords
+            elif acc['member_type'] in ['admin', 'superuser']:
+                password_display = "••••••••"  # Hide admin/superuser passwords from everyone
             else:
                 password_display = acc.get('plain_password') or "••••••••"
 
