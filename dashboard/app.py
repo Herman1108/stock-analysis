@@ -3109,7 +3109,7 @@ def verify_user_email(token: str) -> dict:
 def login_user(email: str, password: str) -> dict:
     """Login user and return user data"""
     query = """
-        SELECT id, email, username, password_hash, is_verified, member_type, member_end
+        SELECT id, email, username, password_hash, is_verified, member_type, member_end, is_frozen
         FROM users WHERE email = %s
     """
     result = execute_query(query, (email.lower(),), use_cache=False)
@@ -3124,6 +3124,10 @@ def login_user(email: str, password: str) -> dict:
 
     if not user['is_verified']:
         return {'success': False, 'error': 'Email belum diverifikasi. Cek inbox email Anda.'}
+
+    # Check if account is frozen
+    if user.get('is_frozen'):
+        return {'success': False, 'error': 'Akun Anda dibekukan. Hubungi admin untuk informasi lebih lanjut.'}
 
     # Update last login
     update_query = "UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = %s"
@@ -3441,6 +3445,84 @@ def delete_account(user_id: int):
     """Delete user account"""
     query = "DELETE FROM users WHERE id = %s RETURNING id"
     return execute_query(query, (user_id,), use_cache=False)
+
+# ============================================================
+# DATA MANAGEMENT FUNCTIONS
+# ============================================================
+
+def get_stock_data_summary():
+    """Get summary of all stock data (rows, brokers, date range)"""
+    query = """
+        SELECT
+            stock_code,
+            COUNT(*) as rows,
+            COUNT(DISTINCT broker_code) as brokers,
+            MIN(date) as first_date,
+            MAX(date) as last_date
+        FROM broker_summary
+        GROUP BY stock_code
+        ORDER BY stock_code
+    """
+    return execute_query(query, use_cache=False) or []
+
+def get_upload_history(limit: int = 5):
+    """Get last N upload history records"""
+    query = """
+        SELECT id, stock_code, uploaded_by, upload_type, rows_uploaded,
+               brokers_count, date_range_start, date_range_end, uploaded_at
+        FROM upload_history
+        ORDER BY uploaded_at DESC
+        LIMIT %s
+    """
+    return execute_query(query, (limit,), use_cache=False) or []
+
+def add_upload_history(stock_code: str, uploaded_by: str, rows: int, brokers: int,
+                       date_start, date_end, upload_type: str = 'broker_summary'):
+    """Add a record to upload history"""
+    query = """
+        INSERT INTO upload_history (stock_code, uploaded_by, upload_type, rows_uploaded,
+                                    brokers_count, date_range_start, date_range_end)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """
+    return execute_query(query, (stock_code, uploaded_by, upload_type, rows, brokers,
+                                  date_start, date_end), use_cache=False)
+
+def delete_stock_data(stock_code: str):
+    """Delete all data for a stock code"""
+    queries = [
+        "DELETE FROM broker_summary WHERE stock_code = %s",
+        "DELETE FROM stock_daily WHERE stock_code = %s",
+        "DELETE FROM broker_accumulation WHERE stock_code = %s",
+        "DELETE FROM broker_sensitivity WHERE stock_code = %s",
+        "DELETE FROM broker_ipo_position WHERE stock_code = %s",
+        "DELETE FROM sideways_zones WHERE stock_code = %s",
+        "DELETE FROM alerts WHERE stock_code = %s",
+    ]
+    total_deleted = 0
+    for query in queries:
+        try:
+            result = execute_query(query, (stock_code,), fetch=False, use_cache=False)
+            if result:
+                total_deleted += 1
+        except:
+            pass
+    return total_deleted > 0
+
+def get_freezable_accounts():
+    """Get trial and subscribe accounts that can be frozen"""
+    query = """
+        SELECT id, email, username, member_type, is_frozen, is_verified, member_end
+        FROM users
+        WHERE member_type IN ('trial', 'subscribe')
+        ORDER BY member_type, username
+    """
+    return execute_query(query, use_cache=False) or []
+
+def toggle_freeze_account(user_id: int, freeze: bool):
+    """Freeze or unfreeze a user account"""
+    query = "UPDATE users SET is_frozen = %s WHERE id = %s RETURNING id"
+    return execute_query(query, (freeze, user_id), use_cache=False)
 
 def get_password_display(password_hash: str) -> str:
     """Extract readable info from password hash for display (NOT the actual password)"""
@@ -4274,6 +4356,90 @@ def create_upload_page():
                                 ], id="confirm-delete-account-btn", color="danger"),
                             ]),
                         ], id="delete-account-modal", is_open=False),
+                    ])
+                ]),
+
+                # TAB 4: DATA MANAGEMENT
+                dbc.Tab(label="📊 Data Management", tab_id="tab-data-mgmt", children=[
+                    html.Div(className="pt-3", children=[
+                        # Header
+                        dbc.Row([
+                            dbc.Col([
+                                html.H5([
+                                    html.I(className="fas fa-database me-2"),
+                                    "Management Data Upload"
+                                ], className="mb-0"),
+                            ], md=8),
+                            dbc.Col([
+                                dbc.Button([
+                                    html.I(className="fas fa-sync me-2"),
+                                    "Refresh"
+                                ], id="refresh-data-mgmt-btn", color="primary", size="sm", className="float-end"),
+                            ], md=4),
+                        ], className="mb-3"),
+
+                        # Stock Data Summary Card
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H6([html.I(className="fas fa-chart-bar me-2"), "Data Emiten"], className="mb-0")
+                            ]),
+                            dbc.CardBody([
+                                html.Div(id="stock-data-summary-container", children=[
+                                    dbc.Spinner(color="primary", size="sm"),
+                                    " Loading data..."
+                                ])
+                            ])
+                        ], className="mb-4"),
+
+                        # Upload History Card
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H6([html.I(className="fas fa-history me-2"), "Riwayat Upload (5 Terakhir)"], className="mb-0")
+                            ]),
+                            dbc.CardBody([
+                                html.Div(id="upload-history-container", children=[
+                                    dbc.Spinner(color="primary", size="sm"),
+                                    " Loading history..."
+                                ])
+                            ])
+                        ], className="mb-4"),
+
+                        # Freeze Accounts Card
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H6([html.I(className="fas fa-user-lock me-2"), "Freeze/Unfreeze Akun"], className="mb-0")
+                            ]),
+                            dbc.CardBody([
+                                html.P("Freeze akun untuk menonaktifkan sementara (hanya trial & subscribe)", className="text-muted small"),
+                                html.Div(id="freeze-accounts-container", children=[
+                                    dbc.Spinner(color="primary", size="sm"),
+                                    " Loading accounts..."
+                                ])
+                            ])
+                        ]),
+
+                        # Delete Stock Data Modal
+                        dbc.Modal([
+                            dbc.ModalHeader(dbc.ModalTitle([
+                                html.I(className="fas fa-exclamation-triangle me-2 text-danger"),
+                                "Konfirmasi Hapus Data"
+                            ])),
+                            dbc.ModalBody([
+                                dcc.Store(id="delete-stock-code", data=None),
+                                html.P(id="delete-stock-confirm-text"),
+                                html.P("Semua data broker dan harga untuk emiten ini akan dihapus!", className="text-danger fw-bold"),
+                            ]),
+                            dbc.ModalFooter([
+                                dbc.Button("Batal", id="cancel-delete-stock-btn", color="secondary"),
+                                dbc.Button([
+                                    html.I(className="fas fa-trash me-2"),
+                                    "Hapus Data"
+                                ], id="confirm-delete-stock-btn", color="danger"),
+                            ]),
+                        ], id="delete-stock-modal", is_open=False),
+
+                        # Feedback div
+                        html.Div(id="data-mgmt-feedback", className="mt-3"),
                     ])
                 ]),
 
@@ -13399,6 +13565,278 @@ def confirm_delete_account(n_clicks, account_id):
         return False, dbc.Alert("Gagal menghapus akun", color="danger")
     except Exception as e:
         return False, dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# ============================================================
+# DATA MANAGEMENT CALLBACKS
+# ============================================================
+
+# Load stock data summary
+@app.callback(
+    Output('stock-data-summary-container', 'children'),
+    [Input('admin-tabs', 'active_tab'),
+     Input('refresh-data-mgmt-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def load_stock_data_summary(active_tab, refresh_clicks):
+    """Load stock data summary table"""
+    if active_tab != 'tab-data-mgmt':
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        data = get_stock_data_summary()
+
+        if not data:
+            return dbc.Alert("Belum ada data emiten.", color="secondary")
+
+        # Build table
+        table_header = html.Thead(html.Tr([
+            html.Th("#"),
+            html.Th("Kode"),
+            html.Th("Rows", className="text-end"),
+            html.Th("Brokers", className="text-end"),
+            html.Th("Data Dari"),
+            html.Th("Data Sampai"),
+            html.Th("Aksi"),
+        ]))
+
+        table_rows = []
+        for idx, row in enumerate(data, 1):
+            table_rows.append(html.Tr([
+                html.Td(idx),
+                html.Td(dbc.Badge(row['stock_code'], color="info", className="fs-6")),
+                html.Td(f"{row['rows']:,}", className="text-end"),
+                html.Td(row['brokers'], className="text-end"),
+                html.Td(row['first_date'].strftime('%Y-%m-%d') if row['first_date'] else '-'),
+                html.Td(row['last_date'].strftime('%Y-%m-%d') if row['last_date'] else '-'),
+                html.Td(
+                    dbc.Button([html.I(className="fas fa-trash")],
+                              id={"type": "delete-stock-btn", "index": row['stock_code']},
+                              color="danger", size="sm", title="Hapus Data")
+                ),
+            ]))
+
+        table_body = html.Tbody(table_rows)
+        return dbc.Table([table_header, table_body], bordered=True, hover=True,
+                        responsive=True, className="table-sm")
+
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# Load upload history
+@app.callback(
+    Output('upload-history-container', 'children'),
+    [Input('admin-tabs', 'active_tab'),
+     Input('refresh-data-mgmt-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def load_upload_history(active_tab, refresh_clicks):
+    """Load upload history table"""
+    if active_tab != 'tab-data-mgmt':
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        history = get_upload_history(5)
+
+        if not history:
+            return dbc.Alert("Belum ada riwayat upload.", color="secondary")
+
+        # Build table
+        table_header = html.Thead(html.Tr([
+            html.Th("#"),
+            html.Th("Kode"),
+            html.Th("Diupload Oleh"),
+            html.Th("Rows", className="text-end"),
+            html.Th("Brokers", className="text-end"),
+            html.Th("Range Data"),
+            html.Th("Waktu Upload"),
+        ]))
+
+        table_rows = []
+        for idx, row in enumerate(history, 1):
+            uploaded_at = row['uploaded_at']
+            time_str = uploaded_at.strftime('%Y-%m-%d %H:%M') if uploaded_at else '-'
+
+            date_range = '-'
+            if row['date_range_start'] and row['date_range_end']:
+                date_range = f"{row['date_range_start'].strftime('%m/%d')} - {row['date_range_end'].strftime('%m/%d')}"
+
+            table_rows.append(html.Tr([
+                html.Td(idx),
+                html.Td(dbc.Badge(row['stock_code'], color="info")),
+                html.Td(row['uploaded_by'] or '-', style={"fontSize": "12px"}),
+                html.Td(f"{row['rows_uploaded']:,}" if row['rows_uploaded'] else '-', className="text-end"),
+                html.Td(row['brokers_count'] or '-', className="text-end"),
+                html.Td(date_range, style={"fontSize": "11px"}),
+                html.Td(time_str, style={"fontSize": "11px"}),
+            ]))
+
+        table_body = html.Tbody(table_rows)
+        return dbc.Table([table_header, table_body], bordered=True, hover=True,
+                        responsive=True, className="table-sm", style={"fontSize": "13px"})
+
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# Load freezable accounts
+@app.callback(
+    Output('freeze-accounts-container', 'children'),
+    [Input('admin-tabs', 'active_tab'),
+     Input('refresh-data-mgmt-btn', 'n_clicks')],
+    prevent_initial_call=False
+)
+def load_freezable_accounts(active_tab, refresh_clicks):
+    """Load accounts that can be frozen"""
+    if active_tab != 'tab-data-mgmt':
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        accounts = get_freezable_accounts()
+
+        if not accounts:
+            return dbc.Alert("Tidak ada akun trial/subscribe.", color="secondary")
+
+        # Build table
+        table_header = html.Thead(html.Tr([
+            html.Th("#"),
+            html.Th("Email"),
+            html.Th("Username"),
+            html.Th("Tipe"),
+            html.Th("Status"),
+            html.Th("Aksi"),
+        ]))
+
+        table_rows = []
+        for idx, acc in enumerate(accounts, 1):
+            type_badge = dbc.Badge("⭐ Subscribe", color="success") if acc['member_type'] == 'subscribe' else dbc.Badge("🕐 Trial", color="secondary")
+
+            if acc['is_frozen']:
+                status_badge = dbc.Badge("🔒 Frozen", color="danger")
+                action_btn = dbc.Button([html.I(className="fas fa-unlock me-1"), "Unfreeze"],
+                                       id={"type": "unfreeze-btn", "index": acc['id']},
+                                       color="success", size="sm")
+            else:
+                status_badge = dbc.Badge("✅ Active", color="success")
+                action_btn = dbc.Button([html.I(className="fas fa-lock me-1"), "Freeze"],
+                                       id={"type": "freeze-btn", "index": acc['id']},
+                                       color="warning", size="sm")
+
+            table_rows.append(html.Tr([
+                html.Td(idx),
+                html.Td(acc['email'], style={"fontSize": "12px"}),
+                html.Td(acc['username']),
+                html.Td(type_badge),
+                html.Td(status_badge),
+                html.Td(action_btn),
+            ]))
+
+        table_body = html.Tbody(table_rows)
+        return dbc.Table([table_header, table_body], bordered=True, hover=True,
+                        responsive=True, className="table-sm", style={"fontSize": "13px"})
+
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# Open delete stock modal
+@app.callback(
+    [Output('delete-stock-modal', 'is_open'),
+     Output('delete-stock-code', 'data'),
+     Output('delete-stock-confirm-text', 'children')],
+    [Input({"type": "delete-stock-btn", "index": ALL}, "n_clicks"),
+     Input('cancel-delete-stock-btn', 'n_clicks')],
+    [State('delete-stock-modal', 'is_open')],
+    prevent_initial_call=True
+)
+def open_delete_stock_modal(delete_clicks, cancel_click, is_open):
+    """Open delete stock modal"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+
+    triggered = ctx.triggered[0]
+    triggered_id = triggered['prop_id']
+
+    if 'cancel-delete-stock-btn' in triggered_id:
+        return False, None, ""
+
+    if 'delete-stock-btn' in triggered_id:
+        import json
+        btn_id = json.loads(triggered_id.split('.')[0])
+        stock_code = btn_id['index']
+        return True, stock_code, f"Apakah Anda yakin ingin menghapus semua data untuk {stock_code}?"
+
+    raise dash.exceptions.PreventUpdate
+
+
+# Confirm delete stock
+@app.callback(
+    [Output('delete-stock-modal', 'is_open', allow_duplicate=True),
+     Output('data-mgmt-feedback', 'children')],
+    [Input('confirm-delete-stock-btn', 'n_clicks')],
+    [State('delete-stock-code', 'data')],
+    prevent_initial_call=True
+)
+def confirm_delete_stock(n_clicks, stock_code):
+    """Delete stock data after confirmation"""
+    if not n_clicks or not stock_code:
+        raise dash.exceptions.PreventUpdate
+
+    try:
+        result = delete_stock_data(stock_code)
+        if result:
+            return (
+                False,
+                dbc.Alert([
+                    html.I(className="fas fa-check-circle me-2"),
+                    f"Data {stock_code} berhasil dihapus. Refresh untuk melihat perubahan."
+                ], color="success", dismissable=True)
+            )
+        return False, dbc.Alert(f"Gagal menghapus data {stock_code}", color="danger")
+    except Exception as e:
+        return False, dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# Handle freeze/unfreeze
+@app.callback(
+    Output('data-mgmt-feedback', 'children', allow_duplicate=True),
+    [Input({"type": "freeze-btn", "index": ALL}, "n_clicks"),
+     Input({"type": "unfreeze-btn", "index": ALL}, "n_clicks")],
+    prevent_initial_call=True
+)
+def handle_freeze_toggle(freeze_clicks, unfreeze_clicks):
+    """Handle freeze/unfreeze button clicks"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+
+    triggered = ctx.triggered[0]
+    if triggered['value'] is None:
+        raise dash.exceptions.PreventUpdate
+
+    triggered_id = triggered['prop_id']
+
+    try:
+        import json
+        btn_id = json.loads(triggered_id.split('.')[0])
+        user_id = btn_id['index']
+        action_type = btn_id['type']
+
+        freeze = action_type == 'freeze-btn'
+        result = toggle_freeze_account(user_id, freeze)
+
+        if result:
+            action_text = "dibekukan (frozen)" if freeze else "diaktifkan kembali"
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                f"Akun berhasil {action_text}. Refresh untuk melihat perubahan."
+            ], color="success", dismissable=True)
+
+        return dbc.Alert("Gagal mengubah status akun", color="danger")
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
 
 
 # ============================================================
