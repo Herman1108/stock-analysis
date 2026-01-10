@@ -9542,15 +9542,18 @@ def create_analysis_page(stock_code='CDIA'):
         }),
 
         # === PAGE HEADER WITH SUBMENU NAVIGATION ===
+        # Title and submenu - stacked on mobile, inline on desktop
         html.Div([
             html.H4([
                 html.I(className="fas fa-chart-pie me-2"),
                 f"Analisis Detail - {stock_code}"
-            ], className="mb-0 d-inline-block me-3"),
-            dcc.Link(dbc.Button([html.I(className="fas fa-chart-line me-2"), "Fundamental"], color="success", size="sm", className="me-2"), href="/fundamental"),
-            dcc.Link(dbc.Button([html.I(className="fas fa-layer-group me-2"), "Support & Resistance"], color="info", size="sm", className="me-2"), href="/support-resistance"),
-            dcc.Link(dbc.Button([html.I(className="fas fa-cubes me-2"), "Accumulation"], color="warning", size="sm"), href="/accumulation"),
-        ], className="d-flex align-items-center flex-wrap mb-4"),
+            ], className="mb-2 mb-lg-0"),
+        ], className="mb-2"),
+        html.Div([
+            dcc.Link(dbc.Button([html.I(className="fas fa-chart-line me-2"), "Fundamental"], color="success", size="sm", className="me-2 mb-2 mb-lg-0"), href="/fundamental"),
+            dcc.Link(dbc.Button([html.I(className="fas fa-layer-group me-2"), "Support & Resistance"], color="info", size="sm", className="me-2 mb-2 mb-lg-0"), href="/support-resistance"),
+            dcc.Link(dbc.Button([html.I(className="fas fa-cubes me-2"), "Accumulation"], color="warning", size="sm", className="mb-2 mb-lg-0"), href="/accumulation"),
+        ], className="d-flex flex-wrap mb-3"),
 
         # === 1. DECISION HERO CARD (PALING PENTING) ===
         dbc.Card([
