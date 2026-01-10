@@ -8686,7 +8686,22 @@ def create_accumulation_page(stock_code='CDIA'):
 
 def create_company_profile_page(stock_code='CDIA'):
     """Create Company Profile page with attractive, colorful design"""
-    profile = get_stock_profile(stock_code)
+    try:
+        profile = get_stock_profile(stock_code)
+    except Exception as e:
+        return html.Div([
+            html.Div([
+                html.H4([
+                    html.I(className="fas fa-building me-2"),
+                    f"Company Profile - {stock_code}"
+                ], className="mb-0 d-inline-block me-3"),
+                create_dashboard_submenu_nav('profile', stock_code),
+            ], className="d-flex align-items-center flex-wrap mb-4"),
+            dbc.Alert([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Error loading profile: {str(e)}"
+            ], color="danger")
+        ])
 
     if not profile:
         return html.Div([
