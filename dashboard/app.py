@@ -8894,10 +8894,10 @@ def create_company_profile_page(stock_code='CDIA'):
                     ], style={'backgroundColor': colors['directors']['header'], 'color': 'white', 'fontWeight': 'bold'}),
                     dbc.CardBody([
                         html.Div([
-                            html.Div([
-                                html.Small(d.get('position', ''), className="text-muted", style={'fontSize': '0.75rem'}),
-                                html.P(d.get('name', ''), className="mb-2 fw-bold", style={'fontSize': '0.9rem'})
-                            ], className="mb-1")
+                            html.P(
+                                d.get('name', d) if isinstance(d, dict) else str(d),
+                                className="mb-2 fw-bold", style={'fontSize': '0.9rem'}
+                            )
                             for d in (profile.get('directors', []) or [])
                         ]) if profile.get('directors') else html.P("-", className="text-muted")
                     ], style={'backgroundColor': colors['directors']['bg']})
@@ -8911,10 +8911,10 @@ def create_company_profile_page(stock_code='CDIA'):
                     ], style={'backgroundColor': colors['commissioners']['header'], 'color': 'white', 'fontWeight': 'bold'}),
                     dbc.CardBody([
                         html.Div([
-                            html.Div([
-                                html.Small(c.get('position', ''), className="text-muted", style={'fontSize': '0.75rem'}),
-                                html.P(c.get('name', ''), className="mb-2 fw-bold", style={'fontSize': '0.9rem'})
-                            ], className="mb-1")
+                            html.P(
+                                c.get('name', c) if isinstance(c, dict) else str(c),
+                                className="mb-2 fw-bold", style={'fontSize': '0.9rem'}
+                            )
                             for c in (profile.get('commissioners', []) or [])
                         ]) if profile.get('commissioners') else html.P("-", className="text-muted")
                     ], style={'backgroundColor': colors['commissioners']['bg']})
