@@ -12437,7 +12437,7 @@ def create_admin_required_content():
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
-        dcc.Location(id='url', refresh=True),  # Full page refresh for navigation
+        dcc.Location(id='url', refresh=False),  # No page refresh - use callbacks for navigation
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
         dcc.Store(id='user-session', storage_type='session', data=None),  # User login session
