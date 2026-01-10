@@ -765,9 +765,15 @@ def calculate_volume_price_multi_horizon(df: pd.DataFrame) -> dict:
         price_range_pct = ((high - low) / mid * 100) if mid > 0 else 0
 
         # Price change (close to close)
-        first_close = recent.iloc[0]['close_price']
-        last_close = recent.iloc[-1]['close_price']
-        price_change_pct = ((last_close - first_close) / first_close * 100) if first_close > 0 else 0
+        # For 1 day horizon, compare today vs yesterday from full data
+        if window == 1 and len(data) >= 2:
+            last_close = data.iloc[-1]['close_price']
+            prev_close = data.iloc[-2]['close_price']
+            price_change_pct = ((last_close - prev_close) / prev_close * 100) if prev_close > 0 else 0
+        else:
+            first_close = recent.iloc[0]['close_price']
+            last_close = recent.iloc[-1]['close_price']
+            price_change_pct = ((last_close - first_close) / first_close * 100) if first_close > 0 else 0
 
         # Average daily range for comparison
         daily_ranges = ((recent['high_price'] - recent['low_price']) / recent['low_price'] * 100)
