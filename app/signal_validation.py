@@ -130,7 +130,12 @@ def get_daily_flow_timeline(stock_code: str, days: int = 20) -> list:
     """
     Ambil data flow harian untuk Timeline Persistence visual
     Returns: list of dict dengan date, net_flow, status (BUY/SELL/NEUTRAL)
-    Uses buy vs sell dominance ratio instead of net (since net often cancels out)
+
+    BANDARMOLOGY APPROACH:
+    - Murni berdasarkan VOLUME LOT (bukan jumlah broker)
+    - Volume besar = Smart Money / Bandar bergerak
+    - Jumlah broker tidak relevan (banyak broker kecil = retail)
+    - Threshold 52% untuk menghindari noise
     """
     query = """
         SELECT
@@ -138,9 +143,7 @@ def get_daily_flow_timeline(stock_code: str, days: int = 20) -> list:
             SUM(net_value) as net_flow,
             SUM(net_lot) as net_lot,
             SUM(CASE WHEN net_lot > 0 THEN net_lot ELSE 0 END) as buy_lot,
-            SUM(CASE WHEN net_lot < 0 THEN ABS(net_lot) ELSE 0 END) as sell_lot,
-            COUNT(CASE WHEN net_lot > 0 THEN 1 END) as buy_brokers,
-            COUNT(CASE WHEN net_lot < 0 THEN 1 END) as sell_brokers
+            SUM(CASE WHEN net_lot < 0 THEN ABS(net_lot) ELSE 0 END) as sell_lot
         FROM broker_summary
         WHERE stock_code = %s
         GROUP BY date
@@ -155,25 +158,17 @@ def get_daily_flow_timeline(stock_code: str, days: int = 20) -> list:
             net_lot = float(row.get('net_lot', 0) or 0)
             buy_lot = float(row.get('buy_lot', 0) or 0)
             sell_lot = float(row.get('sell_lot', 0) or 0)
-            buy_brokers = int(row.get('buy_brokers', 0) or 0)
-            sell_brokers = int(row.get('sell_brokers', 0) or 0)
 
-            # Determine dominance based on buy vs sell ratio
+            # BANDARMOLOGY: Pure volume-based dominance
+            # Only volume matters - follow the big money
             total_lot = buy_lot + sell_lot
             if total_lot > 0:
-                buy_ratio = buy_lot / total_lot
-                sell_ratio = sell_lot / total_lot
+                buy_pct = buy_lot / total_lot
 
-                # Also consider broker count dominance
-                total_brokers = buy_brokers + sell_brokers
-                broker_buy_ratio = buy_brokers / total_brokers if total_brokers > 0 else 0.5
-
-                # Combined score: 70% volume ratio + 30% broker count ratio
-                buy_score = (buy_ratio * 0.7) + (broker_buy_ratio * 0.3)
-
-                if buy_score > 0.55:  # Buy dominates (>55%)
+                # Threshold 52% untuk filter noise
+                if buy_pct > 0.52:  # Buy volume > 52%
                     status = 'BUY'
-                elif buy_score < 0.45:  # Sell dominates (<45%)
+                elif buy_pct < 0.48:  # Sell volume > 52%
                     status = 'SELL'
                 else:
                     status = 'NEUTRAL'
