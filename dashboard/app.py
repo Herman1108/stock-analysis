@@ -3391,6 +3391,8 @@ def get_account_by_id(user_id: int):
 def update_account(user_id: int, username: str = None, password: str = None,
                    member_type: str = None, is_verified: bool = None):
     """Update user account - only update provided fields"""
+    from datetime import datetime, timedelta
+
     updates = []
     params = []
 
@@ -3408,6 +3410,21 @@ def update_account(user_id: int, username: str = None, password: str = None,
     if member_type:
         updates.append("member_type = %s")
         params.append(member_type)
+        # Update member_end based on new member type
+        updates.append("member_start = %s")
+        params.append(datetime.now())
+        if member_type == 'admin':
+            # Admin: 100 years (essentially unlimited)
+            updates.append("member_end = %s")
+            params.append(datetime.now() + timedelta(days=36500))
+        elif member_type == 'subscribe':
+            # Subscribe: 30 days
+            updates.append("member_end = %s")
+            params.append(datetime.now() + timedelta(days=30))
+        elif member_type == 'trial':
+            # Trial: 7 days
+            updates.append("member_end = %s")
+            params.append(datetime.now() + timedelta(days=7))
 
     if is_verified is not None:
         updates.append("is_verified = %s")
@@ -12440,6 +12457,44 @@ def create_admin_required_content():
         ], className="py-5")
     ])
 
+def create_trial_expired_content():
+    """Create content shown when trial period has expired"""
+    return html.Div([
+        dbc.Container([
+            dbc.Row([
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardBody([
+                            html.Div([
+                                html.I(className="fas fa-clock fa-4x text-warning mb-4"),
+                            ], className="text-center"),
+                            html.H3("Masa Trial Berakhir", className="text-center mb-3"),
+                            html.P([
+                                "Masa trial 7 hari Anda telah berakhir. ",
+                                "Upgrade ke akun Subscribe untuk melanjutkan akses ke semua fitur."
+                            ], className="text-center text-muted mb-4"),
+                            html.Div([
+                                dcc.Link(
+                                    dbc.Button([
+                                        html.I(className="fas fa-home me-2"),
+                                        "Kembali ke Home"
+                                    ], color="primary", size="lg", className="me-2"),
+                                    href="/"
+                                ),
+                            ], className="text-center mb-4"),
+                            html.Hr(),
+                            html.P([
+                                html.I(className="fas fa-envelope me-2 text-info"),
+                                "Hubungi admin untuk upgrade akun: ",
+                                html.A("herman.irawan1108@gmail.com", href="mailto:herman.irawan1108@gmail.com")
+                            ], className="text-center text-muted small mb-0")
+                        ], className="py-5")
+                    ], className="shadow-lg border-0")
+                ], md=6, lg=5, className="mx-auto")
+            ], className="min-vh-75 align-items-center", style={"minHeight": "60vh"})
+        ], className="py-5")
+    ])
+
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
@@ -12559,6 +12614,16 @@ app.clientside_callback(
 )
 
 @app.callback(
+    Output('stock-selector', 'options'),
+    [Input('url', 'pathname')],
+    prevent_initial_call=False
+)
+def refresh_stock_dropdown(pathname):
+    """Refresh stock dropdown options on every page load to get new emiten"""
+    stocks = get_available_stocks()
+    return [{'label': s, 'value': s} for s in stocks]
+
+@app.callback(
     Output('page-content', 'children'),
     [Input('url', 'pathname'), Input('url', 'search'), Input('stock-selector', 'value')],
     [State('user-session', 'data'), State('superadmin-session', 'data')]
@@ -12587,23 +12652,46 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     # Check if user is logged in and get member type
     is_logged_in = False
     is_admin = False
+    is_trial_expired = False
+    member_type = None
+
     if user_session and user_session.get('email'):
         is_logged_in = True
-        if user_session.get('member_type') == 'admin':
+        member_type = user_session.get('member_type', 'trial')
+        if member_type == 'admin':
             is_admin = True
+        elif member_type == 'trial':
+            # Check if trial is expired
+            member_end = user_session.get('member_end')
+            if member_end:
+                from datetime import datetime
+                try:
+                    if isinstance(member_end, str):
+                        end_date = datetime.fromisoformat(member_end.replace('Z', '+00:00'))
+                    else:
+                        end_date = member_end
+                    if datetime.now() > end_date.replace(tzinfo=None) if end_date.tzinfo else end_date:
+                        is_trial_expired = True
+                except:
+                    pass
     elif superadmin_session and superadmin_session.get('email'):
         is_logged_in = True
         is_admin = True  # Superadmin is always admin
+        member_type = 'admin'
 
     # Public pages (no login required)
     public_pages = ['/', '/login', '/signup', '/verify']
 
-    # Admin-only pages
+    # Admin-only pages (only admin can access)
     admin_pages = ['/upload']
 
     # Protected pages require login
     if pathname not in public_pages and not is_logged_in:
         return create_login_required_content()
+
+    # Trial expired - can only access landing page
+    if is_trial_expired and pathname != '/' and pathname not in ['/login', '/signup', '/verify']:
+        return create_trial_expired_content()
 
     # Admin pages require admin role
     if pathname in admin_pages and not is_admin:
@@ -13065,9 +13153,9 @@ def load_account_list(active_tab, refresh_clicks):
             html.Th("Username"),
             html.Th("Password", style={"width": "100px"}),
             html.Th("Tipe", style={"width": "100px"}),
+            html.Th("Expired", style={"width": "100px"}),
             html.Th("Status", style={"width": "80px"}),
-            html.Th("Created", style={"width": "100px"}),
-            html.Th("Aksi", style={"width": "150px"}),
+            html.Th("Aksi", style={"width": "120px"}),
         ]))
 
         table_rows = []
@@ -13088,8 +13176,16 @@ def load_account_list(active_tab, refresh_clicks):
             else:
                 password_display = acc.get('plain_password') or "••••••••"
 
-            # Created date
-            created = acc['created_at'].strftime('%Y-%m-%d') if acc['created_at'] else '-'
+            # Expired date with color indication
+            from datetime import datetime
+            member_end = acc.get('member_end')
+            if member_end:
+                expired_date = member_end.strftime('%Y-%m-%d')
+                is_expired = datetime.now() > member_end
+                expired_badge = dbc.Badge(expired_date, color="danger" if is_expired else "success",
+                                         className="small")
+            else:
+                expired_badge = dbc.Badge("-", color="secondary")
 
             table_rows.append(html.Tr([
                 html.Td(idx),
@@ -13097,8 +13193,8 @@ def load_account_list(active_tab, refresh_clicks):
                 html.Td(acc['username']),
                 html.Td(password_display, className="text-muted"),
                 html.Td(type_badge),
+                html.Td(expired_badge),
                 html.Td(status_badge),
-                html.Td(created, style={"fontSize": "11px"}),
                 html.Td([
                     dbc.Button([html.I(className="fas fa-edit")], id={"type": "edit-account-btn", "index": acc['id']},
                               color="primary", size="sm", className="me-1", title="Edit"),
@@ -13405,11 +13501,17 @@ def handle_login_and_resend(login_clicks, resend_clicks, email, password, curren
 
         if result['success']:
             user = result['user']
+            # Convert member_end to string for JSON serialization
+            member_end_str = None
+            if user.get('member_end'):
+                member_end_str = user['member_end'].isoformat() if hasattr(user['member_end'], 'isoformat') else str(user['member_end'])
+
             session_data = {
                 'user_id': user['id'],
                 'email': user['email'],
                 'username': user['username'],
                 'member_type': user['member_type'],
+                'member_end': member_end_str,
                 'logged_in': True
             }
 
@@ -13638,27 +13740,22 @@ def refresh_sensitive_page(n_clicks, stock_code):
 
 # Upload callbacks
 @app.callback(
-    [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children'), Output('stock-selector', 'options'), Output('stock-selector', 'value')],
+    [Output('upload-status', 'children'), Output('available-stocks-list', 'children'), Output('import-log', 'children')],
     [Input('upload-data', 'contents')],
-    [State('upload-data', 'filename'), State('upload-stock-code', 'value'), State('stock-selector', 'value')],
+    [State('upload-data', 'filename'), State('upload-stock-code', 'value')],
     prevent_initial_call=True
 )
-def handle_upload(contents, filename, stock_code, current_stock):
+def handle_upload(contents, filename, stock_code):
     import tempfile
     import traceback
 
     stocks_list = create_stocks_list()
 
-    # Get current stock options for dropdown
-    def get_stock_options():
-        stocks = get_available_stocks()
-        return [{'label': s, 'value': s} for s in stocks]
-
     if contents is None:
-        return html.Div(), stocks_list, html.Div("No imports yet", className="text-muted"), get_stock_options(), current_stock
+        return html.Div(), stocks_list, html.Div("No imports yet", className="text-muted")
 
     if not stock_code or len(stock_code) < 2:
-        return dbc.Alert("Masukkan kode saham terlebih dahulu (min 2 karakter)", color="danger"), stocks_list, html.Div(), get_stock_options(), current_stock
+        return dbc.Alert("Masukkan kode saham terlebih dahulu (min 2 karakter)", color="danger"), stocks_list, html.Div()
 
     stock_code = stock_code.upper().strip()
 
@@ -13758,7 +13855,7 @@ def handle_upload(contents, filename, stock_code, current_stock):
         except Exception as backup_error:
             print(f"[UPLOAD] Auto backup failed (non-critical): {backup_error}")
 
-        return status, create_stocks_list(), log, get_stock_options(), stock_code  # Set dropdown to newly uploaded stock
+        return status, create_stocks_list(), log  # Dropdown options refreshed by separate callback
 
     except Exception as e:
         error_detail = traceback.format_exc()
@@ -13772,7 +13869,7 @@ def handle_upload(contents, filename, stock_code, current_stock):
                 html.Summary("Detail Error"),
                 html.Pre(error_detail, style={'fontSize': '10px', 'maxHeight': '200px', 'overflow': 'auto'})
             ])
-        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger"), get_stock_options(), current_stock
+        ], color="danger"), stocks_list, html.Div(f"[{datetime.now().strftime('%H:%M:%S')}] Error: {e}", className="text-danger")
 
 
 def create_stocks_list():
