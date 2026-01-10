@@ -13127,7 +13127,7 @@ def validate_upload_password(n_clicks, session_data, user_session, password):
     triggered = ctx.triggered[0]['prop_id'] if ctx.triggered else None
 
     # Check if user is logged in as admin/superuser - auto unlock upload
-    if user_session and user_session.get('member_type') == 'admin':
+    if user_session and user_session.get('member_type') in ['admin', 'superuser']:
         return {'display': 'none'}, {'display': 'block'}, "", {'logged_in': True}
 
     # Check if already logged in from admin session (password)
