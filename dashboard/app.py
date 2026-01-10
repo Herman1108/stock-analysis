@@ -23,7 +23,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 
-from database import execute_query, get_cursor, clear_cache, get_cache_stats, preload_stock_data
+from database import execute_query, get_cursor, clear_cache, clear_stock_cache, get_cache_stats, preload_stock_data
 from analyzer import (
     get_price_data, get_broker_data, run_full_analysis,
     get_top_accumulators, get_top_distributors,
@@ -2575,62 +2575,64 @@ def create_navbar():
     stocks = get_available_stocks()
     return dbc.Navbar(
         dbc.Container([
-            # Brand + Stock Selector + Theme Toggle (always visible)
-            html.Div([
-                dbc.NavbarBrand("HermanStock", href="/", className="me-2", style={"fontSize": "1rem"}),
-                # Stock Selector - searchable dropdown for 30+ stocks
-                dcc.Dropdown(
-                    id='stock-selector',
-                    options=[{'label': s, 'value': s} for s in stocks],
-                    value=stocks[0] if stocks else 'PANI',
-                    style={'width': '120px', 'minWidth': '120px'},
-                    clearable=False,
-                    searchable=True,  # Enable search/filter
-                    placeholder="Cari emiten...",
-                    persistence=True,
-                    persistence_type='session',
-                    className="stock-dropdown"
-                ),
-                # Theme toggle button (sun/moon icon)
-                dbc.Button(
-                    html.I(className="fas fa-sun", id="theme-icon"),
-                    id="theme-toggle",
-                    color="link",
-                    size="sm",
-                    className="ms-2 text-warning",
-                    title="Toggle Light/Dark Mode"
-                ),
-            ], className="d-flex align-items-center"),
+            # Brand
+            dbc.NavbarBrand("HermanStock", href="/", className="me-1", style={"fontSize": "0.95rem"}),
 
-            # Hamburger toggle button for mobile only - orange color
+            # Stock Selector - searchable dropdown
+            dcc.Dropdown(
+                id='stock-selector',
+                options=[{'label': s, 'value': s} for s in stocks],
+                value=stocks[0] if stocks else 'PANI',
+                style={'width': '100px', 'minWidth': '100px'},
+                clearable=False,
+                searchable=True,
+                placeholder="Emiten",
+                persistence=True,
+                persistence_type='session',
+                className="stock-dropdown me-1"
+            ),
+
+            # Desktop nav items - close to dropdown
+            dbc.Nav([
+                dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/")),
+                dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/dashboard")),
+                dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/analysis")),
+                dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white px-2 py-1"), href="/discussion")),
+                dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/upload")),
+            ], className="d-none d-lg-flex me-1", navbar=True, style={"gap": "2px"}),
+
+            # Theme toggle
+            dbc.Button(
+                html.I(className="fas fa-sun", id="theme-icon"),
+                id="theme-toggle",
+                color="link",
+                size="sm",
+                className="text-warning px-1",
+                title="Toggle Light/Dark Mode"
+            ),
+
+            # Auth buttons desktop
+            html.Div([
+                dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white px-2 py-1"), href="/login"),
+                dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark px-2 py-1"), href="/signup"),
+            ], id="auth-buttons-desktop", className="d-none d-lg-flex", style={"gap": "2px"}),
+
+            # Logout section desktop
+            html.Div([
+                html.Span(id="user-display-desktop", className="text-light me-1 small"),
+                dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-desktop", color="danger", size="sm", className="fw-bold text-white px-2 py-1"),
+            ], id="logout-section-desktop", className="d-none d-lg-flex align-items-center", style={"display": "none"}),
+
+            # Hamburger toggle button for mobile
             dbc.Button(
                 html.I(className="fas fa-bars"),
                 id="navbar-toggler",
                 color="warning",
                 size="sm",
-                className="d-lg-none ms-2",
+                className="d-lg-none ms-1",
                 n_clicks=0,
                 style={"border": "none"}
             ),
-
-            # Desktop nav items - always visible on large screens
-            dbc.Nav([
-                dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white me-1"), href="/")),
-                dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white me-1"), href="/dashboard")),
-                dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white me-1"), href="/analysis")),
-                dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white me-1"), href="/discussion")),
-                dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white me-1"), href="/upload")),
-                # Auth buttons - Login/Daftar (shown when not logged in)
-                html.Div([
-                    dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white me-1"), href="/login"),
-                    dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark"), href="/signup"),
-                ], id="auth-buttons-desktop", className="d-flex"),
-                # Logout button (shown when logged in)
-                html.Div([
-                    html.Span(id="user-display-desktop", className="text-light me-2 small"),
-                    dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-desktop", color="danger", size="sm", className="fw-bold text-white"),
-                ], id="logout-section-desktop", className="d-flex align-items-center", style={"display": "none"}),
-            ], className="ms-auto d-none d-lg-flex", navbar=True),
 
             # Mobile dropdown menu - only visible when hamburger clicked
             dbc.Collapse(
@@ -2865,7 +2867,7 @@ def create_landing_page():
                     ])
                 ], className="h-100 shadow", color="dark", outline=True,
                    style={"borderColor": f"var(--bs-{action_color})", "borderWidth": "2px"})
-            ], md=6, lg=4, className="mb-4")
+            ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}", **{"data-stock": stock_code})
 
             stock_cards.append(card)
 
@@ -2879,7 +2881,7 @@ def create_landing_page():
                         dbc.Button("Dashboard", href=f"/dashboard?stock={stock_code}", color="primary", size="sm")
                     ])
                 ], className="h-100", color="dark", outline=True)
-            ], md=6, lg=4, className="mb-4")
+            ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}-error", **{"data-stock": stock_code})
             stock_cards.append(card)
 
     return html.Div([
@@ -2901,17 +2903,32 @@ def create_landing_page():
         # Stock Selection
         dbc.Container([
             html.Div([
-                html.H4([
-                    html.I(className="fas fa-list-alt me-2"),
-                    f"Pilih Emiten ({len(stocks)} tersedia)"
-                ], className="mb-0 d-inline-block me-3"),
-                # Legend
+                # Title and search row
                 html.Div([
-                    dbc.Badge("🟢 ENTRY/ADD", color="success", className="me-1 small"),
-                    dbc.Badge("🟡 WAIT/HOLD", color="warning", className="me-1 small"),
-                    dbc.Badge("🔴 EXIT", color="danger", className="small"),
-                ], className="d-inline-block")
-            ], className="mb-4 d-flex align-items-center flex-wrap"),
+                    html.H4([
+                        html.I(className="fas fa-list-alt me-2"),
+                        f"Pilih Emiten ({len(stocks)} tersedia)"
+                    ], className="mb-0 me-3"),
+                    # Search input
+                    html.Div([
+                        dbc.InputGroup([
+                            dbc.InputGroupText(html.I(className="fas fa-search"), style={"backgroundColor": "#16213e", "borderColor": "#0f3460", "color": "#17a2b8"}),
+                            dbc.Input(
+                                id="landing-stock-search",
+                                placeholder="Cari emiten...",
+                                type="text",
+                                style={"backgroundColor": "#1a1a2e", "borderColor": "#0f3460", "color": "#fff", "maxWidth": "150px"}
+                            ),
+                        ], size="sm"),
+                    ], className="me-3"),
+                    # Legend
+                    html.Div([
+                        dbc.Badge("🟢 ENTRY/ADD", color="success", className="me-1 small"),
+                        dbc.Badge("🟡 WAIT/HOLD", color="warning", className="me-1 small"),
+                        dbc.Badge("🔴 EXIT", color="danger", className="small"),
+                    ], className="d-inline-block")
+                ], className="d-flex align-items-center flex-wrap gap-2"),
+            ], className="mb-4"),
 
             dbc.Row(stock_cards),
 
@@ -12463,6 +12480,34 @@ app.clientside_callback(
     [State('theme-store', 'data')]
 )
 
+# Client-side callback to filter stock cards on landing page
+app.clientside_callback(
+    """
+    function(searchValue) {
+        // Get all stock cards
+        var cards = document.querySelectorAll('.stock-card');
+        if (!cards || cards.length === 0) return window.dash_clientside.no_update;
+
+        // If search is empty, show all cards
+        var search = (searchValue || '').toUpperCase().trim();
+
+        cards.forEach(function(card) {
+            var stockCode = card.getAttribute('data-stock');
+            if (!search || (stockCode && stockCode.toUpperCase().includes(search))) {
+                card.style.display = '';
+            } else {
+                card.style.display = 'none';
+            }
+        });
+
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('landing-stock-search', 'className'),  # Dummy output
+    [Input('landing-stock-search', 'value')],
+    prevent_initial_call=True
+)
+
 @app.callback(
     Output('page-content', 'children'),
     [Input('url', 'pathname'), Input('url', 'search'), Input('stock-selector', 'value')],
@@ -12485,6 +12530,9 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     elif not selected_stock:
         stocks = get_available_stocks()
         selected_stock = stocks[0] if stocks else 'PANI'
+
+    # Clear cache for selected stock to ensure fresh data on stock change
+    clear_stock_cache(selected_stock)
 
     # Check if user is logged in
     is_logged_in = False
