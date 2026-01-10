@@ -13811,11 +13811,19 @@ def open_delete_stock_modal(delete_clicks, cancel_click, is_open):
 
     triggered = ctx.triggered[0]
     triggered_id = triggered['prop_id']
+    triggered_value = triggered['value']
+
+    # Important: Check that this is an actual click, not just button creation
+    if triggered_value is None:
+        raise dash.exceptions.PreventUpdate
 
     if 'cancel-delete-stock-btn' in triggered_id:
         return False, None, ""
 
     if 'delete-stock-btn' in triggered_id:
+        # Also verify there was an actual click (value > 0)
+        if not triggered_value or triggered_value < 1:
+            raise dash.exceptions.PreventUpdate
         import json
         btn_id = json.loads(triggered_id.split('.')[0])
         stock_code = btn_id['index']
