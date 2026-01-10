@@ -2575,64 +2575,70 @@ def create_navbar():
     stocks = get_available_stocks()
     return dbc.Navbar(
         dbc.Container([
-            # Brand
-            dbc.NavbarBrand("HermanStock", href="/", className="me-1", style={"fontSize": "0.95rem"}),
-
-            # Stock Selector - searchable dropdown
-            dcc.Dropdown(
-                id='stock-selector',
-                options=[{'label': s, 'value': s} for s in stocks],
-                value=stocks[0] if stocks else 'PANI',
-                style={'width': '100px', 'minWidth': '100px'},
-                clearable=False,
-                searchable=True,
-                placeholder="Emiten",
-                persistence=True,
-                persistence_type='session',
-                className="stock-dropdown me-1"
-            ),
-
-            # Desktop nav items - close to dropdown
-            dbc.Nav([
-                dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/")),
-                dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/dashboard")),
-                dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/analysis")),
-                dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white px-2 py-1"), href="/discussion")),
-                dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/upload")),
-            ], className="d-none d-lg-flex me-1", navbar=True, style={"gap": "2px"}),
-
-            # Theme toggle
-            dbc.Button(
-                html.I(className="fas fa-sun", id="theme-icon"),
-                id="theme-toggle",
-                color="link",
-                size="sm",
-                className="text-warning px-1",
-                title="Toggle Light/Dark Mode"
-            ),
-
-            # Auth buttons desktop
+            # LEFT SIDE: Brand + Stock Selector + Content Menus
             html.Div([
-                dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white px-2 py-1"), href="/login"),
-                dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark px-2 py-1"), href="/signup"),
-            ], id="auth-buttons-desktop", className="d-none d-lg-flex", style={"gap": "2px"}),
+                # Brand
+                dbc.NavbarBrand("HermanStock", href="/", className="me-2", style={"fontSize": "0.95rem"}),
 
-            # Logout section desktop
+                # Stock Selector - searchable dropdown
+                dcc.Dropdown(
+                    id='stock-selector',
+                    options=[{'label': s, 'value': s} for s in stocks],
+                    value=stocks[0] if stocks else 'PANI',
+                    style={'width': '100px', 'minWidth': '100px'},
+                    clearable=False,
+                    searchable=True,
+                    placeholder="Emiten",
+                    persistence=True,
+                    persistence_type='session',
+                    className="stock-dropdown me-2"
+                ),
+
+                # Desktop content menus
+                dbc.Nav([
+                    dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/dashboard")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/analysis")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white px-2 py-1"), href="/discussion")),
+                    dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/upload")),
+                ], className="d-none d-lg-flex", navbar=True, style={"gap": "3px"}),
+            ], className="d-flex align-items-center"),
+
+            # RIGHT SIDE: Theme + Auth (pushed to right with ms-auto)
             html.Div([
-                html.Span(id="user-display-desktop", className="text-light me-1 small"),
-                dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-desktop", color="danger", size="sm", className="fw-bold text-white px-2 py-1"),
-            ], id="logout-section-desktop", className="d-none d-lg-flex align-items-center", style={"display": "none"}),
+                # Theme toggle
+                dbc.Button(
+                    html.I(className="fas fa-sun", id="theme-icon"),
+                    id="theme-toggle",
+                    color="link",
+                    size="sm",
+                    className="text-warning px-2",
+                    title="Toggle Light/Dark Mode"
+                ),
 
-            # Hamburger toggle button for mobile
-            dbc.Button(
-                html.I(className="fas fa-bars"),
-                id="navbar-toggler",
-                color="warning",
-                size="sm",
-                className="d-lg-none ms-1",
-                n_clicks=0,
-                style={"border": "none"}
-            ),
+                # Auth buttons desktop (shown when not logged in)
+                html.Div([
+                    dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white px-2 py-1"), href="/login"),
+                    dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Sign Up"], color="light", size="sm", className="fw-bold text-dark px-2 py-1"), href="/signup"),
+                ], id="auth-buttons-desktop", className="d-none d-lg-flex", style={"gap": "3px"}),
+
+                # Logout section desktop (shown when logged in)
+                html.Div([
+                    html.Span(id="user-display-desktop", className="text-light me-2 small"),
+                    dbc.Button([html.I(className="fas fa-sign-out-alt me-1"), "Logout"], id="logout-btn-desktop", color="danger", size="sm", className="fw-bold text-white px-2 py-1"),
+                ], id="logout-section-desktop", className="d-none d-lg-flex align-items-center", style={"display": "none"}),
+
+                # Hamburger toggle button for mobile
+                dbc.Button(
+                    html.I(className="fas fa-bars"),
+                    id="navbar-toggler",
+                    color="warning",
+                    size="sm",
+                    className="d-lg-none ms-2",
+                    n_clicks=0,
+                    style={"border": "none"}
+                ),
+            ], className="d-flex align-items-center ms-auto"),
 
             # Mobile dropdown menu - only visible when hamburger clicked
             dbc.Collapse(
@@ -2643,10 +2649,10 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white mb-1 w-100"), href="/discussion", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/upload", refresh=True)),
                     html.Hr(className="my-2", style={"borderColor": "white"}),
-                    # Auth buttons - Login/Daftar (shown when not logged in)
+                    # Auth buttons - Login/Sign Up (shown when not logged in)
                     html.Div([
                         dcc.Link(dbc.Button([html.I(className="fas fa-sign-in-alt me-1"), "Login"], color="success", size="sm", className="fw-bold text-white mb-1 w-100"), href="/login", refresh=True),
-                        dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Daftar"], color="light", size="sm", className="fw-bold text-dark mb-1 w-100"), href="/signup", refresh=True),
+                        dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Sign Up"], color="light", size="sm", className="fw-bold text-dark mb-1 w-100"), href="/signup", refresh=True),
                     ], id="auth-buttons-mobile"),
                     # Logout button (shown when logged in)
                     html.Div([
@@ -12431,7 +12437,7 @@ def create_admin_required_content():
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
-        dcc.Location(id='url', refresh='callback-nav'),  # Enable programmatic navigation
+        dcc.Location(id='url', refresh=True),  # Full page refresh for navigation
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
         dcc.Store(id='user-session', storage_type='session', data=None),  # User login session
