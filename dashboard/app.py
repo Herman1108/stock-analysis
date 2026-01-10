@@ -2680,9 +2680,10 @@ def create_navbar():
 # PAGE: LANDING / HOME
 # ============================================================
 
-def create_landing_page():
-    """Create landing page with stock selection and overview using unified analysis data from 3 submenus"""
-    stocks = get_available_stocks()
+def create_landing_page(is_admin: bool = False):
+    """Create landing page with stock selection and overview using unified analysis data from 3 submenus.
+    During maintenance, regular users only see stocks from snapshot."""
+    stocks = get_available_stocks_for_user(is_admin)
 
     if not stocks:
         return html.Div([
@@ -3140,6 +3141,23 @@ def login_user(email: str, password: str) -> dict:
         }
     }
 
+def get_user_membership_status(email: str) -> dict:
+    """Get current membership status directly from database.
+    Used to check real-time member_end when session might be stale."""
+    query = """
+        SELECT member_type, member_end, is_verified
+        FROM users WHERE email = %s
+    """
+    result = execute_query(query, (email.lower(),), use_cache=False)
+    if result:
+        user = result[0]
+        return {
+            'member_type': user['member_type'],
+            'member_end': user['member_end'],
+            'is_verified': user['is_verified']
+        }
+    return None
+
 def send_verification_email(email: str, token: str, username: str) -> dict:
     """Send verification email to user. Returns dict with success status and verification URL"""
     verification_url = f"{EMAIL_CONFIG['site_url']}/verify?token={token}"
@@ -3541,8 +3559,13 @@ def get_maintenance_mode():
     return {'is_on': False, 'updated_at': None, 'updated_by': None}
 
 def set_maintenance_mode(is_on: bool, updated_by: str = None):
-    """Set maintenance mode on or off"""
+    """Set maintenance mode on or off. Saves stock snapshot when turning ON."""
     value = 'on' if is_on else 'off'
+    
+    # Save stock snapshot when enabling maintenance
+    if is_on:
+        save_stock_snapshot()
+    
     query = """
         UPDATE system_settings
         SET value = %s, updated_at = CURRENT_TIMESTAMP, updated_by = %s
@@ -3558,6 +3581,64 @@ def get_frozen_data_snapshot():
     if result:
         return result[0]['updated_at']
     return None
+
+def save_stock_snapshot():
+    """Save current stock list as snapshot when maintenance is enabled"""
+    import json
+    stocks = get_available_stocks()
+    stocks_json = json.dumps(stocks)
+    query = """
+        INSERT INTO system_settings (key, value, updated_at)
+        VALUES ('maintenance_stock_snapshot', %s, CURRENT_TIMESTAMP)
+        ON CONFLICT (key) DO UPDATE SET value = %s, updated_at = CURRENT_TIMESTAMP
+    """
+    execute_query(query, (stocks_json, stocks_json), fetch=False, use_cache=False)
+    return stocks
+
+def get_stock_snapshot():
+    """Get stock list snapshot saved during maintenance"""
+    import json
+    query = "SELECT value FROM system_settings WHERE key = 'maintenance_stock_snapshot'"
+    result = execute_query(query, use_cache=False)
+    if result and result[0]['value']:
+        try:
+            return json.loads(result[0]['value'])
+        except:
+            pass
+    return None
+
+def get_available_stocks_for_user(is_admin: bool = False):
+    """Get available stocks considering maintenance mode.
+    Admin always sees real-time data, regular users see snapshot during maintenance."""
+    if is_admin:
+        return get_available_stocks()
+    
+    # Check if maintenance mode is on
+    maintenance = get_maintenance_mode()
+    if maintenance.get('is_on', False):
+        # Return snapshot for regular users during maintenance
+        snapshot = get_stock_snapshot()
+        if snapshot:
+            return snapshot
+    
+    # Return real-time data
+    return get_available_stocks()
+
+def is_stock_accessible_for_user(stock_code: str, is_admin: bool = False) -> bool:
+    """Check if a stock is accessible for the user.
+    During maintenance, regular users can only access stocks in the snapshot."""
+    if is_admin:
+        return True
+    
+    # Check if maintenance mode is on
+    maintenance = get_maintenance_mode()
+    if maintenance.get('is_on', False):
+        snapshot = get_stock_snapshot()
+        if snapshot:
+            return stock_code in snapshot
+    
+    # Outside maintenance, check if stock exists in database
+    return stock_code in get_available_stocks()
 
 def get_password_display(password_hash: str) -> str:
     """Extract readable info from password hash for display (NOT the actual password)"""
@@ -12832,11 +12913,19 @@ app.clientside_callback(
 @app.callback(
     Output('stock-selector', 'options'),
     [Input('url', 'pathname')],
+    [State('user-session', 'data')],
     prevent_initial_call=False
 )
-def refresh_stock_dropdown(pathname):
-    """Refresh stock dropdown options on every page load to get new emiten"""
-    stocks = get_available_stocks()
+def refresh_stock_dropdown(pathname, user_session):
+    """Refresh stock dropdown options on every page load.
+    During maintenance, regular users see frozen snapshot of stocks."""
+    # Check if user is admin
+    is_admin = False
+    if user_session and isinstance(user_session, dict):
+        member_type = user_session.get('member_type', '')
+        is_admin = member_type in ['admin', 'superuser']
+    
+    stocks = get_available_stocks_for_user(is_admin)
     return [{'label': s, 'value': s} for s in stocks]
 
 @app.callback(
@@ -12891,20 +12980,31 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
 
     if user_session and user_session.get('email'):
         is_logged_in = True
-        member_type = user_session.get('member_type', 'trial')
+        user_email = user_session.get('email')
+        
+        # Get fresh membership status from database (not from session)
+        # This ensures admin changes to member_end take effect immediately
+        db_status = get_user_membership_status(user_email)
+        if db_status:
+            member_type = db_status['member_type']
+        else:
+            member_type = user_session.get('member_type', 'trial')
+        
         if member_type in ['admin', 'superuser']:
             is_admin = True  # superuser has same access as admin
-        elif member_type == 'trial':
-            # Check if trial is expired
-            member_end = user_session.get('member_end')
-            if member_end:
-                from datetime import datetime
+        elif member_type in ['trial', 'subscribe']:
+            # Check if trial/subscribe is expired - use database value for real-time check
+            from datetime import datetime
+            if db_status and db_status.get('member_end'):
+                member_end = db_status['member_end']
                 try:
-                    if isinstance(member_end, str):
-                        end_date = datetime.fromisoformat(member_end.replace('Z', '+00:00'))
-                    else:
+                    if isinstance(member_end, datetime):
                         end_date = member_end
-                    if datetime.now() > end_date.replace(tzinfo=None) if end_date.tzinfo else end_date:
+                    else:
+                        end_date = datetime.fromisoformat(str(member_end).replace('Z', '+00:00'))
+                    # Compare with timezone-naive datetime
+                    end_date_naive = end_date.replace(tzinfo=None) if hasattr(end_date, 'tzinfo') and end_date.tzinfo else end_date
+                    if datetime.now() > end_date_naive:
                         is_trial_expired = True
                 except:
                     pass
@@ -12951,8 +13051,31 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
 
     # Route to appropriate page
     if pathname == '/':
-        return wrap_with_banner(create_landing_page())
-    elif pathname == '/dashboard':
+        return wrap_with_banner(create_landing_page(is_admin))
+    
+    # Pages that require stock selection - check access during maintenance
+    stock_pages = ['/dashboard', '/analysis', '/bandarmology', '/summary', '/position',
+                   '/discussion', '/movement', '/sensitive', '/profile', '/fundamental',
+                   '/support-resistance', '/accumulation']
+    
+    if pathname in stock_pages:
+        # Check if user can access this stock during maintenance
+        if not is_stock_accessible_for_user(selected_stock, is_admin):
+            # Redirect to landing page with message
+            return wrap_with_banner(html.Div([
+                dbc.Alert([
+                    html.I(className="fas fa-tools me-2"),
+                    html.Strong("Maintenance Mode - "),
+                    f"Data {selected_stock} tidak tersedia selama maintenance. ",
+                    "Silakan pilih emiten lain atau tunggu maintenance selesai."
+                ], color="warning", className="text-center"),
+                html.Div([
+                    dbc.Button([html.I(className="fas fa-home me-2"), "Kembali ke Home"], 
+                              href="/", color="primary", size="lg")
+                ], className="text-center mt-4")
+            ]))
+    
+    if pathname == '/dashboard':
         return wrap_with_banner(create_dashboard_page(selected_stock))
     elif pathname == '/analysis':
         return wrap_with_banner(create_analysis_page(selected_stock))
@@ -12985,7 +13108,7 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     elif pathname == '/verify':
         return create_verify_page(token)  # No banner for auth pages
     else:
-        return wrap_with_banner(create_landing_page())
+        return wrap_with_banner(create_landing_page(is_admin))
 
 # Password validation callback for upload page - with session persistence
 @app.callback(
