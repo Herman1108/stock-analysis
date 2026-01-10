@@ -1,4 +1,4 @@
-﻿"""
+"""
 Stock Analysis Dashboard - Multi-Emiten Support
 Dynamic analysis with file upload capability
 """
@@ -8572,40 +8572,55 @@ def get_stock_profile(stock_code: str) -> dict:
     result = execute_query(query, (stock_code,), use_cache=False)
     if result and len(result) > 0:
         row = result[0]
-        # Parse directors/commissioners - could be string or already parsed
-        directors = row['directors']
-        if isinstance(directors, str):
-            directors = json.loads(directors) if directors else []
-        commissioners = row['commissioners']
-        if isinstance(commissioners, str):
-            commissioners = json.loads(commissioners) if commissioners else []
-        shareholder_history = row['shareholder_history']
+        # Parse directors/commissioners - could be JSON, semicolon-separated, or already parsed
+        def parse_people_list(val):
+            if not val:
+                return []
+            if isinstance(val, list):
+                return val
+            if isinstance(val, str):
+                # Try JSON first
+                try:
+                    return json.loads(val)
+                except:
+                    # Split by semicolon
+                    return [x.strip() for x in val.split(';') if x.strip()]
+            return []
+
+        directors = parse_people_list(row.get('directors'))
+        commissioners = parse_people_list(row.get('commissioners'))
+        shareholder_history = row.get('shareholder_history')
         if isinstance(shareholder_history, str):
-            shareholder_history = json.loads(shareholder_history) if shareholder_history else []
+            try:
+                shareholder_history = json.loads(shareholder_history) if shareholder_history else []
+            except:
+                shareholder_history = []
+        elif not shareholder_history:
+            shareholder_history = []
 
         return {
-            'stock_code': row['stock_code'],
-            'company_name': row['company_name'],
-            'listing_board': row['listing_board'],
-            'sector': row['sector'],
-            'subsector': row['subsector'],
-            'industry': row['industry'],
-            'business_activity': row['business_activity'],
-            'listing_date': row['listing_date'],
-            'effective_date': row['effective_date'],
-            'nominal_value': float(row['nominal_value']) if row['nominal_value'] else None,
-            'ipo_price': float(row['ipo_price']) if row['ipo_price'] else None,
-            'ipo_shares': row['ipo_shares'],
-            'ipo_amount': float(row['ipo_amount']) if row['ipo_amount'] else None,
-            'underwriter': row['underwriter'],
-            'share_registrar': row['share_registrar'],
-            'company_background': row['company_background'],
-            'major_shareholder': row['major_shareholder'],
-            'major_shareholder_pct': float(row['major_shareholder_pct']) if row['major_shareholder_pct'] else 0,
-            'public_pct': float(row['public_pct']) if row['public_pct'] else 0,
-            'total_shares': row['total_shares'],
-            'president_director': row['president_director'],
-            'president_commissioner': row['president_commissioner'],
+            'stock_code': row.get('stock_code'),
+            'company_name': row.get('company_name'),
+            'listing_board': row.get('listing_board'),
+            'sector': row.get('sector'),
+            'subsector': row.get('subsector'),
+            'industry': row.get('industry'),
+            'business_activity': row.get('business_activity'),
+            'listing_date': row.get('listing_date'),
+            'effective_date': row.get('effective_date'),
+            'nominal_value': float(row.get('nominal_value') or 0) if row.get('nominal_value') else None,
+            'ipo_price': float(row.get('ipo_price') or 0) if row.get('ipo_price') else None,
+            'ipo_shares': row.get('ipo_shares'),
+            'ipo_amount': float(row.get('ipo_amount') or 0) if row.get('ipo_amount') else None,
+            'underwriter': row.get('underwriter'),
+            'share_registrar': row.get('share_registrar'),
+            'company_background': row.get('company_background'),
+            'major_shareholder': row.get('major_shareholder'),
+            'major_shareholder_pct': float(row.get('major_shareholder_pct') or 0),
+            'public_pct': float(row.get('public_pct') or 0),
+            'total_shares': row.get('total_shares', 0),
+            'president_director': row.get('president_director'),
+            'president_commissioner': row.get('president_commissioner'),
             'directors': directors,
             'commissioners': commissioners,
             'shareholder_history': shareholder_history,
