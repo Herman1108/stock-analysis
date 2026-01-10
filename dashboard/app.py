@@ -2873,7 +2873,7 @@ def create_landing_page():
                     ])
                 ], className="h-100 shadow", color="dark", outline=True,
                    style={"borderColor": f"var(--bs-{action_color})", "borderWidth": "2px"})
-            ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}", **{"data-stock": stock_code})
+            ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}")
 
             stock_cards.append(card)
 
@@ -2887,7 +2887,7 @@ def create_landing_page():
                         dbc.Button("Dashboard", href=f"/dashboard?stock={stock_code}", color="primary", size="sm")
                     ])
                 ], className="h-100", color="dark", outline=True)
-            ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}-error", **{"data-stock": stock_code})
+            ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}-error")
             stock_cards.append(card)
 
     return html.Div([
@@ -12534,7 +12534,9 @@ app.clientside_callback(
         var search = (searchValue || '').toUpperCase().trim();
 
         cards.forEach(function(card) {
-            var stockCode = card.getAttribute('data-stock');
+            // Extract stock code from id (format: stock-card-XXXX)
+            var cardId = card.id || '';
+            var stockCode = cardId.replace('stock-card-', '').replace('-error', '');
             if (!search || (stockCode && stockCode.toUpperCase().includes(search))) {
                 card.style.display = '';
             } else {
