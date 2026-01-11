@@ -2753,7 +2753,7 @@ def create_landing_page(is_admin: bool = False):
                     dbc.CardHeader([
                         html.Div([
                             html.Div([
-                                html.H3(stock_code, className="mb-0 fw-bold text-white"),
+                                html.H3(stock_code, className="mb-0 fw-bold", style={"color": "#ffffff"}),
                                 html.Small(company_name[:25] + "..." if len(company_name) > 25 else company_name, className="text-muted d-block")
                             ]),
                             dbc.Badge([
