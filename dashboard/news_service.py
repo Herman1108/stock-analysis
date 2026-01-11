@@ -209,3 +209,12 @@ def get_latest_news_summary(stock_codes, max_total=10):
             all_articles.extend(NEWS_CACHE[code.upper()].get('articles', [])[:2])
     all_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
     return all_articles[:max_total]
+
+def get_all_stocks_news(stock_codes, max_per_stock=3):
+    """Get news for multiple stocks"""
+    all_news = {}
+    for code in stock_codes:
+        news = get_news_with_sentiment(code, max_per_stock)
+        if news:
+            all_news[code] = news
+    return all_news
