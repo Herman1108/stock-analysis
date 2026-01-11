@@ -73,11 +73,18 @@ def get_db_connection():
     """Get direct database connection using DATABASE_URL"""
     try:
         import psycopg2
-        database_url = os.getenv('DATABASE_URL')
+        # Try multiple possible env var names (Railway uses different names)
+        database_url = (
+            os.getenv('DATABASE_URL') or
+            os.getenv('DATABASE_PRIVATE_URL') or
+            os.getenv('DATABASE_PUBLIC_URL')
+        )
         if not database_url:
-            print("[DB ERROR] DATABASE_URL not set")
+            print("[DB ERROR] No DATABASE_URL found in environment")
             return None
+        print(f"[DB] Connecting to database...")
         conn = psycopg2.connect(database_url)
+        print(f"[DB] Connected successfully")
         return conn
     except Exception as e:
         print(f"[DB ERROR] Cannot connect: {e}")
