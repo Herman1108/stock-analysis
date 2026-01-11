@@ -58,7 +58,7 @@ def get_stock_keywords(stock_code: str) -> str:
     return ' OR '.join([f'"{kw}"' for kw in keywords[:2]])  # Limit to 2 keywords
 
 
-def fetch_news_gnews(stock_code: str, max_results: int = 5) -> List[Dict]:
+def fetch_news_gnews(stock_code: str, max_results: int = 15) -> List[Dict]:
     """
     Fetch news from GNews API for a specific stock
 
@@ -75,13 +75,18 @@ def fetch_news_gnews(stock_code: str, max_results: int = 5) -> List[Dict]:
 
     keywords = get_stock_keywords(stock_code)
 
+    # Calculate date 14 days ago
+    from datetime import datetime, timedelta
+    date_from = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%dT00:00:00Z')
+    
     params = {
         'q': keywords,
         'lang': 'id',  # Indonesian only
         'country': 'id',  # Indonesia
         'max': max_results,
         'apikey': GNEWS_API_KEY,
-        'sortby': 'publishedAt'  # Latest first
+        'sortby': 'publishedAt',  # Latest first
+        'from': date_from  # 14 days ago
     }
 
     try:
@@ -167,7 +172,7 @@ def analyze_sentiment_simple(title: str, description: str) -> Dict:
         }
 
 
-def get_news_with_sentiment(stock_code: str, max_results: int = 5) -> List[Dict]:
+def get_news_with_sentiment(stock_code: str, max_results: int = 15) -> List[Dict]:
     """
     Get news articles with sentiment analysis
 

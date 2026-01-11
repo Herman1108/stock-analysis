@@ -3960,7 +3960,7 @@ def create_news_page(stock_code: str = 'BBCA'):
         stocks = get_available_stocks()
 
         # Fetch news for selected stock
-        news_articles = get_news_with_sentiment(stock_code, max_results=10)
+        news_articles = get_news_with_sentiment(stock_code, max_results=15)
 
         # Get latest news across all stocks
         latest_all = get_latest_news_summary(stocks[:10], max_total=5)
