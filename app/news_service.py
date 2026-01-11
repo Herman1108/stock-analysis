@@ -291,13 +291,11 @@ def fetch_news_marketaux(stock_code, max_results=10):
     if not MARKETAUX_API_KEY:
         return []
     keywords = get_stock_keywords(stock_code)
-    # Marketaux uses search parameter
     search_query = ','.join(keywords[:2])
+    # Note: Marketaux free tier tidak punya berita Indonesia terbaru
     params = {
         'api_token': MARKETAUX_API_KEY,
         'search': search_query,
-        'language': 'id',
-        'filter_entities': 'true',
         'limit': max_results
     }
     try:
