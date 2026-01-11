@@ -1,6 +1,7 @@
 """
 News Service - GNews API dengan Smart Caching
 Jam kerja (08-16): 2 jam | Luar jam: 5 jam | Weekend: 6 jam
+Otomatis fetch semua emiten yang tersedia
 """
 
 import os
@@ -19,7 +20,9 @@ GNEWS_BASE_URL = "https://gnews.io/api/v4/search"
 NEWS_CACHE = {}
 CACHE_LOCK = threading.Lock()
 LAST_REFRESH_TIME = None
+PRELOAD_IN_PROGRESS = False
 
+# Default keywords - stock baru otomatis pakai nama stock code
 STOCK_KEYWORDS = {
     'BBCA': ['BBCA', 'Bank Central Asia'],
     'BMRI': ['BMRI', 'Bank Mandiri'],
@@ -46,11 +49,13 @@ STOCK_KEYWORDS = {
     'UNTR': ['UNTR', 'United Tractors'],
     'JSMR': ['JSMR', 'Jasa Marga'],
     'WIKA': ['WIKA', 'Wijaya Karya'],
-    'PANI': ['Pantai Indah Kapuk', 'PANI saham'],
-    'BREN': ['Barito Renewables', 'BREN saham'],
-    'CUAN': ['Petrindo Jaya', 'CUAN saham'],
-    'DSSA': ['Dian Swastatika', 'DSSA saham'],
-    'AMMN': ['Amman Mineral', 'AMMN saham'],
+    'PANI': ['Pantai Indah Kapuk', 'PANI'],
+    'BREN': ['Barito Renewables', 'BREN'],
+    'CUAN': ['Petrindo Jaya', 'CUAN'],
+    'DSSA': ['Dian Swastatika', 'DSSA'],
+    'AMMN': ['Amman Mineral', 'AMMN'],
+    'CDIA': ['Cisarua Mountain Dairy', 'CDIA'],
+    'PTRO': ['Petrosea', 'PTRO'],
 }
 
 
@@ -103,7 +108,7 @@ def get_cache_age_text(stock_code):
 
 
 def get_stock_keywords(stock_code):
-    keywords = STOCK_KEYWORDS.get(stock_code.upper(), [stock_code])
+    keywords = STOCK_KEYWORDS.get(stock_code.upper(), [stock_code, f"{stock_code} saham"])
     return ' OR '.join([f'"{kw}"' for kw in keywords[:2]])
 
 
@@ -130,7 +135,7 @@ def fetch_news_gnews(stock_code, max_results=15):
             'stock_code': stock_code
         } for a in articles]
     except Exception as e:
-        print(f"Error: {e}")
+        print(f"[NEWS ERROR] {stock_code}: {e}")
         return []
 
 
@@ -165,12 +170,10 @@ def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
     global NEWS_CACHE, LAST_REFRESH_TIME
     stock_code = stock_code.upper()
 
-    # Use cache if valid
     if not force_refresh and is_cache_valid(stock_code):
         print(f"[CACHE HIT] {stock_code}")
         return NEWS_CACHE[stock_code]['articles']
 
-    # Fetch fresh
     print(f"[CACHE MISS] {stock_code} - fetching")
     articles = fetch_news_gnews(stock_code, max_results)
 
@@ -189,6 +192,32 @@ def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
     return articles
 
 
+def preload_all_stocks_news(stock_codes, max_results=10):
+    """Pre-load news untuk semua emiten yang belum ada di cache."""
+    global PRELOAD_IN_PROGRESS
+
+    if PRELOAD_IN_PROGRESS:
+        print("[PRELOAD] Already in progress, skipping...")
+        return
+
+    stocks_to_fetch = [code for code in stock_codes if not is_cache_valid(code.upper())]
+
+    if not stocks_to_fetch:
+        print("[PRELOAD] All stocks already cached")
+        return
+
+    print(f"[PRELOAD] Fetching {len(stocks_to_fetch)} stocks: {stocks_to_fetch}")
+    PRELOAD_IN_PROGRESS = True
+
+    try:
+        for code in stocks_to_fetch:
+            get_news_with_sentiment(code, max_results)
+    finally:
+        PRELOAD_IN_PROGRESS = False
+
+    print(f"[PRELOAD] Complete. Total cached: {len(NEWS_CACHE)}")
+
+
 def get_cache_info(stock_code=None):
     info = {
         'refresh_mode': get_refresh_mode_text(),
@@ -203,12 +232,18 @@ def get_cache_info(stock_code=None):
 
 
 def get_latest_news_summary(stock_codes, max_total=10):
+    """Get berita terbaru dari semua emiten. Otomatis preload semua."""
+    preload_all_stocks_news(stock_codes)
+
     all_articles = []
     for code in stock_codes:
-        if code.upper() in NEWS_CACHE:
-            all_articles.extend(NEWS_CACHE[code.upper()].get('articles', [])[:2])
+        code_upper = code.upper()
+        if code_upper in NEWS_CACHE:
+            all_articles.extend(NEWS_CACHE[code_upper].get('articles', [])[:2])
+
     all_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
     return all_articles[:max_total]
+
 
 def get_all_stocks_news(stock_codes, max_per_stock=3):
     """Get news for multiple stocks"""

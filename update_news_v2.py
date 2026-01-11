@@ -1,4 +1,6 @@
-"""
+"""Update news_service.py with auto-preload feature"""
+
+news_service_code = '''"""
 News Service - GNews API dengan Smart Caching
 Jam kerja (08-16): 2 jam | Luar jam: 5 jam | Weekend: 6 jam
 Otomatis fetch semua emiten yang tersedia
@@ -253,3 +255,12 @@ def get_all_stocks_news(stock_codes, max_per_stock=3):
         if news:
             all_news[code] = news
     return all_news
+'''
+
+with open('dashboard/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_service_code)
+
+with open('app/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_service_code)
+
+print('News service updated with auto-preload!')

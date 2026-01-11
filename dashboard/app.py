@@ -4095,7 +4095,7 @@ def create_news_page(stock_code: str = 'BBCA'):
                     dbc.CardHeader([
                         html.H6([
                             html.I(className="fas fa-globe me-2 text-success"),
-                            "Berita Terbaru (dari Cache)"
+                            "Berita Terbaru Semua Emiten"
                         ], className="mb-0")
                     ], className="bg-dark"),
                     dbc.CardBody([
