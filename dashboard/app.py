@@ -8666,7 +8666,7 @@ def create_accumulation_page(stock_code='CDIA'):
             return 'danger'
 
         # Get signal validation data for hero section
-        from app.signal_validation import get_signal_validation_summary
+        from signal_validation import get_signal_validation_summary
         signal_data = get_signal_validation_summary(stock_code)
         overall_signal = signal_data.get('overall_signal', 'NETRAL')
         confidence_data = signal_data.get('confidence', {})
