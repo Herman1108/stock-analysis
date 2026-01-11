@@ -8665,20 +8665,23 @@ def create_accumulation_page(stock_code='CDIA'):
             if score >= 30: return 'warning'
             return 'danger'
 
-        # Get signal validation data for hero section
-        from signal_validation import get_signal_validation_summary
-        signal_data = get_signal_validation_summary(stock_code)
-        overall_signal = signal_data.get('overall_signal', 'NETRAL')
-        confidence_data = signal_data.get('confidence', {})
-        passed = confidence_data.get('passed', 0)
-        total = confidence_data.get('total', 15)
-        pass_rate = confidence_data.get('pass_rate', 0)
-        conf_level = confidence_data.get('level', 'LOW')
+        # Get validation data for hero section (use existing composite data)
+        from signal_validation import get_unified_analysis_summary
+        unified = get_unified_analysis_summary(stock_code)
+        accum_data = unified.get('accumulation', {})
+        summary = accum_data.get('summary', {})
+        confidence = accum_data.get('confidence', {})
+
+        overall_signal = summary.get('overall_signal', 'NETRAL')
+        passed = confidence.get('passed', 0)
+        total = confidence.get('total', 15)
+        pass_rate = confidence.get('pass_rate', 0)
+        conf_level = confidence.get('level', 'LOW')
 
         # Map signal to action display
         action_config = {
-            'AKUMULASI': {'action': 'BUY ON WEAKNESS', 'icon': '[G]', 'color': 'success', 'desc': 'Sinyal akumulasi terdeteksi - Smart money masuk'},
-            'DISTRIBUSI': {'action': 'TAKE PROFIT', 'icon': '[R]', 'color': 'danger', 'desc': 'Sinyal distribusi terdeteksi - Smart money keluar'},
+            'AKUMULASI': {'action': 'BUY ON WEAKNESS', 'icon': '[G]', 'color': 'success', 'desc': 'Sinyal akumulasi terdeteksi - Smart money sedang masuk'},
+            'DISTRIBUSI': {'action': 'TAKE PROFIT', 'icon': '[R]', 'color': 'danger', 'desc': 'Sinyal distribusi terdeteksi - Smart money sedang keluar'},
             'NETRAL': {'action': 'WAIT & OBSERVE', 'icon': '[~]', 'color': 'secondary', 'desc': 'Belum ada konfirmasi arah - Pantau perkembangan'}
         }
         action_info = action_config.get(overall_signal, action_config['NETRAL'])
@@ -8689,8 +8692,49 @@ def create_accumulation_page(stock_code='CDIA'):
         conf_text = conf_text_map.get(conf_level, 'N/A')
         conf_color = conf_color_map.get(conf_level, 'secondary')
 
-        # Get current price
+        # Get current price from composite
         current_price = composite.get('price_position', {}).get('current_price', 0)
+
+        # Generate risk & opportunity based on signal
+        if overall_signal == 'AKUMULASI':
+            opportunities = [
+                "Smart money sedang mengakumulasi - potensi kenaikan",
+                "Volume pembelian dominan di level support",
+                "Broker besar konsisten membeli",
+                "Harga dalam zona entry yang menarik"
+            ]
+            risks = [
+                "Akumulasi bisa berlangsung lama (berminggu-minggu)",
+                "False breakout bisa terjadi",
+                "Market risk jika IHSG koreksi tajam",
+                "Perlu konfirmasi volume saat breakout"
+            ]
+        elif overall_signal == 'DISTRIBUSI':
+            opportunities = [
+                "Kesempatan take profit di harga tinggi",
+                "Hindari kerugian lebih besar",
+                "Bisa re-entry di harga lebih rendah nanti",
+                "Capital bisa dialokasikan ke saham lain"
+            ]
+            risks = [
+                "Harga bisa turun signifikan",
+                "Smart money sedang keluar",
+                "Volume penjualan meningkat",
+                "Support level bisa ditembus"
+            ]
+        else:
+            opportunities = [
+                "Waktu untuk riset dan observasi",
+                "Bisa entry jika ada konfirmasi sinyal",
+                "Menghindari whipsaw di market sideways",
+                "Sabar menunggu setup yang lebih jelas"
+            ]
+            risks = [
+                "Market bisa bergerak tiba-tiba",
+                "Opportunity cost jika tidak entry",
+                "Sinyal bisa berubah kapan saja",
+                "Volatilitas bisa meningkat tanpa warning"
+            ]
 
     except Exception as e:
         return html.Div([
@@ -8715,7 +8759,7 @@ def create_accumulation_page(stock_code='CDIA'):
                     # Left: Big Action Icon & Label
                     dbc.Col([
                         html.Div([
-                            html.Span(action_info['icon'], style={"fontSize": "56px", "fontWeight": "bold"}),
+                            html.Span(action_info['icon'], style={"fontSize": "64px", "fontWeight": "bold"}),
                             html.H2(action_info['action'], className=f"text-{action_info['color']} fw-bold mb-0 mt-2"),
                             html.P(action_info['desc'], className="text-muted small mb-0"),
                         ], className="text-center py-3")
@@ -8729,7 +8773,7 @@ def create_accumulation_page(stock_code='CDIA'):
                                 html.Div([
                                     html.Small("Confidence Level", className="text-muted d-block"),
                                     html.H4(conf_text, className=f"text-{conf_color} mb-0"),
-                                    html.Small(f"{passed}/{total} validasi terpenuhi", className="text-muted"),
+                                    html.Small(f"{passed}/{total} validasi", className="text-muted"),
                                 ], className="text-center py-2")
                             ], width=4),
                             # Pass Rate
@@ -8737,14 +8781,14 @@ def create_accumulation_page(stock_code='CDIA'):
                                 html.Div([
                                     html.Small("Pass Rate", className="text-muted d-block"),
                                     html.H4(f"{pass_rate:.0f}%", className=f"text-{conf_color} mb-0"),
-                                    html.Small("Kriteria terpenuhi", className="text-muted"),
+                                    html.Small("Kriteria lolos", className="text-muted"),
                                 ], className="text-center py-2")
                             ], width=4),
                             # Current Price
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Harga Saat Ini", className="text-muted d-block"),
-                                    html.H4(f"Rp {current_price:,.0f}" if current_price else "N/A", className="text-primary mb-0"),
+                                    html.Small("Harga Terakhir", className="text-muted d-block"),
+                                    html.H4(f"Rp {current_price:,.0f}" if current_price else "N/A", className="text-info mb-0"),
                                     html.Small(f"Signal: {overall_signal}", className="text-muted"),
                                 ], className="text-center py-2")
                             ], width=4),
@@ -8764,6 +8808,39 @@ def create_accumulation_page(stock_code='CDIA'):
             "border": "1px solid rgba(255,255,255,0.1)",
             "borderRadius": "12px"
         }),
+
+        # ========== RISK & OPPORTUNITY ANALYSIS ==========
+        dbc.Row([
+            # Peluang (Opportunities)
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-arrow-trend-up me-2 text-success"),
+                        html.Strong("Peluang", className="text-success")
+                    ], className="bg-success bg-opacity-10"),
+                    dbc.CardBody([
+                        html.Ul([
+                            html.Li(opp, className="mb-2") for opp in opportunities
+                        ], className="mb-0 ps-3", style={"listStyleType": "none"})
+                    ])
+                ], className="h-100 border-success")
+            ], md=6, className="mb-3"),
+
+            # Resiko (Risks)
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-triangle-exclamation me-2 text-danger"),
+                        html.Strong("Resiko", className="text-danger")
+                    ], className="bg-danger bg-opacity-10"),
+                    dbc.CardBody([
+                        html.Ul([
+                            html.Li(risk, className="mb-2") for risk in risks
+                        ], className="mb-0 ps-3", style={"listStyleType": "none"})
+                    ])
+                ], className="h-100 border-danger")
+            ], md=6, className="mb-3"),
+        ], className="mb-4"),
 
         # ========== ACTIVE ALERTS ==========
         dbc.Card([
@@ -10010,8 +10087,39 @@ def create_analysis_page(stock_code='CDIA'):
                                     color="success" if accum.get('decision_rule', {}).get('current_vs_entry') == 'IN_ZONE' else "warning" if accum.get('decision_rule', {}).get('current_vs_entry') == 'ABOVE' else "danger"
                                 )
                             ], className="mb-2"),
-                            html.P(decision.get('reason', ''), className="mb-3"),
+                            html.P(decision.get('reason', ''), className="mb-2"),
                         ]),
+
+                        # Confidence Metrics Row
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Confidence", className="text-muted"),
+                                    html.Div([
+                                        html.Strong(
+                                            {'VERY_HIGH': 'SANGAT TINGGI', 'HIGH': 'TINGGI', 'MEDIUM': 'SEDANG', 'LOW': 'RENDAH', 'VERY_LOW': 'SANGAT RENDAH'}.get(conf_level, 'N/A'),
+                                            className='text-' + {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}.get(conf_level, 'secondary')
+                                        )
+                                    ])
+                                ], className="text-center")
+                            ], width=4),
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Pass Rate", className="text-muted"),
+                                    html.Div([
+                                        html.Strong(f"{pass_rate:.0f}%", className='text-' + {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}.get(conf_level, 'secondary'))
+                                    ])
+                                ], className="text-center")
+                            ], width=4),
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Signal", className="text-muted"),
+                                    html.Div([
+                                        html.Strong(overall_signal, className='text-' + {'AKUMULASI': 'success', 'DISTRIBUSI': 'danger', 'NETRAL': 'secondary'}.get(overall_signal, 'secondary'))
+                                    ])
+                                ], className="text-center")
+                            ], width=4),
+                        ], className="mb-3 py-2", style={"backgroundColor": "rgba(255,255,255,0.05)", "borderRadius": "8px"}),
 
                         # Poin Utama & Peringatan (Indonesian)
                         dbc.Row([
