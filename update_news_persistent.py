@@ -1,4 +1,6 @@
-"""
+"""Update news_service.py with persistent database cache"""
+
+news_code = '''"""
 News Service - GNews API dengan Persistent Cache (Database)
 Jam kerja (08-16): 2 jam | Luar jam: 5 jam | Weekend: 6 jam
 Cache disimpan di PostgreSQL agar tidak hilang saat restart
@@ -63,42 +65,6 @@ def get_db_cursor():
         return None
 
 
-TABLES_CREATED = False
-
-def ensure_tables_exist():
-    global TABLES_CREATED
-    if TABLES_CREATED:
-        return True
-    cursor = get_db_cursor()
-    if not cursor:
-        return False
-    try:
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS news_cache (
-                id SERIAL PRIMARY KEY, stock_code VARCHAR(10) NOT NULL,
-                title TEXT NOT NULL, description TEXT, url TEXT NOT NULL,
-                source VARCHAR(100), published_at TIMESTAMP WITH TIME ZONE,
-                sentiment VARCHAR(20), color VARCHAR(20), icon VARCHAR(10),
-                fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                UNIQUE(stock_code, url)
-            );
-            CREATE INDEX IF NOT EXISTS idx_news_cache_stock ON news_cache(stock_code);
-            CREATE TABLE IF NOT EXISTS news_fetch_log (
-                stock_code VARCHAR(10) PRIMARY KEY,
-                last_fetch TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-                article_count INTEGER DEFAULT 0
-            );
-        """)
-        cursor.connection.commit()
-        cursor.close()
-        TABLES_CREATED = True
-        print("[DB] News cache tables ready")
-        return True
-    except Exception as e:
-        print(f"[DB ERROR] ensure_tables_exist: {e}")
-        return False
-
-
 def get_refresh_interval_hours():
     now = datetime.now()
     if now.weekday() >= 5:
@@ -118,7 +84,6 @@ def get_refresh_mode_text():
 
 
 def is_cache_valid_db(stock_code):
-    ensure_tables_exist()
     cursor = get_db_cursor()
     if not cursor:
         return False
@@ -234,7 +199,7 @@ def save_to_database(stock_code, articles):
 
 def get_stock_keywords(stock_code):
     keywords = STOCK_KEYWORDS.get(stock_code.upper(), [stock_code, f"{stock_code} saham"])
-    return ' OR '.join([f'"{kw}"' for kw in keywords[:2]])
+    return ' OR '.join([f\'"{kw}"\' for kw in keywords[:2]])
 
 
 def fetch_news_gnews(stock_code, max_results=15):
@@ -380,3 +345,12 @@ def get_all_stocks_news(stock_codes, max_per_stock=3):
         if news:
             all_news[code] = news
     return all_news
+'''
+
+with open('dashboard/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_code)
+
+with open('app/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_code)
+
+print("News service updated with persistent database cache!")
