@@ -67,8 +67,9 @@ from decision_panel import create_decision_panel, create_why_signal_checklist
 # News service for stock news
 try:
     from news_service import get_news_with_sentiment, get_all_stocks_news, get_latest_news_summary, get_cache_info
-except ImportError:
-    print('Warning: news_service not available')
+    print('news_service loaded OK')
+except Exception as e:
+    print(f'Warning: news_service error - {e}')
     def get_news_with_sentiment(stock_code, max_results=5): return []
     def get_all_stocks_news(codes, max_per=3): return {}
     def get_latest_news_summary(codes, max_total=10): return []
