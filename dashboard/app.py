@@ -2761,7 +2761,7 @@ def create_landing_page(is_admin: bool = False):
                                 "Premium"
                             ], color="warning", className="fs-6 px-3 py-2")
                         ], className="d-flex align-items-center justify-content-between")
-                    ], className="bg-dark", style={"borderBottom": "3px solid var(--bs-warning)"}),
+                    ], className="bg-dark", style={"borderBottom": "3px solid var(--bs-warning)", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
 
                     dbc.CardBody([
                         # Price & Change Row
@@ -2873,7 +2873,7 @@ def create_landing_page(is_admin: bool = False):
                         ], className="d-flex")
                     ])
                 ], className="h-100 shadow", color="dark", outline=True,
-                   style={"borderColor": "var(--bs-warning)", "borderWidth": "2px"})
+                   style={"borderColor": "var(--bs-warning)", "borderWidth": "2px", "background": "linear-gradient(180deg, #0f0f1a 0%, #1a1a2e 100%)"})
             ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}")
 
             stock_cards.append(card)
