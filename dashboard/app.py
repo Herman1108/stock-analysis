@@ -13615,6 +13615,19 @@ def load_account_list(active_tab, refresh_clicks, user_session):
             else:
                 expired_badge = dbc.Badge("-", color="secondary")
 
+            # Action buttons - Admin accounts cannot be edited or deleted
+            if acc['member_type'] == 'admin':
+                action_cell = html.Td([
+                    html.Small("[Protected]", className="text-muted fst-italic")
+                ], className="text-center")
+            else:
+                action_cell = html.Td([
+                    dbc.Button([html.I(className="fas fa-edit")], id={"type": "edit-account-btn", "index": acc['id']},
+                              color="primary", size="sm", className="me-1", title="Edit"),
+                    dbc.Button([html.I(className="fas fa-trash")], id={"type": "delete-account-btn", "index": acc['id']},
+                              color="danger", size="sm", title="Hapus"),
+                ])
+
             table_rows.append(html.Tr([
                 html.Td(idx),
                 html.Td(acc['email'], style={"fontSize": "12px"}),
@@ -13623,12 +13636,7 @@ def load_account_list(active_tab, refresh_clicks, user_session):
                 html.Td(type_badge),
                 html.Td(expired_badge),
                 html.Td(status_badge),
-                html.Td([
-                    dbc.Button([html.I(className="fas fa-edit")], id={"type": "edit-account-btn", "index": acc['id']},
-                              color="primary", size="sm", className="me-1", title="Edit"),
-                    dbc.Button([html.I(className="fas fa-trash")], id={"type": "delete-account-btn", "index": acc['id']},
-                              color="danger", size="sm", title="Hapus"),
-                ]),
+                action_cell,
             ]))
 
         table_body = html.Tbody(table_rows)
