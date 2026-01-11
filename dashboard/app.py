@@ -66,12 +66,13 @@ from decision_panel import create_decision_panel, create_why_signal_checklist
 
 # News service for stock news
 try:
-    from news_service import get_news_with_sentiment, get_all_stocks_news, get_latest_news_summary
+    from news_service import get_news_with_sentiment, get_all_stocks_news, get_latest_news_summary, get_cache_info
 except ImportError:
     print('Warning: news_service not available')
     def get_news_with_sentiment(stock_code, max_results=5): return []
     def get_all_stocks_news(codes, max_per=3): return {}
     def get_latest_news_summary(codes, max_total=10): return []
+    def get_cache_info(stock_code=None): return {'refresh_mode': '-', 'interval_hours': 2, 'cached_stocks': 0, 'last_refresh': '-'}
 
 # Helper function to create colored broker code span
 def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool = False) -> html.Span:
@@ -3962,12 +3963,16 @@ def create_news_page(stock_code: str = 'BBCA'):
         # Fetch news for selected stock
         news_articles = get_news_with_sentiment(stock_code, max_results=15)
 
-        # Get latest news across all stocks
+        # Get latest news across all stocks (only from cache)
         latest_all = get_latest_news_summary(stocks[:10], max_total=5)
+
+        # Get cache info
+        cache_info = get_cache_info(stock_code)
 
     except Exception as e:
         news_articles = []
         latest_all = []
+        cache_info = {'refresh_mode': '-', 'interval_hours': 2, 'cached_stocks': 0, 'last_refresh': '-'}
         print(f"Error loading news: {e}")
 
     # Create news cards
@@ -4044,23 +4049,26 @@ def create_news_page(stock_code: str = 'BBCA'):
 
             # Right Column - Latest Across All Stocks + Info
             dbc.Col([
-                # News Info Card
+                # Cache Status Card
                 dbc.Card([
                     dbc.CardHeader([
                         html.H6([
-                            html.I(className="fas fa-info-circle me-2 text-info"),
-                            "Tentang Berita"
+                            html.I(className="fas fa-clock me-2 text-info"),
+                            "Status Cache"
                         ], className="mb-0")
                     ], className="bg-dark"),
                     dbc.CardBody([
                         html.P([
-                            html.Strong("Sumber: "), "GNews API"
+                            html.Strong("Mode: "), cache_info.get('refresh_mode', '-')
                         ], className="small mb-2"),
                         html.P([
-                            html.Strong("Bahasa: "), "Indonesia"
+                            html.Strong("Refresh: "), f"per {cache_info.get('interval_hours', 2)} jam"
                         ], className="small mb-2"),
                         html.P([
-                            html.Strong("Sentiment Analysis: "), "AI-powered"
+                            html.Strong("Emiten di cache: "), str(cache_info.get('cached_stocks', 0))
+                        ], className="small mb-2"),
+                        html.P([
+                            html.Strong("Update terakhir: "), cache_info.get('last_refresh', '-')
                         ], className="small mb-2"),
                         html.Hr(),
                         html.Div([
