@@ -8665,6 +8665,33 @@ def create_accumulation_page(stock_code='CDIA'):
             if score >= 30: return 'warning'
             return 'danger'
 
+        # Get signal validation data for hero section
+        from app.signal_validation import get_signal_validation_summary
+        signal_data = get_signal_validation_summary(stock_code)
+        overall_signal = signal_data.get('overall_signal', 'NETRAL')
+        confidence_data = signal_data.get('confidence', {})
+        passed = confidence_data.get('passed', 0)
+        total = confidence_data.get('total', 15)
+        pass_rate = confidence_data.get('pass_rate', 0)
+        conf_level = confidence_data.get('level', 'LOW')
+
+        # Map signal to action display
+        action_config = {
+            'AKUMULASI': {'action': 'BUY ON WEAKNESS', 'icon': '[G]', 'color': 'success', 'desc': 'Sinyal akumulasi terdeteksi - Smart money masuk'},
+            'DISTRIBUSI': {'action': 'TAKE PROFIT', 'icon': '[R]', 'color': 'danger', 'desc': 'Sinyal distribusi terdeteksi - Smart money keluar'},
+            'NETRAL': {'action': 'WAIT & OBSERVE', 'icon': '[~]', 'color': 'secondary', 'desc': 'Belum ada konfirmasi arah - Pantau perkembangan'}
+        }
+        action_info = action_config.get(overall_signal, action_config['NETRAL'])
+
+        # Confidence level mapping
+        conf_text_map = {'VERY_HIGH': 'SANGAT TINGGI', 'HIGH': 'TINGGI', 'MEDIUM': 'SEDANG', 'LOW': 'RENDAH', 'VERY_LOW': 'SANGAT RENDAH'}
+        conf_color_map = {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}
+        conf_text = conf_text_map.get(conf_level, 'N/A')
+        conf_color = conf_color_map.get(conf_level, 'secondary')
+
+        # Get current price
+        current_price = composite.get('price_position', {}).get('current_price', 0)
+
     except Exception as e:
         return html.Div([
             dbc.Alert(f"Error loading Accumulation analysis for {stock_code}: {str(e)}", color="danger"),
@@ -8680,6 +8707,63 @@ def create_accumulation_page(stock_code='CDIA'):
             ], className="mb-0 d-inline-block me-3"),
             create_submenu_nav('accumulation', stock_code),
         ], className="d-flex align-items-center flex-wrap mb-4"),
+
+        # ========== HERO SECTION - SIGNAL ACTION ==========
+        dbc.Card([
+            dbc.CardBody([
+                dbc.Row([
+                    # Left: Big Action Icon & Label
+                    dbc.Col([
+                        html.Div([
+                            html.Span(action_info['icon'], style={"fontSize": "56px", "fontWeight": "bold"}),
+                            html.H2(action_info['action'], className=f"text-{action_info['color']} fw-bold mb-0 mt-2"),
+                            html.P(action_info['desc'], className="text-muted small mb-0"),
+                        ], className="text-center py-3")
+                    ], md=4, className="d-flex align-items-center justify-content-center border-end"),
+
+                    # Right: 3 Metrics
+                    dbc.Col([
+                        dbc.Row([
+                            # Confidence Level
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Confidence Level", className="text-muted d-block"),
+                                    html.H4(conf_text, className=f"text-{conf_color} mb-0"),
+                                    html.Small(f"{passed}/{total} validasi terpenuhi", className="text-muted"),
+                                ], className="text-center py-2")
+                            ], width=4),
+                            # Pass Rate
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Pass Rate", className="text-muted d-block"),
+                                    html.H4(f"{pass_rate:.0f}%", className=f"text-{conf_color} mb-0"),
+                                    html.Small("Kriteria terpenuhi", className="text-muted"),
+                                ], className="text-center py-2")
+                            ], width=4),
+                            # Current Price
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Harga Saat Ini", className="text-muted d-block"),
+                                    html.H4(f"Rp {current_price:,.0f}" if current_price else "N/A", className="text-primary mb-0"),
+                                    html.Small(f"Signal: {overall_signal}", className="text-muted"),
+                                ], className="text-center py-2")
+                            ], width=4),
+                        ])
+                    ], md=8, className="d-flex align-items-center"),
+                ]),
+                # Engine badge
+                html.Div([
+                    dbc.Badge([
+                        html.I(className="fas fa-cogs me-1"),
+                        "Wyckoff + Bandarmology Engine"
+                    ], color="dark", className="mt-2")
+                ], className="text-center")
+            ])
+        ], className="mb-4", style={
+            "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
+            "border": "1px solid rgba(255,255,255,0.1)",
+            "borderRadius": "12px"
+        }),
 
         # ========== ACTIVE ALERTS ==========
         dbc.Card([
