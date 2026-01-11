@@ -80,14 +80,19 @@ def get_db_connection():
             os.getenv('DATABASE_PUBLIC_URL')
         )
         if not database_url:
-            print("[DB ERROR] No DATABASE_URL found in environment")
+            print("[NEWS DB ERROR] No DATABASE_URL found in environment")
+            print(f"[NEWS DB DEBUG] Available env vars: {[k for k in os.environ.keys() if 'DATABASE' in k or 'DB' in k]}")
             return None
-        print(f"[DB] Connecting to database...")
-        conn = psycopg2.connect(database_url)
-        print(f"[DB] Connected successfully")
+        # Mask password for logging
+        masked_url = database_url[:30] + "..." if len(database_url) > 30 else database_url
+        print(f"[NEWS DB] Connecting to: {masked_url}")
+        conn = psycopg2.connect(database_url, connect_timeout=10)
+        print(f"[NEWS DB] Connected successfully!")
         return conn
     except Exception as e:
-        print(f"[DB ERROR] Cannot connect: {e}")
+        import traceback
+        print(f"[NEWS DB ERROR] Cannot connect: {e}")
+        print(f"[NEWS DB TRACEBACK] {traceback.format_exc()}")
         return None
 
 
