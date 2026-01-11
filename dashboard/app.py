@@ -64,6 +64,15 @@ from signal_validation import (
 )
 from decision_panel import create_decision_panel, create_why_signal_checklist
 
+# News service for stock news
+try:
+    from news_service import get_news_with_sentiment, get_all_stocks_news, get_latest_news_summary
+except ImportError:
+    print('Warning: news_service not available')
+    def get_news_with_sentiment(stock_code, max_results=5): return []
+    def get_all_stocks_news(codes, max_per=3): return {}
+    def get_latest_news_summary(codes, max_total=10): return []
+
 # Helper function to create colored broker code span
 def colored_broker(broker_code: str, show_type: bool = False, with_badge: bool = False) -> html.Span:
     """Create a colored broker code span based on broker type.
@@ -2599,6 +2608,7 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/")),
                     dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/dashboard")),
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/analysis")),
+                    dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-newspaper me-1"), "News"], color="info", size="sm", className="fw-bold text-white px-2 py-1"), href="/news")),
                     dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white px-2 py-1"), href="/discussion")),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white px-2 py-1"), href="/upload")),
                 ], className="d-none d-lg-flex", navbar=True, style={"gap": "3px"}),
@@ -2649,6 +2659,7 @@ def create_navbar():
                     dbc.NavItem(dcc.Link(dbc.Button("Home", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Dashboard", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/dashboard", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Analysis", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/analysis", refresh=True)),
+                    dbc.NavItem(dcc.Link(dbc.Button([html.I(className="fas fa-newspaper me-1"), "News"], color="info", size="sm", className="fw-bold text-white mb-1 w-100"), href="/news", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Discussion", color="info", size="sm", className="fw-bold text-white mb-1 w-100"), href="/discussion", refresh=True)),
                     dbc.NavItem(dcc.Link(dbc.Button("Upload", color="warning", size="sm", className="fw-bold text-white mb-1 w-100"), href="/upload", refresh=True)),
                     html.Hr(className="my-2", style={"borderColor": "white"}),
@@ -3936,6 +3947,179 @@ def create_thread_card(thread: dict) -> dbc.Card:
     return dbc.Card([
         dbc.CardBody(card_body)
     ], className=f"mb-3 {card_class}", style=card_style)
+
+
+# ============================================================
+# PAGE: NEWS - Berita Saham Indonesia
+# ============================================================
+
+def create_news_page(stock_code: str = 'BBCA'):
+    """Create news page with stock-related news from GNews API"""
+    try:
+        # Get available stocks
+        stocks = get_available_stocks()
+
+        # Fetch news for selected stock
+        news_articles = get_news_with_sentiment(stock_code, max_results=10)
+
+        # Get latest news across all stocks
+        latest_all = get_latest_news_summary(stocks[:10], max_total=5)
+
+    except Exception as e:
+        news_articles = []
+        latest_all = []
+        print(f"Error loading news: {e}")
+
+    # Create news cards
+    def create_news_card(article):
+        sentiment = article.get('sentiment', 'NETRAL')
+        color = article.get('color', 'secondary')
+        icon = article.get('icon', '[~]')
+
+        return dbc.Card([
+            dbc.CardBody([
+                dbc.Row([
+                    # Sentiment Badge
+                    dbc.Col([
+                        html.Div([
+                            html.Span(icon, style={"fontSize": "24px", "fontWeight": "bold"}),
+                            dbc.Badge(sentiment, color=color, className="ms-2")
+                        ], className="text-center")
+                    ], width=2, className="d-flex align-items-center justify-content-center"),
+
+                    # News Content
+                    dbc.Col([
+                        html.A(
+                            html.H6(article.get('title', 'No Title')[:80] + ('...' if len(article.get('title', '')) > 80 else ''),
+                                   className="mb-1 text-info"),
+                            href=article.get('url', '#'), target="_blank", style={"textDecoration": "none"}
+                        ),
+                        html.P(article.get('description', '')[:150] + ('...' if len(article.get('description', '')) > 150 else ''),
+                               className="text-muted small mb-1"),
+                        html.Div([
+                            dbc.Badge(article.get('source', 'Unknown'), color="dark", className="me-2"),
+                            html.Small(article.get('published_formatted', ''), className="text-muted"),
+                        ])
+                    ], width=10)
+                ])
+            ])
+        ], className="mb-2", style={"borderLeft": f"4px solid var(--bs-{color})"})
+
+    return html.Div([
+        # Page Header
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-newspaper me-2"),
+                f"Berita Saham - {stock_code}"
+            ], className="mb-0 d-inline-block me-3"),
+            dbc.Badge(f"{len(news_articles)} berita", color="info", className="me-2"),
+            dbc.Button([
+                html.I(className="fas fa-sync-alt me-1"),
+                "Refresh"
+            ], id="refresh-news-btn", color="outline-info", size="sm"),
+        ], className="d-flex align-items-center flex-wrap mb-4"),
+
+        dbc.Row([
+            # Left Column - News for Selected Stock
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H5([
+                            html.I(className="fas fa-rss me-2 text-warning"),
+                            f"Berita {stock_code}"
+                        ], className="mb-0")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.Div([
+                            create_news_card(article) for article in news_articles
+                        ]) if news_articles else dbc.Alert([
+                            html.I(className="fas fa-info-circle me-2"),
+                            f"Tidak ada berita terbaru untuk {stock_code}. ",
+                            html.Br(),
+                            html.Small("Coba refresh atau pilih emiten lain.", className="text-muted")
+                        ], color="info")
+                    ], style={"maxHeight": "600px", "overflowY": "auto"})
+                ])
+            ], md=8),
+
+            # Right Column - Latest Across All Stocks + Info
+            dbc.Col([
+                # News Info Card
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H6([
+                            html.I(className="fas fa-info-circle me-2 text-info"),
+                            "Tentang Berita"
+                        ], className="mb-0")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.P([
+                            html.Strong("Sumber: "), "GNews API"
+                        ], className="small mb-2"),
+                        html.P([
+                            html.Strong("Bahasa: "), "Indonesia"
+                        ], className="small mb-2"),
+                        html.P([
+                            html.Strong("Sentiment Analysis: "), "AI-powered"
+                        ], className="small mb-2"),
+                        html.Hr(),
+                        html.Div([
+                            html.H6("Legenda Sentiment:", className="small mb-2"),
+                            html.Div([
+                                dbc.Badge("[+] POSITIF", color="success", className="me-1 mb-1"),
+                                html.Small(" - Berita baik untuk saham", className="text-muted d-block small"),
+                            ], className="mb-1"),
+                            html.Div([
+                                dbc.Badge("[~] NETRAL", color="secondary", className="me-1 mb-1"),
+                                html.Small(" - Berita umum/informatif", className="text-muted d-block small"),
+                            ], className="mb-1"),
+                            html.Div([
+                                dbc.Badge("[-] NEGATIF", color="danger", className="me-1 mb-1"),
+                                html.Small(" - Berita kurang baik", className="text-muted d-block small"),
+                            ]),
+                        ])
+                    ])
+                ], className="mb-3"),
+
+                # Latest All Stocks
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.H6([
+                            html.I(className="fas fa-globe me-2 text-success"),
+                            "Berita Terbaru Semua Emiten"
+                        ], className="mb-0")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.Div([
+                            html.Div([
+                                html.A(
+                                    html.Span([
+                                        dbc.Badge(art.get('stock_code', ''), color=art.get('color', 'secondary'), className="me-2"),
+                                        art.get('title', '')[:50] + '...'
+                                    ]),
+                                    href=art.get('url', '#'), target="_blank",
+                                    className="text-light small", style={"textDecoration": "none"}
+                                ),
+                                html.Br(),
+                                html.Small(art.get('published_formatted', ''), className="text-muted"),
+                                html.Hr(className="my-2")
+                            ]) for art in latest_all
+                        ]) if latest_all else html.Small("Tidak ada berita", className="text-muted")
+                    ], style={"maxHeight": "300px", "overflowY": "auto"})
+                ])
+            ], md=4)
+        ]),
+
+        # Disclaimer
+        html.Div([
+            html.Hr(className="my-4"),
+            html.Small([
+                html.I(className="fas fa-exclamation-triangle me-2 text-warning"),
+                "Disclaimer: Berita dikumpulkan otomatis dari berbagai sumber. Sentiment analysis bersifat indikatif. ",
+                "Selalu lakukan riset mandiri sebelum mengambil keputusan investasi."
+            ], className="text-muted")
+        ], className="text-center")
+    ])
 
 
 def create_discussion_page(stock_code: str = None):
@@ -13353,6 +13537,8 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
         return wrap_with_banner(create_dashboard_page(selected_stock))
     elif pathname == '/analysis':
         return wrap_with_banner(create_analysis_page(selected_stock))
+    elif pathname == '/news':
+        return wrap_with_banner(create_news_page(selected_stock))
     elif pathname == '/bandarmology':
         return wrap_with_banner(create_bandarmology_page(selected_stock))
     elif pathname == '/summary':
