@@ -1,13 +1,16 @@
 """
-News Service - Dual GNews API dengan Claude AI Dedupe
-Account 1: Jam genap (8,10,12,14,16) | Account 2: Jam ganjil + weekend + luar jam kerja
+News Service - GNews API + Google News RSS Fallback dengan Claude AI Dedupe
+Primary: GNews API (dual accounts) | Fallback: Google News RSS (unlimited, free)
 Refresh: Per 1 jam | Cache: PostgreSQL persistent
 """
 
 import os
 import requests
+import re
+import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from typing import List, Dict
+from email.utils import parsedate_to_datetime
 import threading
 import json
 
@@ -21,6 +24,7 @@ CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY')
 
 # API URLs
 GNEWS_BASE_URL = "https://gnews.io/api/v4/search"
+GOOGLE_NEWS_RSS_URL = "https://news.google.com/rss/search"
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 DB_LOCK = threading.Lock()
@@ -308,6 +312,82 @@ def fetch_news_gnews(stock_code, max_results=10, use_account=1):
         return []
 
 
+def fetch_news_google_rss(stock_code, max_results=10):
+    """
+    Fetch news from Google News RSS - FREE & UNLIMITED
+    Fallback when GNews API limit reached or returns empty
+    """
+    keywords = get_stock_keywords(stock_code)
+    # Use first 2 keywords for search
+    query = '+'.join(keywords[:2])
+
+    params = {
+        'q': query,
+        'hl': 'id',      # Bahasa Indonesia
+        'gl': 'ID',      # Region Indonesia
+        'ceid': 'ID:id'  # Country edition
+    }
+
+    try:
+        response = requests.get(GOOGLE_NEWS_RSS_URL, params=params, timeout=15)
+        response.raise_for_status()
+
+        # Parse RSS XML
+        root = ET.fromstring(response.content)
+        articles = []
+
+        # Find all items in the RSS feed
+        for item in root.findall('.//item')[:max_results]:
+            title = item.find('title')
+            link = item.find('link')
+            pub_date = item.find('pubDate')
+            source = item.find('source')
+
+            # Parse published date
+            published_at = ''
+            if pub_date is not None and pub_date.text:
+                try:
+                    dt = parsedate_to_datetime(pub_date.text)
+                    published_at = dt.isoformat()
+                except:
+                    published_at = pub_date.text
+
+            # Extract source name from title (format: "Title - Source")
+            title_text = title.text if title is not None else ''
+            source_name = 'Google News'
+            if source is not None and source.text:
+                source_name = source.text
+            elif ' - ' in title_text:
+                # Fallback: extract from title
+                parts = title_text.rsplit(' - ', 1)
+                if len(parts) == 2:
+                    title_text = parts[0].strip()
+                    source_name = parts[1].strip()
+
+            # Get description from title (Google RSS doesn't have description)
+            description = title_text[:200] if title_text else ''
+
+            articles.append({
+                'title': title_text,
+                'description': description,
+                'url': link.text if link is not None else '',
+                'source': source_name,
+                'published_at': published_at,
+                'stock_code': stock_code,
+                'api_source': 'google_rss'
+            })
+
+        print(f"[GOOGLE RSS] {stock_code}: {len(articles)} articles")
+        return articles
+
+    except ET.ParseError as e:
+        print(f"[GOOGLE RSS ERROR] {stock_code}: XML parse error - {e}")
+        return []
+    except Exception as e:
+        print(f"[GOOGLE RSS ERROR] {stock_code}: {e}")
+        return []
+
+
 def dedupe_with_claude(articles):
     """Use Claude AI to deduplicate similar news articles"""
     if not CLAUDE_API_KEY or len(articles) <= 1:
@@ -440,6 +520,7 @@ def get_news_with_sentiment(stock_code, max_results=20, force_refresh=False):
     """
     Fetch news with sentiment. max_results default 20.
     News baru diletakkan di atas, news lama tetap ditampilkan.
+    Priority: GNews Account 1/2 -> Google News RSS (fallback)
     """
     stock_code = stock_code.upper()
 
@@ -450,18 +531,23 @@ def get_news_with_sentiment(stock_code, max_results=20, force_refresh=False):
         if articles:
             return articles
 
-    # Fetch from current API with fallback
+    # Fetch from current API with fallback chain
     current_api = get_current_api()
     use_account = 1 if current_api == 'gnews1' else 2
     print(f"[CACHE MISS] {stock_code} - fetching from GNews Account {use_account}")
 
     new_articles = fetch_news_gnews(stock_code, max_results=10, use_account=use_account)
 
-    # Fallback to other account if failed
+    # Fallback 1: Try other GNews account
     if not new_articles:
         fallback_account = 2 if use_account == 1 else 1
-        print(f"[FALLBACK] {stock_code} - trying GNews Account {fallback_account}")
+        print(f"[FALLBACK 1] {stock_code} - trying GNews Account {fallback_account}")
         new_articles = fetch_news_gnews(stock_code, max_results=10, use_account=fallback_account)
+
+    # Fallback 2: Use Google News RSS (FREE & UNLIMITED)
+    if not new_articles:
+        print(f"[FALLBACK 2] {stock_code} - trying Google News RSS")
+        new_articles = fetch_news_google_rss(stock_code, max_results=10)
 
     print(f"[FETCH] {stock_code}: {len(new_articles)} new articles")
 
