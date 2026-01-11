@@ -97,25 +97,23 @@ def get_db_connection():
 
 
 def get_db_cursor():
-    """Get database cursor (caller must close cursor and connection)"""
+    """Get database cursor and connection as tuple"""
     try:
         conn = get_db_connection()
         if not conn:
-            return None
+            return None, None
         cursor = conn.cursor()
-        # Attach connection to cursor for later commit/close
-        cursor.connection = conn
-        return cursor
+        return cursor, conn
     except Exception as e:
         print(f"[DB ERROR] Cannot get cursor: {e}")
-        return None
+        return None, None
 
 
 def ensure_tables_exist():
     global TABLES_CREATED
     if TABLES_CREATED:
         return True
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     if not cursor:
         return False
     try:
@@ -136,15 +134,18 @@ def ensure_tables_exist():
                 article_count INTEGER DEFAULT 0
             );
         """)
-        cursor.connection.commit()
-        conn = cursor.connection
+        conn.commit()
         cursor.close()
         conn.close()
         TABLES_CREATED = True
-        print("[DB] News cache tables ready")
+        print("[NEWS DB] Tables ready")
         return True
     except Exception as e:
-        print(f"[DB ERROR] ensure_tables_exist: {e}")
+        print(f"[NEWS DB ERROR] ensure_tables_exist: {e}")
+        try:
+            conn.close()
+        except:
+            pass
         return False
 
 
@@ -182,12 +183,10 @@ def get_current_api():
 def is_cache_valid_db(stock_code):
     """Check if cache is still valid based on refresh interval."""
     ensure_tables_exist()
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     if not cursor:
         return False
-    conn = cursor.connection
     try:
-        # Use database NOW() to avoid timezone mismatch
         refresh_interval = get_refresh_interval_hours()
         cursor.execute("""
             SELECT last_fetch,
@@ -198,7 +197,6 @@ def is_cache_valid_db(stock_code):
         cursor.close()
         conn.close()
         if not result:
-            print(f"[CACHE] {stock_code}: No cache record found")
             return False
 
         age_seconds = result[1] if isinstance(result, tuple) else result.get('age_seconds')
@@ -207,11 +205,10 @@ def is_cache_valid_db(stock_code):
 
         max_age = refresh_interval * 3600
         is_valid = age_seconds < max_age
-
-        print(f"[CACHE] {stock_code}: age={int(age_seconds)}s, max={int(max_age)}s, valid={is_valid}")
+        print(f"[NEWS CACHE] {stock_code}: age={int(age_seconds)}s, max={int(max_age)}s, valid={is_valid}")
         return is_valid
     except Exception as e:
-        print(f"[DB ERROR] is_cache_valid_db: {e}")
+        print(f"[NEWS DB ERROR] is_cache_valid_db: {e}")
         try:
             conn.close()
         except:
@@ -220,10 +217,9 @@ def is_cache_valid_db(stock_code):
 
 
 def get_cache_age_text(stock_code):
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     if not cursor:
         return "DB tidak tersedia"
-    conn = cursor.connection
     try:
         cursor.execute("SELECT last_fetch FROM news_fetch_log WHERE stock_code = %s", (stock_code.upper(),))
         result = cursor.fetchone()
@@ -253,10 +249,9 @@ def get_cache_age_text(stock_code):
 
 def load_from_database(stock_code, limit=20):
     """Load news from database. Default limit 20 rows."""
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     if not cursor:
         return []
-    conn = cursor.connection
     try:
         cursor.execute("""
             SELECT title, description, url, source, published_at, sentiment, color, icon, api_source
@@ -281,7 +276,7 @@ def load_from_database(stock_code, limit=20):
             articles.append(article)
         return articles
     except Exception as e:
-        print(f"[DB ERROR] load_from_database: {e}")
+        print(f"[NEWS DB ERROR] load_from_database: {e}")
         try:
             conn.close()
         except:
@@ -292,10 +287,10 @@ def load_from_database(stock_code, limit=20):
 def save_to_database(stock_code, articles):
     if not articles:
         return
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     if not cursor:
+        print(f"[NEWS DB ERROR] save_to_database: No cursor")
         return
-    conn = cursor.connection
     try:
         with DB_LOCK:
             cursor.execute("DELETE FROM news_cache WHERE stock_code = %s AND published_at < NOW() - INTERVAL '14 days'", (stock_code.upper(),))
@@ -323,9 +318,9 @@ def save_to_database(stock_code, articles):
             conn.commit()
             cursor.close()
             conn.close()
-            print(f"[DB SAVED] {stock_code}: {len(articles)} articles")
+            print(f"[NEWS DB SAVED] {stock_code}: {len(articles)} articles")
     except Exception as e:
-        print(f"[DB ERROR] save_to_database: {e}")
+        print(f"[NEWS DB ERROR] save_to_database: {e}")
         try:
             conn.close()
         except:
@@ -651,11 +646,10 @@ def get_news_with_sentiment(stock_code, max_results=20, force_refresh=False):
 
 
 def get_cache_info(stock_code=None):
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     cached_stocks = 0
     last_refresh = '-'
     if cursor:
-        conn = cursor.connection
         try:
             cursor.execute("SELECT COUNT(DISTINCT stock_code) FROM news_fetch_log")
             result = cursor.fetchone()
@@ -670,7 +664,7 @@ def get_cache_info(stock_code=None):
             cursor.close()
             conn.close()
         except Exception as e:
-            print(f"[DB ERROR] get_cache_info: {e}")
+            print(f"[NEWS DB ERROR] get_cache_info: {e}")
             try:
                 conn.close()
             except:
@@ -694,10 +688,9 @@ def get_latest_news_summary(stock_codes, max_total=10):
         if not is_cache_valid_db(code):
             get_news_with_sentiment(code, max_results=20)
 
-    cursor = get_db_cursor()
+    cursor, conn = get_db_cursor()
     if not cursor:
         return []
-    conn = cursor.connection
 
     try:
         now = datetime.now()
@@ -705,11 +698,8 @@ def get_latest_news_summary(stock_codes, max_total=10):
 
         # Determine time filter based on work hours
         if now.weekday() < 5 and 8 <= now.hour < 16:
-            # Jam kerja: tampilkan berita 2 jam terakhir (2 siklus)
             time_filter = "AND fetched_at > NOW() - INTERVAL '2 hours'"
         else:
-            # Luar jam kerja/weekend: tampilkan sampai refresh berikutnya
-            # Calculate next refresh interval
             interval = get_refresh_interval_hours()
             time_filter = f"AND fetched_at > NOW() - INTERVAL '{int(interval)} hours'"
 
@@ -736,9 +726,8 @@ def get_latest_news_summary(stock_codes, max_total=10):
 
         # If no recent news, load from cache anyway
         if not articles:
-            cursor2 = get_db_cursor()
+            cursor2, conn2 = get_db_cursor()
             if cursor2:
-                conn2 = cursor2.connection
                 try:
                     cursor2.execute(f"""
                         SELECT stock_code, title, description, url, source, published_at, sentiment, color, icon
@@ -758,7 +747,7 @@ def get_latest_news_summary(stock_codes, max_total=10):
                         article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
                         articles.append(article)
                 except Exception as e2:
-                    print(f"[DB ERROR] get_latest_news_summary fallback: {e2}")
+                    print(f"[NEWS DB ERROR] get_latest_news_summary fallback: {e2}")
                     try:
                         conn2.close()
                     except:
@@ -766,7 +755,11 @@ def get_latest_news_summary(stock_codes, max_total=10):
 
         return articles
     except Exception as e:
-        print(f"[DB ERROR] get_latest_news_summary: {e}")
+        print(f"[NEWS DB ERROR] get_latest_news_summary: {e}")
+        try:
+            conn.close()
+        except:
+            pass
         return []
 
 
