@@ -1,7 +1,6 @@
 """
-News Service - GNews API dengan Persistent Cache (Database)
-Jam kerja (08-16): 2 jam | Luar jam: 5 jam | Weekend: 6 jam
-Cache disimpan di PostgreSQL agar tidak hilang saat restart
+News Service - Dual API (GNews + Marketaux) dengan Claude AI Dedupe
+Refresh: Per 1 jam | Cache: PostgreSQL persistent
 """
 
 import os
@@ -9,32 +8,44 @@ import requests
 from datetime import datetime, timedelta
 from typing import List, Dict
 import threading
+import json
 
 from dotenv import load_dotenv
 load_dotenv()
 
+# API Keys
 GNEWS_API_KEY = os.getenv('GNEWS_API_KEY')
+MARKETAUX_API_KEY = os.getenv('MARKETAUX_API_KEY')
+CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY')
+
+# API URLs
 GNEWS_BASE_URL = "https://gnews.io/api/v4/search"
+MARKETAUX_BASE_URL = "https://api.marketaux.com/v1/news/all"
+CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 DB_LOCK = threading.Lock()
+TABLES_CREATED = False
+
+# Refresh intervals
+# Jam kerja (08-16): 1 jam | Luar jam: 5 jam | Weekend: 6 jam
 
 STOCK_KEYWORDS = {
-    'BBCA': ['BBCA', 'Bank Central Asia'],
-    'BMRI': ['BMRI', 'Bank Mandiri'],
-    'BBRI': ['BBRI', 'Bank BRI'],
-    'BBNI': ['BBNI', 'Bank BNI'],
-    'TLKM': ['TLKM', 'Telkom'],
-    'ASII': ['ASII', 'Astra'],
+    'BBCA': ['BBCA', 'Bank Central Asia', 'BCA'],
+    'BMRI': ['BMRI', 'Bank Mandiri', 'Mandiri'],
+    'BBRI': ['BBRI', 'Bank BRI', 'Bank Rakyat Indonesia'],
+    'BBNI': ['BBNI', 'Bank BNI', 'Bank Negara Indonesia'],
+    'TLKM': ['TLKM', 'Telkom', 'Telekomunikasi Indonesia'],
+    'ASII': ['ASII', 'Astra', 'Astra International'],
     'UNVR': ['UNVR', 'Unilever Indonesia'],
-    'HMSP': ['HMSP', 'Sampoerna'],
+    'HMSP': ['HMSP', 'Sampoerna', 'HM Sampoerna'],
     'GGRM': ['GGRM', 'Gudang Garam'],
     'ICBP': ['ICBP', 'Indofood CBP'],
     'INDF': ['INDF', 'Indofood'],
     'KLBF': ['KLBF', 'Kalbe Farma'],
-    'PGAS': ['PGAS', 'PGN'],
+    'PGAS': ['PGAS', 'PGN', 'Perusahaan Gas Negara'],
     'PTBA': ['PTBA', 'Bukit Asam'],
-    'ADRO': ['ADRO', 'Adaro'],
-    'ANTM': ['ANTM', 'Antam'],
+    'ADRO': ['ADRO', 'Adaro', 'Adaro Energy'],
+    'ANTM': ['ANTM', 'Antam', 'Aneka Tambang'],
     'INCO': ['INCO', 'Vale Indonesia'],
     'CPIN': ['CPIN', 'Charoen Pokphand'],
     'EXCL': ['EXCL', 'XL Axiata'],
@@ -44,13 +55,13 @@ STOCK_KEYWORDS = {
     'UNTR': ['UNTR', 'United Tractors'],
     'JSMR': ['JSMR', 'Jasa Marga'],
     'WIKA': ['WIKA', 'Wijaya Karya'],
-    'PANI': ['Pantai Indah Kapuk', 'PANI'],
-    'BREN': ['Barito Renewables', 'BREN'],
-    'CUAN': ['Petrindo Jaya', 'CUAN'],
-    'DSSA': ['Dian Swastatika', 'DSSA'],
-    'AMMN': ['Amman Mineral', 'AMMN'],
-    'CDIA': ['Cisarua Mountain Dairy', 'CDIA'],
-    'PTRO': ['Petrosea', 'PTRO'],
+    'PANI': ['PANI', 'Pantai Indah Kapuk'],
+    'BREN': ['BREN', 'Barito Renewables'],
+    'CUAN': ['CUAN', 'Petrindo Jaya'],
+    'DSSA': ['DSSA', 'Dian Swastatika'],
+    'AMMN': ['AMMN', 'Amman Mineral'],
+    'CDIA': ['CDIA', 'Cisarua Mountain Dairy'],
+    'PTRO': ['PTRO', 'Petrosea'],
 }
 
 
@@ -62,8 +73,6 @@ def get_db_cursor():
         print(f"[DB ERROR] Cannot connect: {e}")
         return None
 
-
-TABLES_CREATED = False
 
 def ensure_tables_exist():
     global TABLES_CREATED
@@ -79,6 +88,7 @@ def ensure_tables_exist():
                 title TEXT NOT NULL, description TEXT, url TEXT NOT NULL,
                 source VARCHAR(100), published_at TIMESTAMP WITH TIME ZONE,
                 sentiment VARCHAR(20), color VARCHAR(20), icon VARCHAR(10),
+                api_source VARCHAR(20) DEFAULT 'gnews',
                 fetched_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
                 UNIQUE(stock_code, url)
             );
@@ -101,11 +111,11 @@ def ensure_tables_exist():
 
 def get_refresh_interval_hours():
     now = datetime.now()
-    if now.weekday() >= 5:
+    if now.weekday() >= 5:  # Weekend
         return 6.0
-    if 8 <= now.hour < 16:
-        return 2.0
-    return 5.0
+    if 8 <= now.hour < 16:  # Jam kerja
+        return 1.0
+    return 5.0  # Luar jam kerja
 
 
 def get_refresh_mode_text():
@@ -113,8 +123,21 @@ def get_refresh_mode_text():
     if now.weekday() >= 5:
         return "Weekend (per 6 jam)"
     elif 8 <= now.hour < 16:
-        return "Jam Kerja (per 2 jam)"
+        return "Jam Kerja (per 1 jam)"
     return "Luar Jam Kerja (per 5 jam)"
+
+
+def get_current_api():
+    """Jam genap=GNews, Jam ganjil=Marketaux (hanya jam kerja 08-16)"""
+    now = datetime.now()
+    if now.weekday() >= 5:  # Weekend - pakai GNews
+        return 'gnews'
+    if 8 <= now.hour < 16:  # Jam kerja - bergantian
+        if now.hour % 2 == 0:  # Jam genap: 8,10,12,14,16
+            return 'gnews'
+        else:  # Jam ganjil: 9,11,13,15
+            return 'marketaux'
+    return 'gnews'  # Luar jam kerja - pakai GNews
 
 
 def is_cache_valid_db(stock_code):
@@ -134,7 +157,7 @@ def is_cache_valid_db(stock_code):
         if last_fetch.tzinfo:
             last_fetch = last_fetch.replace(tzinfo=None)
         age = datetime.now() - last_fetch
-        return age.total_seconds() < (get_refresh_interval_hours() * 3600)
+        return age.total_seconds() < (REFRESH_INTERVAL_HOURS * 3600)
     except Exception as e:
         print(f"[DB ERROR] is_cache_valid_db: {e}")
         return False
@@ -172,7 +195,7 @@ def load_from_database(stock_code):
         return []
     try:
         cursor.execute("""
-            SELECT title, description, url, source, published_at, sentiment, color, icon
+            SELECT title, description, url, source, published_at, sentiment, color, icon, api_source
             FROM news_cache WHERE stock_code = %s ORDER BY published_at DESC LIMIT 15
         """, (stock_code.upper(),))
         rows = cursor.fetchall()
@@ -185,7 +208,8 @@ def load_from_database(stock_code):
                 article = {
                     'title': row[0], 'description': row[1], 'url': row[2], 'source': row[3],
                     'published_at': row[4].isoformat() if row[4] else '',
-                    'sentiment': row[5], 'color': row[6], 'icon': row[7]
+                    'sentiment': row[5], 'color': row[6], 'icon': row[7],
+                    'api_source': row[8] if len(row) > 8 else 'gnews'
                 }
             article['stock_code'] = stock_code.upper()
             article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
@@ -213,14 +237,15 @@ def save_to_database(stock_code, articles):
                     except:
                         pass
                 cursor.execute("""
-                    INSERT INTO news_cache (stock_code, title, description, url, source, published_at, sentiment, color, icon)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO news_cache (stock_code, title, description, url, source, published_at, sentiment, color, icon, api_source)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ON CONFLICT (stock_code, url) DO UPDATE SET
                         title = EXCLUDED.title, description = EXCLUDED.description,
                         sentiment = EXCLUDED.sentiment, color = EXCLUDED.color, icon = EXCLUDED.icon, fetched_at = NOW()
                 """, (stock_code.upper(), article.get('title', ''), article.get('description', ''),
                       article.get('url', ''), article.get('source', ''), published_at,
-                      article.get('sentiment', 'NETRAL'), article.get('color', 'secondary'), article.get('icon', '[~]')))
+                      article.get('sentiment', 'NETRAL'), article.get('color', 'secondary'),
+                      article.get('icon', '[~]'), article.get('api_source', 'gnews')))
             cursor.execute("""
                 INSERT INTO news_fetch_log (stock_code, last_fetch, article_count) VALUES (%s, NOW(), %s)
                 ON CONFLICT (stock_code) DO UPDATE SET last_fetch = NOW(), article_count = EXCLUDED.article_count
@@ -234,31 +259,157 @@ def save_to_database(stock_code, articles):
 
 def get_stock_keywords(stock_code):
     keywords = STOCK_KEYWORDS.get(stock_code.upper(), [stock_code, f"{stock_code} saham"])
-    return ' OR '.join([f'"{kw}"' for kw in keywords[:2]])
+    return keywords
 
 
-def fetch_news_gnews(stock_code, max_results=15):
+def fetch_news_gnews(stock_code, max_results=10):
     if not GNEWS_API_KEY:
-        print("[NEWS ERROR] GNEWS_API_KEY not set")
         return []
     keywords = get_stock_keywords(stock_code)
+    query = ' OR '.join([f'"{kw}"' for kw in keywords[:2]])
     date_from = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%dT00:00:00Z')
-    params = {'q': keywords, 'lang': 'id', 'country': 'id', 'max': max_results,
+    params = {'q': query, 'lang': 'id', 'country': 'id', 'max': max_results,
               'apikey': GNEWS_API_KEY, 'sortby': 'publishedAt', 'from': date_from}
     try:
         response = requests.get(GNEWS_BASE_URL, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         if 'errors' in data:
-            print(f"[API ERROR] {stock_code}: {data['errors']}")
+            print(f"[GNEWS ERROR] {stock_code}: {data['errors']}")
             return []
         articles = data.get('articles', [])
         return [{'title': a.get('title', ''), 'description': a.get('description', ''),
                  'url': a.get('url', ''), 'source': a.get('source', {}).get('name', 'Unknown'),
-                 'published_at': a.get('publishedAt', ''), 'stock_code': stock_code} for a in articles]
+                 'published_at': a.get('publishedAt', ''), 'stock_code': stock_code,
+                 'api_source': 'gnews'} for a in articles]
     except Exception as e:
-        print(f"[NEWS ERROR] {stock_code}: {e}")
+        print(f"[GNEWS ERROR] {stock_code}: {e}")
         return []
+
+
+def fetch_news_marketaux(stock_code, max_results=10):
+    if not MARKETAUX_API_KEY:
+        return []
+    keywords = get_stock_keywords(stock_code)
+    # Marketaux uses search parameter
+    search_query = ','.join(keywords[:2])
+    params = {
+        'api_token': MARKETAUX_API_KEY,
+        'search': search_query,
+        'language': 'id',
+        'filter_entities': 'true',
+        'limit': max_results
+    }
+    try:
+        response = requests.get(MARKETAUX_BASE_URL, params=params, timeout=10)
+        response.raise_for_status()
+        data = response.json()
+        if 'error' in data:
+            print(f"[MARKETAUX ERROR] {stock_code}: {data['error']}")
+            return []
+        articles = data.get('data', [])
+        return [{'title': a.get('title', ''), 'description': a.get('description', ''),
+                 'url': a.get('url', ''), 'source': a.get('source', 'Marketaux'),
+                 'published_at': a.get('published_at', ''), 'stock_code': stock_code,
+                 'api_source': 'marketaux'} for a in articles]
+    except Exception as e:
+        print(f"[MARKETAUX ERROR] {stock_code}: {e}")
+        return []
+
+
+def dedupe_with_claude(articles):
+    """Use Claude AI to deduplicate similar news articles"""
+    if not CLAUDE_API_KEY or len(articles) <= 1:
+        return articles
+
+    try:
+        # Create summary of articles for Claude
+        article_summaries = []
+        for i, a in enumerate(articles):
+            article_summaries.append(f"{i}: {a.get('title', '')[:100]}")
+
+        prompt = f"""Analisis berita saham berikut dan identifikasi berita yang duplikat atau sangat mirip.
+
+Daftar berita:
+{chr(10).join(article_summaries)}
+
+Berikan response dalam format JSON array berisi index berita yang UNIK (tidak duplikat).
+Contoh response: [0, 2, 5, 7]
+
+Hanya berikan JSON array, tanpa penjelasan lain."""
+
+        headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': CLAUDE_API_KEY,
+            'anthropic-version': '2023-06-01'
+        }
+
+        payload = {
+            'model': 'claude-3-haiku-20240307',
+            'max_tokens': 200,
+            'messages': [{'role': 'user', 'content': prompt}]
+        }
+
+        response = requests.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+
+        # Parse response
+        content = result.get('content', [{}])[0].get('text', '[]')
+        # Extract JSON array from response
+        import re
+        match = re.search(r'\[([\d,\s]+)\]', content)
+        if match:
+            unique_indices = json.loads('[' + match.group(1) + ']')
+            unique_articles = [articles[i] for i in unique_indices if i < len(articles)]
+            print(f"[CLAUDE DEDUPE] {len(articles)} -> {len(unique_articles)} articles")
+            return unique_articles if unique_articles else articles
+
+        return articles
+    except Exception as e:
+        print(f"[CLAUDE ERROR] dedupe: {e}")
+        return articles
+
+
+def analyze_sentiment_claude(title, description):
+    """Use Claude for sentiment analysis"""
+    if not CLAUDE_API_KEY:
+        return analyze_sentiment_simple(title, description)
+
+    try:
+        text = f"{title}. {description}"[:500]
+        prompt = f"""Analisis sentiment berita saham berikut dalam 1 kata saja (POSITIF/NEGATIF/NETRAL):
+
+"{text}"
+
+Jawab hanya dengan 1 kata: POSITIF, NEGATIF, atau NETRAL"""
+
+        headers = {
+            'Content-Type': 'application/json',
+            'x-api-key': CLAUDE_API_KEY,
+            'anthropic-version': '2023-06-01'
+        }
+
+        payload = {
+            'model': 'claude-3-haiku-20240307',
+            'max_tokens': 10,
+            'messages': [{'role': 'user', 'content': prompt}]
+        }
+
+        response = requests.post(CLAUDE_API_URL, headers=headers, json=payload, timeout=10)
+        response.raise_for_status()
+        result = response.json()
+
+        content = result.get('content', [{}])[0].get('text', '').upper().strip()
+
+        if 'POSITIF' in content:
+            return {'sentiment': 'POSITIF', 'color': 'success', 'icon': '[+]'}
+        elif 'NEGATIF' in content:
+            return {'sentiment': 'NEGATIF', 'color': 'danger', 'icon': '[-]'}
+        return {'sentiment': 'NETRAL', 'color': 'secondary', 'icon': '[~]'}
+    except Exception as e:
+        print(f"[CLAUDE ERROR] sentiment: {e}")
+        return analyze_sentiment_simple(title, description)
 
 
 def analyze_sentiment_simple(title, description):
@@ -296,22 +447,52 @@ def format_time_ago_str(dt_str):
 
 def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
     stock_code = stock_code.upper()
+
+    # Check database cache first
     if not force_refresh and is_cache_valid_db(stock_code):
         print(f"[CACHE HIT] {stock_code} - loading from database")
         articles = load_from_database(stock_code)
         if articles:
             return articles
-    print(f"[CACHE MISS] {stock_code} - fetching from API")
-    articles = fetch_news_gnews(stock_code, max_results)
-    for article in articles:
-        article.update(analyze_sentiment_simple(article.get('title', ''), article.get('description', '')))
+
+    # Fetch from current API (bergantian jam genap/ganjil)
+    current_api = get_current_api()
+    print(f"[CACHE MISS] {stock_code} - fetching from {current_api}")
+    
+    if current_api == 'marketaux':
+        all_articles = fetch_news_marketaux(stock_code, max_results)
+    else:
+        all_articles = fetch_news_gnews(stock_code, max_results)
+    
+    print(f"[FETCH] {stock_code}: {current_api}={len(all_articles)} articles")
+    
+    # Load existing from DB to combine and dedupe
+    existing = load_from_database(stock_code)
+    if existing:
+        all_articles = all_articles + existing
+        # Deduplicate with Claude
+        if len(all_articles) > 1:
+            all_articles = dedupe_with_claude(all_articles)
+
+    # Add sentiment analysis (use simple for speed, Claude for accuracy on first few)
+    for i, article in enumerate(all_articles):
+        if i < 3 and CLAUDE_API_KEY:  # Claude for top 3 articles
+            article.update(analyze_sentiment_claude(article.get('title', ''), article.get('description', '')))
+        else:
+            article.update(analyze_sentiment_simple(article.get('title', ''), article.get('description', '')))
         article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
-    if articles:
-        save_to_database(stock_code, articles)
+
+    # Limit to max_results
+    all_articles = all_articles[:max_results]
+
+    # Save to database
+    if all_articles:
+        save_to_database(stock_code, all_articles)
     else:
         print(f"[FALLBACK] {stock_code} - loading old data from database")
-        articles = load_from_database(stock_code)
-    return articles
+        all_articles = load_from_database(stock_code)
+
+    return all_articles
 
 
 def get_cache_info(stock_code=None):

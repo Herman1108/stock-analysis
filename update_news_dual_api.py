@@ -1,4 +1,6 @@
-"""
+"""Update news_service.py with dual API + Claude dedupe + 1 hour refresh"""
+
+news_code = '''"""
 News Service - Dual API (GNews + Marketaux) dengan Claude AI Dedupe
 Refresh: Per 1 jam | Cache: PostgreSQL persistent
 """
@@ -26,8 +28,8 @@ CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 DB_LOCK = threading.Lock()
 TABLES_CREATED = False
 
-# Refresh intervals
-# Jam kerja (08-16): 1 jam | Luar jam: 5 jam | Weekend: 6 jam
+# Refresh interval: 1 jam (konsisten)
+REFRESH_INTERVAL_HOURS = 1.0
 
 STOCK_KEYWORDS = {
     'BBCA': ['BBCA', 'Bank Central Asia', 'BCA'],
@@ -110,34 +112,11 @@ def ensure_tables_exist():
 
 
 def get_refresh_interval_hours():
-    now = datetime.now()
-    if now.weekday() >= 5:  # Weekend
-        return 6.0
-    if 8 <= now.hour < 16:  # Jam kerja
-        return 1.0
-    return 5.0  # Luar jam kerja
+    return REFRESH_INTERVAL_HOURS
 
 
 def get_refresh_mode_text():
-    now = datetime.now()
-    if now.weekday() >= 5:
-        return "Weekend (per 6 jam)"
-    elif 8 <= now.hour < 16:
-        return "Jam Kerja (per 1 jam)"
-    return "Luar Jam Kerja (per 5 jam)"
-
-
-def get_current_api():
-    """Jam genap=GNews, Jam ganjil=Marketaux (hanya jam kerja 08-16)"""
-    now = datetime.now()
-    if now.weekday() >= 5:  # Weekend - pakai GNews
-        return 'gnews'
-    if 8 <= now.hour < 16:  # Jam kerja - bergantian
-        if now.hour % 2 == 0:  # Jam genap: 8,10,12,14,16
-            return 'gnews'
-        else:  # Jam ganjil: 9,11,13,15
-            return 'marketaux'
-    return 'gnews'  # Luar jam kerja - pakai GNews
+    return f"Per {REFRESH_INTERVAL_HOURS:.0f} jam"
 
 
 def is_cache_valid_db(stock_code):
@@ -358,7 +337,7 @@ Hanya berikan JSON array, tanpa penjelasan lain."""
         content = result.get('content', [{}])[0].get('text', '[]')
         # Extract JSON array from response
         import re
-        match = re.search(r'\[([\d,\s]+)\]', content)
+        match = re.search(r'\\[([\\d,\\s]+)\\]', content)
         if match:
             unique_indices = json.loads('[' + match.group(1) + ']')
             unique_articles = [articles[i] for i in unique_indices if i < len(articles)]
@@ -455,24 +434,18 @@ def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
         if articles:
             return articles
 
-    # Fetch from current API (bergantian jam genap/ganjil)
-    current_api = get_current_api()
-    print(f"[CACHE MISS] {stock_code} - fetching from {current_api}")
-    
-    if current_api == 'marketaux':
-        all_articles = fetch_news_marketaux(stock_code, max_results)
-    else:
-        all_articles = fetch_news_gnews(stock_code, max_results)
-    
-    print(f"[FETCH] {stock_code}: {current_api}={len(all_articles)} articles")
-    
-    # Load existing from DB to combine and dedupe
-    existing = load_from_database(stock_code)
-    if existing:
-        all_articles = all_articles + existing
-        # Deduplicate with Claude
-        if len(all_articles) > 1:
-            all_articles = dedupe_with_claude(all_articles)
+    # Fetch from both APIs
+    print(f"[CACHE MISS] {stock_code} - fetching from APIs")
+    gnews_articles = fetch_news_gnews(stock_code, max_results // 2 + 2)
+    marketaux_articles = fetch_news_marketaux(stock_code, max_results // 2 + 2)
+
+    # Combine articles
+    all_articles = gnews_articles + marketaux_articles
+    print(f"[FETCH] {stock_code}: GNews={len(gnews_articles)}, Marketaux={len(marketaux_articles)}")
+
+    # Deduplicate with Claude
+    if len(all_articles) > 1:
+        all_articles = dedupe_with_claude(all_articles)
 
     # Add sentiment analysis (use simple for speed, Claude for accuracy on first few)
     for i, article in enumerate(all_articles):
@@ -561,3 +534,12 @@ def get_all_stocks_news(stock_codes, max_per_stock=3):
         if news:
             all_news[code] = news
     return all_news
+'''
+
+with open('dashboard/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_code)
+
+with open('app/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_code)
+
+print("News service updated with dual API + Claude dedupe + 1 hour refresh!")
