@@ -2732,26 +2732,36 @@ def create_landing_page(is_admin: bool = False):
             overall_signal = summary.get('overall_signal', 'NETRAL')
             signal_color = "success" if overall_signal == 'AKUMULASI' else "danger" if overall_signal == 'DISTRIBUSI' else "secondary"
 
-            # Create card with unified analysis
+            # Get broker statistics for display
+            broker_df = get_broker_data(stock_code)
+            total_brokers = len(broker_df['broker'].unique()) if not broker_df.empty and 'broker' in broker_df.columns else 0
+            avg_volume = price_df['volume'].mean() if not price_df.empty and 'volume' in price_df.columns else 0
+            data_days = len(price_df) if not price_df.empty else 0
+
+            # Get high/low for range info
+            high_52w = price_df['high'].max() if not price_df.empty and 'high' in price_df.columns else 0
+            low_52w = price_df['low'].min() if not price_df.empty and 'low' in price_df.columns else 0
+
+            # Create TEASER card - interesting info but no trading signals
             card = dbc.Col([
                 dbc.Card([
-                    # Header with Decision Action
+                    # Header - Stock name with Premium badge (no signal)
                     dbc.CardHeader([
                         html.Div([
                             html.H3(stock_code, className="mb-0 d-inline fw-bold"),
                             dbc.Badge([
-                                html.Span(action_icon, className="me-1"),
-                                action
-                            ], color=action_color, className="ms-2 fs-6 px-3 py-2")
+                                html.I(className="fas fa-crown me-1"),
+                                "Premium"
+                            ], color="warning", className="ms-2 fs-6 px-3 py-2")
                         ], className="d-flex align-items-center justify-content-between")
-                    ], className="bg-dark", style={"borderBottom": f"3px solid var(--bs-{action_color})"}),
+                    ], className="bg-dark", style={"borderBottom": "3px solid var(--bs-warning)"}),
 
                     dbc.CardBody([
-                        # Price & Change Row
+                        # Price & Change Row (public info)
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Harga Saat Ini", className="text-muted d-block"),
+                                    html.Small("Harga Terakhir", className="text-muted d-block"),
                                     html.H4(f"Rp {current_price:,.0f}", className="mb-0 text-warning"),
                                 ], className="text-center")
                             ], width=6),
@@ -2766,117 +2776,80 @@ def create_landing_page(is_admin: bool = False):
                             ], width=6),
                         ], className="mb-3"),
 
-                        # Markup Trigger Alert (if detected)
-                        html.Div([
-                            dbc.Badge([
-                                html.Span("[FIRE]", className="me-1"),
-                                "MARKUP TRIGGER!"
-                            ], color="warning", className="w-100 py-2 mb-2")
-                        ]) if markup_trigger.get('markup_triggered') else html.Div(),
-
                         html.Hr(className="my-2"),
 
-                        # 3 Submenu Summary Row
-                        html.H6("Ringkasan 3 Analisis", className="text-muted small mb-2 text-center"),
+                        # Market Statistics (interesting but not signals)
+                        html.H6([
+                            html.I(className="fas fa-chart-bar me-2 text-info"),
+                            "Statistik Pasar"
+                        ], className="text-muted small mb-2"),
                         dbc.Row([
-                            # Fundamental
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Fundamental", className="text-success d-block"),
-                                    html.Div([
-                                        html.Span(f"PER {fundamental.get('per', 0):.1f}x" if fundamental.get('has_data') else "N/A",
-                                                  className="small"),
-                                    ]),
-                                    dbc.Badge(fundamental.get('valuation', 'N/A'),
-                                              color=fundamental.get('valuation_color', 'secondary'),
-                                              className="mt-1", style={"fontSize": "10px"})
+                                    html.Small("Broker Aktif", className="text-muted d-block"),
+                                    html.Strong(f"{total_brokers}", className="text-info"),
                                 ], className="text-center")
                             ], width=4),
-
-                            # Support & Resistance
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Posisi Harga", className="text-info d-block"),
-                                    html.Div([
-                                        html.Span(
-                                            "Dekat Support" if sr.get('position') == 'NEAR_SUPPORT'
-                                            else "Dekat Resist" if sr.get('position') == 'NEAR_RESISTANCE'
-                                            else "Di Tengah" if sr.get('has_data') else "N/A",
-                                            className="small"
-                                        ),
-                                    ]),
-                                    dbc.Badge(
-                                        f"{sr.get('dist_from_support', 0):.0f}% dari support" if sr.get('has_data') else "N/A",
-                                        color="success" if sr.get('position') == 'NEAR_SUPPORT' else "danger" if sr.get('position') == 'NEAR_RESISTANCE' else "secondary",
-                                        className="mt-1", style={"fontSize": "10px"}
-                                    )
+                                    html.Small("Avg Volume", className="text-muted d-block"),
+                                    html.Strong(f"{avg_volume/1e6:.1f}M" if avg_volume >= 1e6 else f"{avg_volume/1e3:.0f}K" if avg_volume >= 1e3 else "N/A", className="text-info"),
                                 ], className="text-center")
                             ], width=4),
-
-                            # Accumulation / Momentum Engine
                             dbc.Col([
                                 html.Div([
-                                    # Show which engine detected signal
-                                    html.Small(
-                                        "[!] Momentum" if impulse_signal.get('impulse_detected') 
-                                        else "[#] Akumulasi",
-                                        className=f"{'text-danger' if impulse_signal.get('impulse_detected') else 'text-warning'} d-block fw-bold"
-                                    ),
-                                    dbc.Badge(
-                                        impulse_signal.get('strength', 'IMPULSE') if impulse_signal.get('impulse_detected')
-                                        else overall_signal,
-                                        color="danger" if impulse_signal.get('impulse_detected') else signal_color,
-                                        className="mb-1"
-                                    ),
-                                    html.Div([
-                                        html.Span(
-                                            f"Vol {impulse_signal.get('metrics', {}).get('volume_ratio', 0):.1f}x" if impulse_signal.get('impulse_detected')
-                                            else f"{confidence.get('passed', 0)}/6 Valid",
-                                            className="small text-muted"
-                                        ),
-                                    ]),
+                                    html.Small("Data Hari", className="text-muted d-block"),
+                                    html.Strong(f"{data_days}", className="text-info"),
                                 ], className="text-center")
                             ], width=4),
                         ], className="mb-3"),
 
                         html.Hr(className="my-2"),
 
-                        # Entry Zone & Invalidation
-                        html.Div([
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Small("Entry Zone", className="text-success d-block"),
-                                    html.Strong(f"{entry_zone.get('low', 0):,.0f}-{entry_zone.get('high', 0):,.0f}" if entry_zone else "N/A", className="small")
-                                ], width=6, className="text-center"),
-                                dbc.Col([
-                                    html.Small("Invalidation", className="text-danger d-block"),
-                                    html.Strong(f"< {invalidation:,.0f}" if invalidation else "N/A", className="small")
-                                ], width=6, className="text-center"),
-                            ])
-                        ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
-
-                        # Decision Reason
-                        html.Div([
-                            html.Small([
-                                html.I(className=f"fas fa-{'bolt text-danger' if action in ['MASUK_MOMENTUM', 'PANTAU_BREAKOUT'] else 'check-circle text-success' if action in ['ENTRY', 'ADD'] else 'exclamation-circle text-warning' if action in ['WAIT', 'TUNGGU', 'SIAGA'] else 'times-circle text-danger'} me-2"),
-                                decision.get('description', '')[:60] + "..." if len(decision.get('description', '')) > 60 else decision.get('description', '')
-                            ], className="text-muted")
+                        # Price Range Info (public market data)
+                        html.H6([
+                            html.I(className="fas fa-arrows-alt-v me-2 text-success"),
+                            "Range Harga"
+                        ], className="text-muted small mb-2"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Tertinggi", className="text-muted d-block"),
+                                    html.Strong(f"Rp {high_52w:,.0f}" if high_52w else "N/A", className="text-success small"),
+                                ], className="text-center")
+                            ], width=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("Terendah", className="text-muted d-block"),
+                                    html.Strong(f"Rp {low_52w:,.0f}" if low_52w else "N/A", className="text-danger small"),
+                                ], className="text-center")
+                            ], width=6),
                         ], className="mb-3"),
 
-                        # Action Buttons
+                        html.Hr(className="my-2"),
+
+                        # CTA Message
+                        html.Div([
+                            html.P([
+                                html.I(className="fas fa-lock me-2"),
+                                "Analisis lengkap tersedia untuk member"
+                            ], className="text-center text-muted small mb-2"),
+                        ]),
+
+                        # Action Buttons - Signup CTA
                         html.Div([
                             dbc.Button([
-                                html.I(className="fas fa-chart-pie me-1"),
-                                "Analysis"
-                            ], href=f"/analysis?stock={stock_code}", color=action_color, size="sm", className="me-1 flex-grow-1"),
+                                html.I(className="fas fa-user-plus me-1"),
+                                "Daftar Gratis"
+                            ], href="/signup", color="warning", size="sm", className="me-1 flex-grow-1"),
                             dbc.Button([
-                                html.I(className="fas fa-chart-line me-1"),
-                                "Dashboard"
-                            ], href=f"/dashboard?stock={stock_code}", color="outline-light", size="sm", className="flex-grow-1"),
+                                html.I(className="fas fa-sign-in-alt me-1"),
+                                "Login"
+                            ], href="/login", color="outline-light", size="sm", className="flex-grow-1"),
                         ], className="d-flex")
                     ])
                 ], className="h-100 shadow", color="dark", outline=True,
-                   style={"borderColor": f"var(--bs-{action_color})", "borderWidth": "2px"})
+                   style={"borderColor": "var(--bs-warning)", "borderWidth": "2px"})
             ], md=6, lg=4, className="mb-4 stock-card", id=f"stock-card-{stock_code}")
 
             stock_cards.append(card)
