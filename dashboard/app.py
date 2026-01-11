@@ -2900,12 +2900,21 @@ def create_landing_page(is_admin: bool = False):
             html.Div([
                 html.H1([
                     html.I(className="fas fa-chart-bar me-3"),
-                    "Stock Broker Analysis"
+                    "HermanStock Analytics"
                 ], className="display-5 text-center mb-3"),
                 html.P(
-                    "Analisis terintegrasi: Fundamental, Support/Resistance, dan Akumulasi untuk keputusan trading optimal",
-                    className="lead text-center text-muted mb-4"
+                    "Platform analisis saham dengan metode Wyckoff & Bandarmology",
+                    className="lead text-center text-muted mb-3"
                 ),
+                html.Div([
+                    dbc.Badge([html.I(className="fas fa-robot me-1"), "AI-Powered"], color="info", className="me-2"),
+                    dbc.Badge([html.I(className="fas fa-chart-line me-1"), "Real-time Data"], color="success", className="me-2"),
+                    dbc.Badge([html.I(className="fas fa-users me-1"), "Broker Flow"], color="warning"),
+                ], className="text-center mb-3"),
+                html.P([
+                    html.I(className="fas fa-star text-warning me-2"),
+                    "Daftar GRATIS untuk akses analisis lengkap, sinyal trading, dan rekomendasi entry"
+                ], className="text-center text-info small"),
                 html.Hr(className="my-4"),
             ], className="py-4")
         ]),
@@ -2931,30 +2940,62 @@ def create_landing_page(is_admin: bool = False):
                             ),
                         ], size="sm"),
                     ], className="me-3"),
-                    # Legend
+                    # Info badge
                     html.Div([
-                        dbc.Badge("[G] ENTRY/ADD", color="success", className="me-1 small"),
-                        dbc.Badge("[Y] WAIT/HOLD", color="warning", className="me-1 small"),
-                        dbc.Badge("[R] EXIT", color="danger", className="small"),
+                        dbc.Badge([html.I(className="fas fa-lock me-1"), "Data Premium"], color="info", className="me-1 small"),
+                        dbc.Badge([html.I(className="fas fa-unlock me-1"), "Signup untuk akses"], color="warning", className="small"),
                     ], className="d-inline-block")
                 ], className="d-flex align-items-center flex-wrap gap-2"),
             ], className="mb-4"),
 
             dbc.Row(stock_cards),
 
-            # Quick Links
+            # CTA Section - Why Sign Up
             html.Hr(className="my-4"),
-            dbc.Row([
-                dbc.Col([
-                    dbc.Card([
-                        dbc.CardBody([
-                            html.H5([html.I(className="fas fa-upload me-2"), "Upload Data"], className="mb-2"),
-                            html.P("Import data broker summary dari file Excel", className="text-muted small mb-2"),
-                            dbc.Button("Upload", href="/upload", color="outline-light", size="sm")
-                        ])
-                    ], color="secondary")
-                ], md=12),
-            ], className="mb-4")
+            dbc.Card([
+                dbc.CardBody([
+                    html.H4([
+                        html.I(className="fas fa-gift me-2 text-warning"),
+                        "Keuntungan Member"
+                    ], className="text-center mb-4"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Div([
+                                html.I(className="fas fa-signal fa-2x text-success mb-2"),
+                                html.H6("Sinyal Trading", className="mb-1"),
+                                html.Small("BUY/SELL/HOLD recommendations", className="text-muted")
+                            ], className="text-center p-3")
+                        ], md=3),
+                        dbc.Col([
+                            html.Div([
+                                html.I(className="fas fa-crosshairs fa-2x text-info mb-2"),
+                                html.H6("Entry & Exit Zone", className="mb-1"),
+                                html.Small("Level harga optimal untuk trading", className="text-muted")
+                            ], className="text-center p-3")
+                        ], md=3),
+                        dbc.Col([
+                            html.Div([
+                                html.I(className="fas fa-users fa-2x text-warning mb-2"),
+                                html.H6("Broker Flow", className="mb-1"),
+                                html.Small("Pantau pergerakan smart money", className="text-muted")
+                            ], className="text-center p-3")
+                        ], md=3),
+                        dbc.Col([
+                            html.Div([
+                                html.I(className="fas fa-bell fa-2x text-danger mb-2"),
+                                html.H6("Alert System", className="mb-1"),
+                                html.Small("Notifikasi sinyal penting", className="text-muted")
+                            ], className="text-center p-3")
+                        ], md=3),
+                    ], className="mb-4"),
+                    html.Div([
+                        dbc.Button([
+                            html.I(className="fas fa-user-plus me-2"),
+                            "Daftar Sekarang - GRATIS!"
+                        ], href="/signup", color="warning", size="lg", className="px-5")
+                    ], className="text-center")
+                ])
+            ], className="mb-4", style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)", "border": "2px solid var(--bs-warning)"})
         ], fluid=True)
     ])
 
