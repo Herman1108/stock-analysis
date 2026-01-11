@@ -1,5 +1,6 @@
 """
-News Service - Dual API (GNews + Marketaux) dengan Claude AI Dedupe
+News Service - Dual GNews API dengan Claude AI Dedupe
+Account 1: Jam genap (8,10,12,14,16) | Account 2: Jam ganjil + weekend + luar jam kerja
 Refresh: Per 1 jam | Cache: PostgreSQL persistent
 """
 
@@ -13,14 +14,13 @@ import json
 from dotenv import load_dotenv
 load_dotenv()
 
-# API Keys
-GNEWS_API_KEY = os.getenv('GNEWS_API_KEY')
-MARKETAUX_API_KEY = os.getenv('MARKETAUX_API_KEY')
+# API Keys - Dual GNews Accounts
+GNEWS_API_KEY = os.getenv('GNEWS_API_KEY')      # Account 1 - jam genap
+GNEWS_API_KEY_2 = os.getenv('GNEWS_API_KEY_2')  # Account 2 - jam ganjil/weekend/luar jam
 CLAUDE_API_KEY = os.getenv('CLAUDE_API_KEY')
 
 # API URLs
 GNEWS_BASE_URL = "https://gnews.io/api/v4/search"
-MARKETAUX_BASE_URL = "https://api.marketaux.com/v1/news/all"
 CLAUDE_API_URL = "https://api.anthropic.com/v1/messages"
 
 DB_LOCK = threading.Lock()
@@ -128,36 +128,47 @@ def get_refresh_mode_text():
 
 
 def get_current_api():
-    """Jam genap=GNews, Jam ganjil=Marketaux (hanya jam kerja 08-16)"""
+    """Jam genap=GNews1, Jam ganjil=GNews2 (jam kerja 08-16), Luar jam=GNews2"""
     now = datetime.now()
-    if now.weekday() >= 5:  # Weekend - pakai Marketaux (hemat GNews)
-        return 'marketaux'
+    if now.weekday() >= 5:  # Weekend - pakai GNews Account 2
+        return 'gnews2'
     if 8 <= now.hour < 16:  # Jam kerja - bergantian
         if now.hour % 2 == 0:  # Jam genap: 8,10,12,14,16
-            return 'gnews'
+            return 'gnews1'
         else:  # Jam ganjil: 9,11,13,15
-            return 'marketaux'
-    return 'marketaux'  # Luar jam kerja - pakai Marketaux (hemat GNews)
+            return 'gnews2'
+    return 'gnews2'  # Luar jam kerja - pakai GNews Account 2
 
 
 def is_cache_valid_db(stock_code):
+    """Check if cache is still valid based on refresh interval."""
     ensure_tables_exist()
     cursor = get_db_cursor()
     if not cursor:
         return False
     try:
-        cursor.execute("SELECT last_fetch FROM news_fetch_log WHERE stock_code = %s", (stock_code.upper(),))
+        # Use database NOW() to avoid timezone mismatch
+        refresh_interval = get_refresh_interval_hours()
+        cursor.execute("""
+            SELECT last_fetch,
+                   EXTRACT(EPOCH FROM (NOW() - last_fetch)) as age_seconds
+            FROM news_fetch_log WHERE stock_code = %s
+        """, (stock_code.upper(),))
         result = cursor.fetchone()
         cursor.close()
         if not result:
+            print(f"[CACHE] {stock_code}: No cache record found")
             return False
-        last_fetch = result[0] if isinstance(result, tuple) else result.get('last_fetch')
-        if not last_fetch:
+
+        age_seconds = result[1] if isinstance(result, tuple) else result.get('age_seconds')
+        if age_seconds is None:
             return False
-        if last_fetch.tzinfo:
-            last_fetch = last_fetch.replace(tzinfo=None)
-        age = datetime.now() - last_fetch
-        return age.total_seconds() < (REFRESH_INTERVAL_HOURS * 3600)
+
+        max_age = refresh_interval * 3600
+        is_valid = age_seconds < max_age
+
+        print(f"[CACHE] {stock_code}: age={int(age_seconds)}s, max={int(max_age)}s, valid={is_valid}")
+        return is_valid
     except Exception as e:
         print(f"[DB ERROR] is_cache_valid_db: {e}")
         return False
@@ -189,15 +200,16 @@ def get_cache_age_text(stock_code):
         return "Error"
 
 
-def load_from_database(stock_code):
+def load_from_database(stock_code, limit=20):
+    """Load news from database. Default limit 20 rows."""
     cursor = get_db_cursor()
     if not cursor:
         return []
     try:
         cursor.execute("""
             SELECT title, description, url, source, published_at, sentiment, color, icon, api_source
-            FROM news_cache WHERE stock_code = %s ORDER BY published_at DESC LIMIT 15
-        """, (stock_code.upper(),))
+            FROM news_cache WHERE stock_code = %s ORDER BY published_at DESC LIMIT %s
+        """, (stock_code.upper(), limit))
         rows = cursor.fetchall()
         cursor.close()
         articles = []
@@ -262,56 +274,37 @@ def get_stock_keywords(stock_code):
     return keywords
 
 
-def fetch_news_gnews(stock_code, max_results=10):
-    if not GNEWS_API_KEY:
+def fetch_news_gnews(stock_code, max_results=10, use_account=1):
+    """Fetch news from GNews API. use_account: 1 or 2"""
+    api_key = GNEWS_API_KEY if use_account == 1 else GNEWS_API_KEY_2
+    if not api_key:
+        print(f"[GNEWS{use_account}] API key not configured")
         return []
     keywords = get_stock_keywords(stock_code)
     query = ' OR '.join([f'"{kw}"' for kw in keywords[:2]])
     date_from = (datetime.now() - timedelta(days=14)).strftime('%Y-%m-%dT00:00:00Z')
     params = {'q': query, 'lang': 'id', 'country': 'id', 'max': max_results,
-              'apikey': GNEWS_API_KEY, 'sortby': 'publishedAt', 'from': date_from}
+              'apikey': api_key, 'sortby': 'publishedAt', 'from': date_from}
     try:
         response = requests.get(GNEWS_BASE_URL, params=params, timeout=10)
         response.raise_for_status()
         data = response.json()
         if 'errors' in data:
-            print(f"[GNEWS ERROR] {stock_code}: {data['errors']}")
+            print(f"[GNEWS{use_account} ERROR] {stock_code}: {data['errors']}")
             return []
         articles = data.get('articles', [])
         return [{'title': a.get('title', ''), 'description': a.get('description', ''),
                  'url': a.get('url', ''), 'source': a.get('source', {}).get('name', 'Unknown'),
                  'published_at': a.get('publishedAt', ''), 'stock_code': stock_code,
-                 'api_source': 'gnews'} for a in articles]
-    except Exception as e:
-        print(f"[GNEWS ERROR] {stock_code}: {e}")
+                 'api_source': f'gnews{use_account}'} for a in articles]
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 403:
+            print(f"[GNEWS{use_account} LIMIT] {stock_code}: API limit reached")
+        else:
+            print(f"[GNEWS{use_account} ERROR] {stock_code}: {e}")
         return []
-
-
-def fetch_news_marketaux(stock_code, max_results=10):
-    if not MARKETAUX_API_KEY:
-        return []
-    keywords = get_stock_keywords(stock_code)
-    search_query = ','.join(keywords[:2])
-    # Note: Marketaux free tier tidak punya berita Indonesia terbaru
-    params = {
-        'api_token': MARKETAUX_API_KEY,
-        'search': search_query,
-        'limit': max_results
-    }
-    try:
-        response = requests.get(MARKETAUX_BASE_URL, params=params, timeout=10)
-        response.raise_for_status()
-        data = response.json()
-        if 'error' in data:
-            print(f"[MARKETAUX ERROR] {stock_code}: {data['error']}")
-            return []
-        articles = data.get('data', [])
-        return [{'title': a.get('title', ''), 'description': a.get('description', ''),
-                 'url': a.get('url', ''), 'source': a.get('source', 'Marketaux'),
-                 'published_at': a.get('published_at', ''), 'stock_code': stock_code,
-                 'api_source': 'marketaux'} for a in articles]
     except Exception as e:
-        print(f"[MARKETAUX ERROR] {stock_code}: {e}")
+        print(f"[GNEWS{use_account} ERROR] {stock_code}: {e}")
         return []
 
 
@@ -443,58 +436,71 @@ def format_time_ago_str(dt_str):
         return str(dt_str)[:10] if dt_str else ""
 
 
-def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
+def get_news_with_sentiment(stock_code, max_results=20, force_refresh=False):
+    """
+    Fetch news with sentiment. max_results default 20.
+    News baru diletakkan di atas, news lama tetap ditampilkan.
+    """
     stock_code = stock_code.upper()
 
     # Check database cache first
     if not force_refresh and is_cache_valid_db(stock_code):
         print(f"[CACHE HIT] {stock_code} - loading from database")
-        articles = load_from_database(stock_code)
+        articles = load_from_database(stock_code, limit=max_results)
         if articles:
             return articles
 
     # Fetch from current API with fallback
     current_api = get_current_api()
-    print(f"[CACHE MISS] {stock_code} - fetching from {current_api}")
-    
-    if current_api == 'marketaux':
-        all_articles = fetch_news_marketaux(stock_code, max_results)
-        if not all_articles:  # Fallback to GNews
-            print(f"[FALLBACK] {stock_code} - trying gnews")
-            all_articles = fetch_news_gnews(stock_code, max_results)
-    else:
-        all_articles = fetch_news_gnews(stock_code, max_results)
-        if not all_articles:  # Fallback to Marketaux
-            print(f"[FALLBACK] {stock_code} - trying marketaux")
-            all_articles = fetch_news_marketaux(stock_code, max_results)
-    
-    print(f"[FETCH] {stock_code}: {len(all_articles)} articles")
-    
-    # Load existing from DB to combine and dedupe
-    existing = load_from_database(stock_code)
+    use_account = 1 if current_api == 'gnews1' else 2
+    print(f"[CACHE MISS] {stock_code} - fetching from GNews Account {use_account}")
+
+    new_articles = fetch_news_gnews(stock_code, max_results=10, use_account=use_account)
+
+    # Fallback to other account if failed
+    if not new_articles:
+        fallback_account = 2 if use_account == 1 else 1
+        print(f"[FALLBACK] {stock_code} - trying GNews Account {fallback_account}")
+        new_articles = fetch_news_gnews(stock_code, max_results=10, use_account=fallback_account)
+
+    print(f"[FETCH] {stock_code}: {len(new_articles)} new articles")
+
+    # Load existing from DB to combine (news lama tetap ditampilkan)
+    existing = load_from_database(stock_code, limit=50)  # Load more for deduplication
+
+    # Combine: new articles first, then existing
     if existing:
-        all_articles = all_articles + existing
-        # Deduplicate with Claude
-        if len(all_articles) > 1:
-            all_articles = dedupe_with_claude(all_articles)
+        # Get URLs of new articles to avoid duplicates
+        new_urls = {a.get('url') for a in new_articles}
+        # Filter existing that are not in new
+        existing_unique = [a for a in existing if a.get('url') not in new_urls]
+        all_articles = new_articles + existing_unique
+    else:
+        all_articles = new_articles
+
+    # Deduplicate with Claude if too many
+    if len(all_articles) > 25:
+        all_articles = dedupe_with_claude(all_articles)
 
     # Add sentiment analysis (use simple for speed, Claude for accuracy on first few)
     for i, article in enumerate(all_articles):
-        if i < 3 and CLAUDE_API_KEY:  # Claude for top 3 articles
-            article.update(analyze_sentiment_claude(article.get('title', ''), article.get('description', '')))
-        else:
-            article.update(analyze_sentiment_simple(article.get('title', ''), article.get('description', '')))
+        # Only analyze sentiment for new articles (no sentiment yet)
+        if not article.get('sentiment'):
+            if i < 3 and CLAUDE_API_KEY:  # Claude for top 3 new articles
+                article.update(analyze_sentiment_claude(article.get('title', ''), article.get('description', '')))
+            else:
+                article.update(analyze_sentiment_simple(article.get('title', ''), article.get('description', '')))
         article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
 
-    # Limit to max_results
+    # Keep up to max_results (default 20)
     all_articles = all_articles[:max_results]
 
-    # Save to database
+    # Save all to database (news lama + baru)
     if all_articles:
         save_to_database(stock_code, all_articles)
     else:
         print(f"[FALLBACK] {stock_code} - loading old data from database")
-        all_articles = load_from_database(stock_code)
+        all_articles = load_from_database(stock_code, limit=max_results)
 
     return all_articles
 
@@ -528,20 +534,42 @@ def get_cache_info(stock_code=None):
 
 
 def get_latest_news_summary(stock_codes, max_total=10):
+    """
+    Berita Terbaru Semua Emiten:
+    - Jam kerja (08-16): tampilkan berita 2 jam terakhir (2 siklus refresh)
+    - Luar jam kerja/weekend: tampilkan sampai refresh berikutnya
+    """
     for code in stock_codes:
         if not is_cache_valid_db(code):
-            get_news_with_sentiment(code, max_results=10)
+            get_news_with_sentiment(code, max_results=20)
+
     cursor = get_db_cursor()
     if not cursor:
         return []
+
     try:
+        now = datetime.now()
         placeholders = ','.join(['%s'] * len(stock_codes))
+
+        # Determine time filter based on work hours
+        if now.weekday() < 5 and 8 <= now.hour < 16:
+            # Jam kerja: tampilkan berita 2 jam terakhir (2 siklus)
+            time_filter = "AND fetched_at > NOW() - INTERVAL '2 hours'"
+        else:
+            # Luar jam kerja/weekend: tampilkan sampai refresh berikutnya
+            # Calculate next refresh interval
+            interval = get_refresh_interval_hours()
+            time_filter = f"AND fetched_at > NOW() - INTERVAL '{int(interval)} hours'"
+
         cursor.execute(f"""
             SELECT stock_code, title, description, url, source, published_at, sentiment, color, icon
-            FROM news_cache WHERE stock_code IN ({placeholders}) ORDER BY published_at DESC LIMIT %s
+            FROM news_cache
+            WHERE stock_code IN ({placeholders}) {time_filter}
+            ORDER BY published_at DESC LIMIT %s
         """, (*[c.upper() for c in stock_codes], max_total))
         rows = cursor.fetchall()
         cursor.close()
+
         articles = []
         for row in rows:
             if isinstance(row, dict):
@@ -552,6 +580,28 @@ def get_latest_news_summary(stock_codes, max_total=10):
                            'sentiment': row[6], 'color': row[7], 'icon': row[8]}
             article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
             articles.append(article)
+
+        # If no recent news, load from cache anyway
+        if not articles:
+            cursor = get_db_cursor()
+            if cursor:
+                cursor.execute(f"""
+                    SELECT stock_code, title, description, url, source, published_at, sentiment, color, icon
+                    FROM news_cache WHERE stock_code IN ({placeholders})
+                    ORDER BY published_at DESC LIMIT %s
+                """, (*[c.upper() for c in stock_codes], max_total))
+                rows = cursor.fetchall()
+                cursor.close()
+                for row in rows:
+                    if isinstance(row, dict):
+                        article = dict(row)
+                    else:
+                        article = {'stock_code': row[0], 'title': row[1], 'description': row[2], 'url': row[3],
+                                   'source': row[4], 'published_at': row[5].isoformat() if row[5] else '',
+                                   'sentiment': row[6], 'color': row[7], 'icon': row[8]}
+                    article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
+                    articles.append(article)
+
         return articles
     except Exception as e:
         print(f"[DB ERROR] get_latest_news_summary: {e}")
