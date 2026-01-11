@@ -130,14 +130,14 @@ def get_refresh_mode_text():
 def get_current_api():
     """Jam genap=GNews, Jam ganjil=Marketaux (hanya jam kerja 08-16)"""
     now = datetime.now()
-    if now.weekday() >= 5:  # Weekend - pakai GNews
-        return 'gnews'
+    if now.weekday() >= 5:  # Weekend - pakai Marketaux (hemat GNews)
+        return 'marketaux'
     if 8 <= now.hour < 16:  # Jam kerja - bergantian
         if now.hour % 2 == 0:  # Jam genap: 8,10,12,14,16
             return 'gnews'
         else:  # Jam ganjil: 9,11,13,15
             return 'marketaux'
-    return 'gnews'  # Luar jam kerja - pakai GNews
+    return 'marketaux'  # Luar jam kerja - pakai Marketaux (hemat GNews)
 
 
 def is_cache_valid_db(stock_code):
@@ -455,16 +455,22 @@ def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
         if articles:
             return articles
 
-    # Fetch from current API (bergantian jam genap/ganjil)
+    # Fetch from current API with fallback
     current_api = get_current_api()
     print(f"[CACHE MISS] {stock_code} - fetching from {current_api}")
     
     if current_api == 'marketaux':
         all_articles = fetch_news_marketaux(stock_code, max_results)
+        if not all_articles:  # Fallback to GNews
+            print(f"[FALLBACK] {stock_code} - trying gnews")
+            all_articles = fetch_news_gnews(stock_code, max_results)
     else:
         all_articles = fetch_news_gnews(stock_code, max_results)
+        if not all_articles:  # Fallback to Marketaux
+            print(f"[FALLBACK] {stock_code} - trying marketaux")
+            all_articles = fetch_news_marketaux(stock_code, max_results)
     
-    print(f"[FETCH] {stock_code}: {current_api}={len(all_articles)} articles")
+    print(f"[FETCH] {stock_code}: {len(all_articles)} articles")
     
     # Load existing from DB to combine and dedupe
     existing = load_from_database(stock_code)
