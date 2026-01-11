@@ -46,11 +46,11 @@ STOCK_KEYWORDS = {
     'UNTR': ['UNTR', 'United Tractors'],
     'JSMR': ['JSMR', 'Jasa Marga'],
     'WIKA': ['WIKA', 'Wijaya Karya'],
-    'PANI': ['PANI', 'Pantai Indah'],
-    'BREN': ['BREN', 'Barito Renewables'],
-    'CUAN': ['CUAN', 'Petrindo Jaya'],
-    'DSSA': ['DSSA', 'Dian Swastatika'],
-    'AMMN': ['AMMN', 'Amman Mineral'],
+    'PANI': ['Pantai Indah Kapuk', 'PANI saham'],
+    'BREN': ['Barito Renewables', 'BREN saham'],
+    'CUAN': ['Petrindo Jaya', 'CUAN saham'],
+    'DSSA': ['Dian Swastatika', 'DSSA saham'],
+    'AMMN': ['Amman Mineral', 'AMMN saham'],
 }
 
 

@@ -1,4 +1,6 @@
-"""
+"""Update news_service.py with smart caching"""
+
+news_service_code = '''"""
 News Service - GNews API dengan Smart Caching
 Jam kerja (08-16): 2 jam | Luar jam: 5 jam | Weekend: 6 jam
 """
@@ -27,30 +29,12 @@ STOCK_KEYWORDS = {
     'BBNI': ['BBNI', 'Bank BNI'],
     'TLKM': ['TLKM', 'Telkom'],
     'ASII': ['ASII', 'Astra'],
-    'UNVR': ['UNVR', 'Unilever Indonesia'],
-    'HMSP': ['HMSP', 'Sampoerna'],
-    'GGRM': ['GGRM', 'Gudang Garam'],
-    'ICBP': ['ICBP', 'Indofood CBP'],
-    'INDF': ['INDF', 'Indofood'],
-    'KLBF': ['KLBF', 'Kalbe Farma'],
-    'PGAS': ['PGAS', 'PGN'],
-    'PTBA': ['PTBA', 'Bukit Asam'],
-    'ADRO': ['ADRO', 'Adaro'],
-    'ANTM': ['ANTM', 'Antam'],
-    'INCO': ['INCO', 'Vale Indonesia'],
-    'CPIN': ['CPIN', 'Charoen Pokphand'],
-    'EXCL': ['EXCL', 'XL Axiata'],
-    'ISAT': ['ISAT', 'Indosat'],
-    'SMGR': ['SMGR', 'Semen Indonesia'],
-    'INTP': ['INTP', 'Indocement'],
-    'UNTR': ['UNTR', 'United Tractors'],
-    'JSMR': ['JSMR', 'Jasa Marga'],
-    'WIKA': ['WIKA', 'Wijaya Karya'],
-    'PANI': ['Pantai Indah Kapuk', 'PANI saham'],
-    'BREN': ['Barito Renewables', 'BREN saham'],
-    'CUAN': ['Petrindo Jaya', 'CUAN saham'],
-    'DSSA': ['Dian Swastatika', 'DSSA saham'],
-    'AMMN': ['Amman Mineral', 'AMMN saham'],
+    'PANI': ['PANI', 'Pratama Abadi'],
+    'BREN': ['BREN', 'Barito Renewables'],
+    'CDIA': ['CDIA', 'Cisarua'],
+    'PTRO': ['PTRO', 'Petrosea'],
+    'FUTR': ['FUTR', 'Future'],
+    'CBDK': ['CBDK', 'Citra Borneo'],
 }
 
 
@@ -209,12 +193,13 @@ def get_latest_news_summary(stock_codes, max_total=10):
             all_articles.extend(NEWS_CACHE[code.upper()].get('articles', [])[:2])
     all_articles.sort(key=lambda x: x.get('published_at', ''), reverse=True)
     return all_articles[:max_total]
+'''
 
-def get_all_stocks_news(stock_codes, max_per_stock=3):
-    """Get news for multiple stocks"""
-    all_news = {}
-    for code in stock_codes:
-        news = get_news_with_sentiment(code, max_per_stock)
-        if news:
-            all_news[code] = news
-    return all_news
+with open('dashboard/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_service_code)
+
+# Also copy to app directory
+with open('app/news_service.py', 'w', encoding='utf-8') as f:
+    f.write(news_service_code)
+
+print("News service updated with smart caching!")
