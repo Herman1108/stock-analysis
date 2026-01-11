@@ -185,9 +185,13 @@ def get_news_with_sentiment(stock_code, max_results=15, force_refresh=False):
         except:
             article['published_formatted'] = article.get('published_at', '')[:10]
 
-    with CACHE_LOCK:
-        NEWS_CACHE[stock_code] = {'articles': articles, 'timestamp': datetime.now()}
-        LAST_REFRESH_TIME = datetime.now()
+    # Only cache if we got results (don't cache empty due to API limit)
+    if articles:
+        with CACHE_LOCK:
+            NEWS_CACHE[stock_code] = {'articles': articles, 'timestamp': datetime.now()}
+            LAST_REFRESH_TIME = datetime.now()
+    else:
+        print(f'[CACHE SKIP] {stock_code} - no articles found')
 
     return articles
 
