@@ -69,12 +69,33 @@ STOCK_KEYWORDS = {
 }
 
 
-def get_db_cursor():
+def get_db_connection():
+    """Get direct database connection using DATABASE_URL"""
     try:
-        from database import get_cursor
-        return get_cursor()
+        import psycopg2
+        database_url = os.getenv('DATABASE_URL')
+        if not database_url:
+            print("[DB ERROR] DATABASE_URL not set")
+            return None
+        conn = psycopg2.connect(database_url)
+        return conn
     except Exception as e:
         print(f"[DB ERROR] Cannot connect: {e}")
+        return None
+
+
+def get_db_cursor():
+    """Get database cursor (caller must close cursor and connection)"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return None
+        cursor = conn.cursor()
+        # Attach connection to cursor for later commit/close
+        cursor.connection = conn
+        return cursor
+    except Exception as e:
+        print(f"[DB ERROR] Cannot get cursor: {e}")
         return None
 
 
@@ -104,7 +125,9 @@ def ensure_tables_exist():
             );
         """)
         cursor.connection.commit()
+        conn = cursor.connection
         cursor.close()
+        conn.close()
         TABLES_CREATED = True
         print("[DB] News cache tables ready")
         return True
@@ -150,6 +173,7 @@ def is_cache_valid_db(stock_code):
     cursor = get_db_cursor()
     if not cursor:
         return False
+    conn = cursor.connection
     try:
         # Use database NOW() to avoid timezone mismatch
         refresh_interval = get_refresh_interval_hours()
@@ -160,6 +184,7 @@ def is_cache_valid_db(stock_code):
         """, (stock_code.upper(),))
         result = cursor.fetchone()
         cursor.close()
+        conn.close()
         if not result:
             print(f"[CACHE] {stock_code}: No cache record found")
             return False
@@ -175,6 +200,10 @@ def is_cache_valid_db(stock_code):
         return is_valid
     except Exception as e:
         print(f"[DB ERROR] is_cache_valid_db: {e}")
+        try:
+            conn.close()
+        except:
+            pass
         return False
 
 
@@ -182,10 +211,12 @@ def get_cache_age_text(stock_code):
     cursor = get_db_cursor()
     if not cursor:
         return "DB tidak tersedia"
+    conn = cursor.connection
     try:
         cursor.execute("SELECT last_fetch FROM news_fetch_log WHERE stock_code = %s", (stock_code.upper(),))
         result = cursor.fetchone()
         cursor.close()
+        conn.close()
         if not result:
             return "Belum ada data"
         last_fetch = result[0] if isinstance(result, tuple) else result.get('last_fetch')
@@ -201,6 +232,10 @@ def get_cache_age_text(stock_code):
             return f"{minutes} menit lalu"
         return f"{minutes // 60} jam lalu"
     except:
+        try:
+            conn.close()
+        except:
+            pass
         return "Error"
 
 
@@ -209,6 +244,7 @@ def load_from_database(stock_code, limit=20):
     cursor = get_db_cursor()
     if not cursor:
         return []
+    conn = cursor.connection
     try:
         cursor.execute("""
             SELECT title, description, url, source, published_at, sentiment, color, icon, api_source
@@ -216,6 +252,7 @@ def load_from_database(stock_code, limit=20):
         """, (stock_code.upper(), limit))
         rows = cursor.fetchall()
         cursor.close()
+        conn.close()
         articles = []
         for row in rows:
             if isinstance(row, dict):
@@ -233,6 +270,10 @@ def load_from_database(stock_code, limit=20):
         return articles
     except Exception as e:
         print(f"[DB ERROR] load_from_database: {e}")
+        try:
+            conn.close()
+        except:
+            pass
         return []
 
 
@@ -242,6 +283,7 @@ def save_to_database(stock_code, articles):
     cursor = get_db_cursor()
     if not cursor:
         return
+    conn = cursor.connection
     try:
         with DB_LOCK:
             cursor.execute("DELETE FROM news_cache WHERE stock_code = %s AND published_at < NOW() - INTERVAL '14 days'", (stock_code.upper(),))
@@ -266,11 +308,16 @@ def save_to_database(stock_code, articles):
                 INSERT INTO news_fetch_log (stock_code, last_fetch, article_count) VALUES (%s, NOW(), %s)
                 ON CONFLICT (stock_code) DO UPDATE SET last_fetch = NOW(), article_count = EXCLUDED.article_count
             """, (stock_code.upper(), len(articles)))
-            cursor.connection.commit()
+            conn.commit()
             cursor.close()
+            conn.close()
             print(f"[DB SAVED] {stock_code}: {len(articles)} articles")
     except Exception as e:
         print(f"[DB ERROR] save_to_database: {e}")
+        try:
+            conn.close()
+        except:
+            pass
 
 
 def get_stock_keywords(stock_code):
@@ -596,6 +643,7 @@ def get_cache_info(stock_code=None):
     cached_stocks = 0
     last_refresh = '-'
     if cursor:
+        conn = cursor.connection
         try:
             cursor.execute("SELECT COUNT(DISTINCT stock_code) FROM news_fetch_log")
             result = cursor.fetchone()
@@ -608,8 +656,13 @@ def get_cache_info(stock_code=None):
                     lr = lr.replace(tzinfo=None)
                 last_refresh = lr.strftime('%H:%M')
             cursor.close()
+            conn.close()
         except Exception as e:
             print(f"[DB ERROR] get_cache_info: {e}")
+            try:
+                conn.close()
+            except:
+                pass
     info = {'refresh_mode': get_refresh_mode_text(), 'interval_hours': get_refresh_interval_hours(),
             'cached_stocks': cached_stocks, 'last_refresh': last_refresh}
     if stock_code:
@@ -632,6 +685,7 @@ def get_latest_news_summary(stock_codes, max_total=10):
     cursor = get_db_cursor()
     if not cursor:
         return []
+    conn = cursor.connection
 
     try:
         now = datetime.now()
@@ -655,6 +709,7 @@ def get_latest_news_summary(stock_codes, max_total=10):
         """, (*[c.upper() for c in stock_codes], max_total))
         rows = cursor.fetchall()
         cursor.close()
+        conn.close()
 
         articles = []
         for row in rows:
@@ -669,24 +724,33 @@ def get_latest_news_summary(stock_codes, max_total=10):
 
         # If no recent news, load from cache anyway
         if not articles:
-            cursor = get_db_cursor()
-            if cursor:
-                cursor.execute(f"""
-                    SELECT stock_code, title, description, url, source, published_at, sentiment, color, icon
-                    FROM news_cache WHERE stock_code IN ({placeholders})
-                    ORDER BY published_at DESC LIMIT %s
-                """, (*[c.upper() for c in stock_codes], max_total))
-                rows = cursor.fetchall()
-                cursor.close()
-                for row in rows:
-                    if isinstance(row, dict):
-                        article = dict(row)
-                    else:
-                        article = {'stock_code': row[0], 'title': row[1], 'description': row[2], 'url': row[3],
-                                   'source': row[4], 'published_at': row[5].isoformat() if row[5] else '',
-                                   'sentiment': row[6], 'color': row[7], 'icon': row[8]}
-                    article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
-                    articles.append(article)
+            cursor2 = get_db_cursor()
+            if cursor2:
+                conn2 = cursor2.connection
+                try:
+                    cursor2.execute(f"""
+                        SELECT stock_code, title, description, url, source, published_at, sentiment, color, icon
+                        FROM news_cache WHERE stock_code IN ({placeholders})
+                        ORDER BY published_at DESC LIMIT %s
+                    """, (*[c.upper() for c in stock_codes], max_total))
+                    rows = cursor2.fetchall()
+                    cursor2.close()
+                    conn2.close()
+                    for row in rows:
+                        if isinstance(row, dict):
+                            article = dict(row)
+                        else:
+                            article = {'stock_code': row[0], 'title': row[1], 'description': row[2], 'url': row[3],
+                                       'source': row[4], 'published_at': row[5].isoformat() if row[5] else '',
+                                       'sentiment': row[6], 'color': row[7], 'icon': row[8]}
+                        article['published_formatted'] = format_time_ago_str(article.get('published_at', ''))
+                        articles.append(article)
+                except Exception as e2:
+                    print(f"[DB ERROR] get_latest_news_summary fallback: {e2}")
+                    try:
+                        conn2.close()
+                    except:
+                        pass
 
         return articles
     except Exception as e:
