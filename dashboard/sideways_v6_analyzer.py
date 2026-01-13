@@ -47,8 +47,12 @@ def load_stock_data(stock_code, conn=None):
 
     data_list = []
     for i, row in enumerate(all_data):
-        prev_close = all_data[i-1]['close'] if i > 0 else row['close']
-        change = ((row['close'] - prev_close) / prev_close * 100) if prev_close else 0
+        # Skip rows with None values
+        if row['high'] is None or row['low'] is None or row['close'] is None or row['volume'] is None:
+            continue
+
+        prev_close = all_data[i-1]['close'] if i > 0 and all_data[i-1]['close'] else row['close']
+        change = ((float(row['close']) - float(prev_close)) / float(prev_close) * 100) if prev_close else 0
         data_list.append({
             'date': row['date'],
             'high': float(row['high']),
