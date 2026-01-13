@@ -64,6 +64,14 @@ from signal_validation import (
 )
 from decision_panel import create_decision_panel, create_why_signal_checklist
 
+# V6 Sideways Analyzer - Adaptive Threshold + Accumulation/Distribution
+try:
+    from sideways_v6_analyzer import get_v6_analysis
+    print('sideways_v6_analyzer loaded OK')
+except Exception as e:
+    print(f'Warning: sideways_v6_analyzer error - {e}')
+    def get_v6_analysis(stock_code, conn=None): return {'error': 'Module not loaded'}
+
 # News service for stock news
 try:
     from news_service import get_news_with_sentiment, get_all_stocks_news, get_latest_news_summary, get_cache_info
@@ -6101,6 +6109,262 @@ def generate_signal_education_data(validation_data: dict, broker_data: dict = No
     return education
 
 
+# ============================================================
+# V6 SIDEWAYS ANALYSIS CARD - Adaptive Threshold
+# ============================================================
+
+def create_v6_analysis_card(stock_code: str):
+    """
+    Create V6 Sideways Analysis Card with:
+    - Adaptive Threshold Detection
+    - Accumulation/Distribution Phase
+    - Entry Signal with Risk Management
+    - Educational Content
+    """
+    try:
+        v6_data = get_v6_analysis(stock_code)
+
+        if v6_data.get('error'):
+            return dbc.Card([
+                dbc.CardBody(html.P(f"V6 Analysis Error: {v6_data['error']}", className="text-warning"))
+            ], className="mb-4")
+
+        sideways = v6_data.get('sideways', {})
+        phase = v6_data.get('phase', {})
+        entry = v6_data.get('entry', {})
+        education = v6_data.get('education', {})
+        current_price = v6_data.get('current_price', 0)
+
+    except Exception as e:
+        return dbc.Card([
+            dbc.CardBody(html.P(f"Error loading V6 analysis: {str(e)}", className="text-danger"))
+        ], className="mb-4")
+
+    # Determine colors based on phase
+    phase_colors = {
+        'ACCUMULATION': {'bg': 'success', 'icon': 'fa-layer-group', 'label': 'AKUMULASI'},
+        'DISTRIBUTION': {'bg': 'danger', 'icon': 'fa-hand-holding-dollar', 'label': 'DISTRIBUSI'},
+        'NEUTRAL': {'bg': 'secondary', 'icon': 'fa-balance-scale', 'label': 'NETRAL'},
+        'UNKNOWN': {'bg': 'secondary', 'icon': 'fa-question', 'label': 'UNKNOWN'}
+    }
+    phase_style = phase_colors.get(phase.get('phase', 'UNKNOWN'), phase_colors['UNKNOWN'])
+
+    # Action colors
+    action_colors = {
+        'ENTRY': {'bg': 'success', 'icon': 'fa-check-circle'},
+        'WATCH': {'bg': 'info', 'icon': 'fa-eye'},
+        'EXIT': {'bg': 'danger', 'icon': 'fa-times-circle'},
+        'WAIT': {'bg': 'secondary', 'icon': 'fa-clock'}
+    }
+    action_style = action_colors.get(entry.get('action', 'WAIT'), action_colors['WAIT'])
+
+    # Build the card
+    return dbc.Card([
+        # Header
+        dbc.CardHeader([
+            html.Div([
+                html.I(className="fas fa-chart-area me-2 text-info"),
+                html.Strong("Analisis Sideways V6", className="text-info"),
+                html.Small(" - Adaptive Threshold", className="text-muted ms-2")
+            ], className="d-flex align-items-center")
+        ], style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)", "borderBottom": "2px solid #17a2b8"}),
+
+        dbc.CardBody([
+            # Row 1: Sideways Status + Phase
+            dbc.Row([
+                # Sideways Status
+                dbc.Col([
+                    html.Div([
+                        html.H6("Status Sideways", className="text-muted mb-2"),
+                        html.Div([
+                            dbc.Badge(
+                                "SIDEWAYS" if sideways.get('is_sideways') else "TRENDING",
+                                color="info" if sideways.get('is_sideways') else "warning",
+                                className="fs-6 me-2"
+                            ),
+                            html.Small(f"({sideways.get('days', 0)} hari)", className="text-muted")
+                        ]),
+                        html.Div([
+                            html.Small([
+                                f"Range: Rp {sideways.get('low', 0):,.0f} - Rp {sideways.get('high', 0):,.0f}"
+                            ], className="text-muted d-block mt-1"),
+                            html.Small([
+                                f"Range%: {sideways.get('range_pct', 0):.1f}% ",
+                                html.Span(
+                                    f"({'<' if sideways.get('is_sideways') else '>'} {sideways.get('threshold', 0):.1f}%)",
+                                    className="text-success" if sideways.get('is_sideways') else "text-warning"
+                                )
+                            ], className="text-muted d-block"),
+                        ], className="mt-2")
+                    ], className="p-3 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"})
+                ], md=4),
+
+                # Phase Analysis
+                dbc.Col([
+                    html.Div([
+                        html.H6("Fase Pasar", className="text-muted mb-2"),
+                        html.Div([
+                            html.I(className=f"fas {phase_style['icon']} me-2 fs-4 text-{phase_style['bg']}"),
+                            html.Strong(phase_style['label'], className=f"fs-5 text-{phase_style['bg']}")
+                        ]),
+                        html.Div([
+                            html.Small([
+                                f"Volume Ratio: {phase.get('vol_ratio', 0):.2f}"
+                            ], className="text-muted d-block mt-1"),
+                            html.Small([
+                                f"Score: ACC {phase.get('acc_score', 0)} vs DIST {phase.get('dist_score', 0)}"
+                            ], className="text-muted d-block"),
+                        ], className="mt-2")
+                    ], className="p-3 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"})
+                ], md=4),
+
+                # Action Signal
+                dbc.Col([
+                    html.Div([
+                        html.H6("Sinyal Aksi", className="text-muted mb-2"),
+                        html.Div([
+                            html.I(className=f"fas {action_style['icon']} me-2 fs-4 text-{action_style['bg']}"),
+                            html.Strong(entry.get('action', 'WAIT'), className=f"fs-5 text-{action_style['bg']}")
+                        ]),
+                        html.Div([
+                            html.Small(entry.get('action_reason', ''), className="text-muted d-block mt-1")
+                        ], className="mt-2")
+                    ], className="p-3 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"})
+                ], md=4),
+            ], className="mb-3"),
+
+            # Row 2: Entry Confirmation (if applicable)
+            html.Div([
+                html.Hr(className="my-3"),
+                html.H6([
+                    html.I(className="fas fa-clipboard-check me-2"),
+                    "Konfirmasi Entry"
+                ], className="text-info mb-3"),
+
+                dbc.Row([
+                    # Confirmation Checklist
+                    dbc.Col([
+                        html.Div([
+                            html.Div([
+                                html.Span(
+                                    "[v] " if entry.get('signals', {}).get('near_support', {}).get('passed') else "[x] ",
+                                    className="text-success fw-bold" if entry.get('signals', {}).get('near_support', {}).get('passed') else "text-danger fw-bold"
+                                ),
+                                html.Span("Near Support ", className="small"),
+                                html.Small(f"({entry.get('pos_in_range', 0):.0f}% dari range)", className="text-muted")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span(
+                                    "[v] " if entry.get('signals', {}).get('bullish_candle', {}).get('passed') else "[x] ",
+                                    className="text-success fw-bold" if entry.get('signals', {}).get('bullish_candle', {}).get('passed') else "text-danger fw-bold"
+                                ),
+                                html.Span("Bullish Candle", className="small")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span(
+                                    "[v] " if entry.get('signals', {}).get('range_expansion', {}).get('passed') else "[x] ",
+                                    className="text-success fw-bold" if entry.get('signals', {}).get('range_expansion', {}).get('passed') else "text-danger fw-bold"
+                                ),
+                                html.Span("Range Expansion ", className="small"),
+                                html.Small(f"({entry.get('signals', {}).get('range_expansion', {}).get('value', 0):.2f}x)", className="text-muted")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span(
+                                    "[v] " if entry.get('signals', {}).get('volume_surge', {}).get('passed') else "[x] ",
+                                    className="text-success fw-bold" if entry.get('signals', {}).get('volume_surge', {}).get('passed') else "text-danger fw-bold"
+                                ),
+                                html.Span("Volume Surge ", className="small"),
+                                html.Small(f"({entry.get('signals', {}).get('volume_surge', {}).get('value', 0):.2f}x)", className="text-muted")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Strong(f"Score: {entry.get('score', 0)}/4", className="text-info")
+                            ], className="mt-2")
+                        ])
+                    ], md=6),
+
+                    # Risk Management
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Risk Management", className="text-warning mb-2"),
+                            html.Div([
+                                html.Span("Entry: ", className="text-muted"),
+                                html.Strong(f"Rp {current_price:,.0f}", className="text-light")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span("Stop Loss: ", className="text-muted"),
+                                html.Strong(f"Rp {entry.get('stop_loss', 0):,.0f}", className="text-danger"),
+                                html.Small(f" (-{entry.get('risk_pct', 0):.1f}%)", className="text-danger")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span("Target: ", className="text-muted"),
+                                html.Strong(f"Rp {entry.get('target', 0):,.0f}", className="text-success"),
+                                html.Small(f" (+{entry.get('reward_pct', 0):.1f}%)", className="text-success")
+                            ], className="mb-1"),
+                            html.Div([
+                                html.Span("R:R Ratio: ", className="text-muted"),
+                                html.Strong(
+                                    f"1:{entry.get('rr_ratio', 0):.1f}",
+                                    className="text-success" if entry.get('rr_ratio', 0) >= 1.5 else "text-warning"
+                                )
+                            ], className="mt-2")
+                        ], className="p-3 rounded", style={"backgroundColor": "rgba(255,193,7,0.1)"})
+                    ], md=6),
+                ])
+            ]) if sideways.get('is_sideways') else html.Div(),
+
+            # Row 3: Education - Why Not Buy
+            html.Div([
+                html.Hr(className="my-3"),
+                html.H6([
+                    html.I(className="fas fa-graduation-cap me-2 text-info"),
+                    "Kenapa Belum Buy?"
+                ], className="text-danger mb-2"),
+                html.Div([
+                    html.Div([
+                        html.Span(f"{i}. ", className="text-danger fw-bold"),
+                        html.Span(reason, className="small")
+                    ], className="mb-1") for i, reason in enumerate(education.get('why_not_buy', []), 1)
+                ])
+            ]) if education.get('why_not_buy') else html.Div(),
+
+            # Row 4: Phase Explanation
+            html.Div([
+                html.Hr(className="my-3"),
+                html.H6([
+                    html.I(className="fas fa-info-circle me-2"),
+                    f"Penjelasan Fase {phase_style['label']}"
+                ], className=f"text-{phase_style['bg']} mb-2"),
+                html.P(education.get('phase_explanation', ''), className="small mb-0")
+            ]) if education.get('phase_explanation') else html.Div(),
+
+            # Row 5: Action Explanation
+            html.Div([
+                html.Hr(className="my-3"),
+                html.Div([
+                    html.I(className=f"fas {action_style['icon']} me-2 text-{action_style['bg']}"),
+                    html.Strong(education.get('action_explanation', ''), className="small")
+                ])
+            ]) if education.get('action_explanation') else html.Div(),
+
+            # Footer: Formula Info
+            html.Div([
+                html.Hr(className="my-3"),
+                html.Details([
+                    html.Summary([
+                        html.I(className="fas fa-calculator me-2"),
+                        html.Span("Lihat Formula V6", className="small text-info")
+                    ], className="mb-2", style={"cursor": "pointer"}),
+                    html.Pre(
+                        education.get('formula_explanation', ''),
+                        className="small text-muted",
+                        style={"fontSize": "11px", "backgroundColor": "rgba(0,0,0,0.3)", "padding": "10px", "borderRadius": "5px", "whiteSpace": "pre-wrap"}
+                    )
+                ])
+            ])
+        ])
+    ], className="mb-4", style={"background": "linear-gradient(180deg, #1a1a2e 0%, #0f0f1a 100%)", "border": "1px solid #17a2b8"})
+
+
 def create_signal_education_card(stock_code: str, validation_data: dict = None, broker_data: dict = None):
     """
     Create educational card explaining WHY the signal is what it is.
@@ -8877,215 +9141,3313 @@ def get_stock_profile(stock_code: str) -> dict:
 # PAGE: ACCUMULATION (New Sub-menu from Analysis)
 # ============================================================
 
-def create_accumulation_page(stock_code='CDIA'):
-    """Create Accumulation analysis page - Active Alerts, Accumulation Phase, Broker Sensitivity & Volume Analysis"""
+def get_market_snapshot_data(stock_code: str, target_date: str = None) -> dict:
+    """
+    Get Market Snapshot data for a specific date.
+    Returns OHLC, Avg, Value, Volume, Freq, Foreign flow data.
+    """
     try:
-        # Get required data
-        composite = get_comprehensive_analysis(stock_code)
-        alerts = generate_alerts(stock_code)
-        accum_phase = composite.get('accumulation_phase', {})
-        broker_sens = calculate_broker_sensitivity_advanced(stock_code)
-        foreign_flow = composite.get('foreign_flow', {})
-        price_pos = composite.get('price_position', {})
-        volume_analysis = composite.get('volume_analysis', {})
+        # Query to get all market data including foreign buy/sell
+        query = """
+            SELECT date, open_price, high_price, low_price, close_price, avg_price,
+                   volume, value, frequency, foreign_buy, foreign_sell, net_foreign,
+                   change_value, change_percent
+            FROM stock_daily
+            WHERE stock_code = %s
+            ORDER BY date DESC
+            LIMIT 30
+        """
+        results = execute_query(query, (stock_code,))
 
-        # Score color helper
-        def score_color(score):
-            if score >= 70: return 'success'
-            if score >= 50: return 'info'
-            if score >= 30: return 'warning'
-            return 'danger'
+        if not results:
+            return None
 
-        # Get validation data for hero section (use existing composite data)
-        from signal_validation import get_unified_analysis_summary
-        unified = get_unified_analysis_summary(stock_code)
-        accum_data = unified.get('accumulation', {})
-        summary = accum_data.get('summary', {})
-        confidence = accum_data.get('confidence', {})
+        df = pd.DataFrame(results)
+        df['date'] = pd.to_datetime(df['date'])
 
-        overall_signal = summary.get('overall_signal', 'NETRAL')
-        passed = confidence.get('passed', 0)
-        total = confidence.get('total', 15)
-        pass_rate = confidence.get('pass_rate', 0)
-        conf_level = confidence.get('level', 'LOW')
-
-        # Map signal to action display
-        action_config = {
-            'AKUMULASI': {'action': 'BUY ON WEAKNESS', 'icon': '[G]', 'color': 'success', 'desc': 'Sinyal akumulasi terdeteksi - Smart money sedang masuk'},
-            'DISTRIBUSI': {'action': 'TAKE PROFIT', 'icon': '[R]', 'color': 'danger', 'desc': 'Sinyal distribusi terdeteksi - Smart money sedang keluar'},
-            'NETRAL': {'action': 'WAIT & OBSERVE', 'icon': '[~]', 'color': 'secondary', 'desc': 'Belum ada konfirmasi arah - Pantau perkembangan'}
-        }
-        action_info = action_config.get(overall_signal, action_config['NETRAL'])
-
-        # Confidence level mapping
-        conf_text_map = {'VERY_HIGH': 'SANGAT TINGGI', 'HIGH': 'TINGGI', 'MEDIUM': 'SEDANG', 'LOW': 'RENDAH', 'VERY_LOW': 'SANGAT RENDAH'}
-        conf_color_map = {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}
-        conf_text = conf_text_map.get(conf_level, 'N/A')
-        conf_color = conf_color_map.get(conf_level, 'secondary')
-
-        # Get current price from composite
-        current_price = composite.get('price_position', {}).get('current_price', 0)
-
-        # Generate risk & opportunity based on signal
-        if overall_signal == 'AKUMULASI':
-            opportunities = [
-                "Smart money sedang mengakumulasi - potensi kenaikan",
-                "Volume pembelian dominan di level support",
-                "Broker besar konsisten membeli",
-                "Harga dalam zona entry yang menarik"
-            ]
-            risks = [
-                "Akumulasi bisa berlangsung lama (berminggu-minggu)",
-                "False breakout bisa terjadi",
-                "Market risk jika IHSG koreksi tajam",
-                "Perlu konfirmasi volume saat breakout"
-            ]
-        elif overall_signal == 'DISTRIBUSI':
-            opportunities = [
-                "Kesempatan take profit di harga tinggi",
-                "Hindari kerugian lebih besar",
-                "Bisa re-entry di harga lebih rendah nanti",
-                "Capital bisa dialokasikan ke saham lain"
-            ]
-            risks = [
-                "Harga bisa turun signifikan",
-                "Smart money sedang keluar",
-                "Volume penjualan meningkat",
-                "Support level bisa ditembus"
-            ]
+        # If target_date specified, find that row
+        if target_date:
+            target = pd.to_datetime(target_date)
+            row = df[df['date'] == target]
+            if row.empty:
+                row = df.iloc[[0]]  # Use latest if not found
+            else:
+                row = row.iloc[[0]]
         else:
-            opportunities = [
-                "Waktu untuk riset dan observasi",
-                "Bisa entry jika ada konfirmasi sinyal",
-                "Menghindari whipsaw di market sideways",
-                "Sabar menunggu setup yang lebih jelas"
-            ]
-            risks = [
-                "Market bisa bergerak tiba-tiba",
-                "Opportunity cost jika tidak entry",
-                "Sinyal bisa berubah kapan saja",
-                "Volatilitas bisa meningkat tanpa warning"
-            ]
+            row = df.iloc[[0]]  # Latest data
+
+        latest = row.iloc[0]
+
+        # Calculate averages for comparison (20 day)
+        avg_value = df['value'].mean() if len(df) > 1 else latest['value']
+        avg_volume = df['volume'].mean() if len(df) > 1 else latest['volume']
+        avg_freq = df['frequency'].mean() if 'frequency' in df.columns and len(df) > 1 else 0
+
+        # Get values
+        close_price = float(latest['close_price']) if pd.notna(latest['close_price']) else 0
+        open_price = float(latest['open_price']) if pd.notna(latest['open_price']) else 0
+        change_value = float(latest['change_value']) if pd.notna(latest.get('change_value')) else 0
+        change_percent = float(latest['change_percent']) if pd.notna(latest.get('change_percent')) else 0
+
+        # Calculate change_percent if it's 0 but change_value exists
+        if change_percent == 0 and change_value != 0:
+            # Calculate from previous close (close - change_value)
+            prev_close = close_price - change_value
+            if prev_close != 0:
+                change_percent = (change_value / prev_close) * 100
+        # If still 0 and we have open price, calculate from open
+        elif change_percent == 0 and open_price != 0 and close_price != open_price:
+            change_value = close_price - open_price
+            change_percent = (change_value / open_price) * 100
+
+        return {
+            'date': latest['date'],
+            'open': open_price,
+            'high': float(latest['high_price']) if pd.notna(latest['high_price']) else 0,
+            'low': float(latest['low_price']) if pd.notna(latest['low_price']) else 0,
+            'close': close_price,
+            'avg': float(latest['avg_price']) if pd.notna(latest.get('avg_price')) else 0,
+            'change': change_percent,
+            'change_value': change_value,
+            'volume': int(latest['volume']) if pd.notna(latest['volume']) else 0,
+            'value': float(latest['value']) if pd.notna(latest['value']) else 0,
+            'frequency': int(latest['frequency']) if pd.notna(latest.get('frequency')) else 0,
+            'foreign_buy': float(latest['foreign_buy']) if pd.notna(latest.get('foreign_buy')) else 0,
+            'foreign_sell': float(latest['foreign_sell']) if pd.notna(latest.get('foreign_sell')) else 0,
+            'net_foreign': float(latest['net_foreign']) if pd.notna(latest.get('net_foreign')) else 0,
+            'avg_value_20d': avg_value,
+            'avg_volume_20d': avg_volume,
+            'avg_freq_20d': avg_freq,
+            'available_dates': df['date'].dt.strftime('%Y-%m-%d').tolist(),
+            # Previous day data for comparison
+            'prev_day': {
+                'date': df.iloc[1]['date'] if len(df) > 1 else None,
+                'close': float(df.iloc[1]['close_price']) if len(df) > 1 and pd.notna(df.iloc[1]['close_price']) else 0,
+                'value': float(df.iloc[1]['value']) if len(df) > 1 and pd.notna(df.iloc[1]['value']) else 0,
+                'volume': int(df.iloc[1]['volume']) if len(df) > 1 and pd.notna(df.iloc[1]['volume']) else 0,
+                'net_foreign': float(df.iloc[1]['net_foreign']) if len(df) > 1 and pd.notna(df.iloc[1].get('net_foreign')) else 0,
+            } if len(df) > 1 else None
+        }
+    except Exception as e:
+        print(f"Error getting market snapshot: {e}")
+        return None
+
+
+def generate_market_narrative(data: dict) -> dict:
+    """
+    Generate 3 narrative sentences for Market Snapshot based on POINT 1 methodology.
+    Returns dict with 3 narratives: closing, weight, foreign
+    """
+    if not data:
+        return {
+            'closing': 'Data tidak tersedia',
+            'weight': 'Data tidak tersedia',
+            'foreign': 'Data tidak tersedia'
+        }
+
+    # 1. Arah & Kualitas Penutupan
+    change = data.get('change', 0)
+    close = data.get('close', 0)
+    high = data.get('high', 0)
+    low = data.get('low', 0)
+    avg = data.get('avg', 0)
+    open_price = data.get('open', 0)
+
+    # Determine direction
+    if change > 0.5:
+        direction = "naik"
+        direction_desc = "mengangkat"
+    elif change < -0.5:
+        direction = "turun"
+        direction_desc = "menggulung"
+    else:
+        direction = "datar"
+        direction_desc = "mengunci"
+
+    # Determine closing quality based on OHLC structure
+    price_range = high - low if high > low else 1
+    close_position = (close - low) / price_range if price_range > 0 else 0.5
+
+    if close_position >= 0.7:
+        ohlc_quality = "pembeli menang sampai penutupan"
+    elif close_position <= 0.3:
+        ohlc_quality = "penjual menang sampai penutupan"
+    else:
+        ohlc_quality = "tarik-menarik, belum ada keputusan kuat"
+
+    # Close vs Avg quality
+    if avg > 0:
+        if close > avg:
+            avg_quality = "kuat (ditutup di atas rata-rata transaksi)"
+        else:
+            avg_quality = "lemah (ditutup di bawah rata-rata transaksi)"
+    else:
+        avg_quality = "tidak dapat dinilai"
+
+    closing_narrative = f"Hari ini ditutup {direction} ({change:+.2f}%), dan penutupan {avg_quality}. {ohlc_quality.capitalize()}."
+
+    # 2. Bobot Pergerakan
+    value = data.get('value', 0)
+    volume = data.get('volume', 0)
+    freq = data.get('frequency', 0)
+    avg_value = data.get('avg_value_20d', value)
+    avg_volume = data.get('avg_volume_20d', volume)
+    avg_freq = data.get('avg_freq_20d', freq)
+
+    # Determine activity level
+    value_ratio = value / avg_value if avg_value > 0 else 1
+    volume_ratio = volume / avg_volume if avg_volume > 0 else 1
+
+    if value_ratio > 1.3 or volume_ratio > 1.3:
+        activity_level = "ramai"
+        weight = "berbobot"
+    elif value_ratio < 0.7 or volume_ratio < 0.7:
+        activity_level = "sepi"
+        weight = "ringan"
+    else:
+        activity_level = "normal"
+        weight = "standar"
+
+    # Combined interpretation
+    if direction == "naik" and activity_level == "sepi":
+        weight_interpretation = "naik ringan, rawan ditarik balik"
+    elif direction == "turun" and activity_level == "sepi":
+        weight_interpretation = "turun ringan, bisa cuma lemah sesaat"
+    elif direction == "naik" and activity_level == "ramai":
+        weight_interpretation = "naik berbobot, pergerakan valid"
+    elif direction == "turun" and activity_level == "ramai":
+        weight_interpretation = "jualnya serius, waspada"
+    else:
+        weight_interpretation = f"pergerakan {weight}"
+
+    weight_narrative = f"Aktivitas pasar {activity_level} (Value {value_ratio:.1f}x avg), jadi {weight_interpretation}."
+
+    # 3. Konteks Asing
+    net_foreign = data.get('net_foreign', 0)
+    foreign_buy = data.get('foreign_buy', 0)
+    foreign_sell = data.get('foreign_sell', 0)
+
+    if net_foreign > 0:
+        foreign_action = "net buy"
+        foreign_stance = "mendukung"
+    elif net_foreign < 0:
+        foreign_action = "net sell"
+        foreign_stance = "menekan"
+    else:
+        foreign_action = "netral"
+        foreign_stance = "tidak aktif"
+
+    # Check if price follows or against foreign
+    if (net_foreign > 0 and change > 0) or (net_foreign < 0 and change < 0):
+        price_reaction = "menurut"
+    elif (net_foreign > 0 and change <= 0) or (net_foreign < 0 and change >= 0):
+        price_reaction = "melawan"
+    else:
+        price_reaction = "netral terhadap"
+
+    # Anomaly detection
+    anomaly = ""
+    if net_foreign < 0 and change > 0:
+        anomaly = " Ada penahan - asing jual tapi harga tidak jatuh."
+    elif net_foreign > 0 and change < 0:
+        anomaly = " Ada pelepas - asing beli tapi harga tidak kuat."
+
+    foreign_narrative = f"Asing {foreign_action} (Rp {net_foreign/1e9:.2f}B), dan harga {price_reaction} arus asing.{anomaly}"
+
+    return {
+        'closing': closing_narrative,
+        'weight': weight_narrative,
+        'foreign': foreign_narrative,
+        'direction': direction,
+        'activity': activity_level,
+        'foreign_stance': foreign_stance
+    }
+
+
+def generate_comparison_narrative(data: dict) -> str:
+    """
+    Generate narrative comparing today with previous day.
+    Returns a single sentence comparison.
+    """
+    if not data or not data.get('prev_day'):
+        return "Data hari sebelumnya tidak tersedia untuk perbandingan."
+
+    prev = data['prev_day']
+
+    # Compare activity
+    today_value = data.get('value', 0)
+    prev_value = prev.get('value', 0)
+
+    if prev_value > 0:
+        value_change = ((today_value - prev_value) / prev_value) * 100
+        if value_change > 20:
+            activity_comp = "aktivitas MENINGKAT SIGNIFIKAN"
+        elif value_change > 5:
+            activity_comp = "aktivitas meningkat"
+        elif value_change < -20:
+            activity_comp = "aktivitas MENURUN SIGNIFIKAN"
+        elif value_change < -5:
+            activity_comp = "aktivitas menurun"
+        else:
+            activity_comp = "aktivitas relatif sama"
+    else:
+        activity_comp = "aktivitas tidak dapat dibandingkan"
+
+    # Compare foreign
+    today_foreign = data.get('net_foreign', 0)
+    prev_foreign = prev.get('net_foreign', 0)
+
+    if today_foreign > 0 and prev_foreign > 0:
+        foreign_comp = "asing tetap net buy"
+    elif today_foreign < 0 and prev_foreign < 0:
+        foreign_comp = "asing tetap net sell"
+    elif today_foreign > 0 and prev_foreign <= 0:
+        foreign_comp = "asing BERBALIK menjadi net buy"
+    elif today_foreign < 0 and prev_foreign >= 0:
+        foreign_comp = "asing BERBALIK menjadi net sell"
+    else:
+        foreign_comp = "asing relatif netral"
+
+    # Compare price direction
+    today_change = data.get('change', 0)
+    prev_close = prev.get('close', 0)
+    today_close = data.get('close', 0)
+
+    if today_close > prev_close:
+        price_comp = "harga melanjutkan kenaikan" if today_change > 0 else "harga rebound dari hari sebelumnya"
+    elif today_close < prev_close:
+        price_comp = "harga melanjutkan penurunan" if today_change < 0 else "harga terkoreksi dari hari sebelumnya"
+    else:
+        price_comp = "harga stagnan"
+
+    return f"Dibanding hari sebelumnya: {activity_comp}, {foreign_comp}, dan {price_comp}."
+
+
+def determine_day_significance(data: dict) -> dict:
+    """
+    Determine if the day is significant enough for deeper analysis.
+    Returns conclusion about day type and recommendation.
+    """
+    if not data:
+        return {
+            'significant': False,
+            'day_type': 'TIDAK DIKETAHUI',
+            'recommendation': 'Data tidak tersedia',
+            'reasons': [],
+            'color': 'secondary'
+        }
+
+    # Get key metrics
+    change = abs(data.get('change', 0))
+    value = data.get('value', 0)
+    avg_value = data.get('avg_value_20d', value)
+    volume = data.get('volume', 0)
+    avg_volume = data.get('avg_volume_20d', volume)
+    close = data.get('close', 0)
+    high = data.get('high', 0)
+    low = data.get('low', 0)
+    avg = data.get('avg', 0)
+    net_foreign = data.get('net_foreign', 0)
+
+    # Calculate ratios
+    value_ratio = value / avg_value if avg_value > 0 else 1
+    volume_ratio = volume / avg_volume if avg_volume > 0 else 1
+    price_range = high - low if high > low else 1
+    close_position = (close - low) / price_range if price_range > 0 else 0.5
+
+    # Scoring system for significance
+    significance_score = 0
+    reasons = []
+
+    # 1. Activity level (0-30 points)
+    if value_ratio > 1.5:
+        significance_score += 30
+        reasons.append("Aktivitas SANGAT RAMAI (>1.5x avg)")
+    elif value_ratio > 1.2:
+        significance_score += 20
+        reasons.append("Aktivitas RAMAI (>1.2x avg)")
+    elif value_ratio > 0.8:
+        significance_score += 10
+        reasons.append("Aktivitas NORMAL")
+    else:
+        reasons.append("Aktivitas SEPI (<0.8x avg)")
+
+    # 2. Price movement (0-25 points)
+    if change > 3:
+        significance_score += 25
+        reasons.append(f"Pergerakan BESAR ({change:.1f}%)")
+    elif change > 1.5:
+        significance_score += 15
+        reasons.append(f"Pergerakan SEDANG ({change:.1f}%)")
+    elif change > 0.5:
+        significance_score += 5
+        reasons.append(f"Pergerakan KECIL ({change:.1f}%)")
+    else:
+        reasons.append(f"Pergerakan DATAR ({change:.1f}%)")
+
+    # 3. Close position clarity (0-20 points)
+    if close_position > 0.8 or close_position < 0.2:
+        significance_score += 20
+        reasons.append("Keputusan JELAS (close di ekstrem)")
+    elif close_position > 0.6 or close_position < 0.4:
+        significance_score += 10
+        reasons.append("Keputusan CUKUP JELAS")
+    else:
+        reasons.append("Keputusan BELUM JELAS (close di tengah)")
+
+    # 4. Foreign participation (0-15 points)
+    foreign_ratio = abs(net_foreign) / value if value > 0 else 0
+    if foreign_ratio > 0.1:
+        significance_score += 15
+        reasons.append("Partisipasi asing SIGNIFIKAN")
+    elif foreign_ratio > 0.05:
+        significance_score += 8
+        reasons.append("Partisipasi asing MODERAT")
+    else:
+        reasons.append("Partisipasi asing MINIMAL")
+
+    # 5. Close vs Avg alignment (0-10 points)
+    if avg > 0:
+        close_vs_avg = (close - avg) / avg * 100
+        if abs(close_vs_avg) > 1:
+            significance_score += 10
+            reasons.append(f"Kualitas penutupan JELAS ({close_vs_avg:+.1f}% vs avg)")
+        else:
+            significance_score += 3
+            reasons.append("Kualitas penutupan NETRAL")
+
+    # Determine day type based on OHLC structure (with context warning)
+    price_change = data.get('change', 0)
+
+    if close_position > 0.7 and price_change > 0:
+        day_type = "HARI DIDORONG"
+        day_desc = "Harga bergerak naik dan penutupan nyaman di atas"
+        day_context = "Perlu dibandingkan dengan hari sebelumnya untuk konfirmasi tren"
+    elif close_position < 0.3 and price_change < 0:
+        day_type = "HARI DIBUANG"
+        day_desc = "Harga jatuh dan penutupan lemah di bawah"
+        day_context = "Tanpa konteks tren - bisa awal downtrend atau akhir koreksi"
+    elif 0.4 <= close_position <= 0.6:
+        day_type = "HARI DITAHAN"
+        day_desc = "Harga dicoba digeser tapi balik lagi ke tengah"
+        day_context = "Pasar belum memutuskan arah - perlu observasi lanjutan"
+    elif close_position > 0.7 and price_change <= 0:
+        day_type = "HARI RECOVERY"
+        day_desc = "Sempat turun tapi ditutup kuat di atas"
+        day_context = "Ada penahan di bawah - perlu konfirmasi besok"
+    elif close_position < 0.3 and price_change >= 0:
+        day_type = "HARI REJECTION"
+        day_desc = "Sempat naik tapi ditutup lemah di bawah"
+        day_context = "Ada tekanan di atas - perlu konfirmasi besok"
+    else:
+        day_type = "HARI TRANSISI"
+        day_desc = "Pergerakan belum menunjukkan arah jelas"
+        day_context = "Tidak ada sinyal kuat - lebih baik observasi"
+
+    # Determine significance level (INTENSITAS HARI, bukan keyakinan analisa)
+    if significance_score >= 70:
+        significant = True
+        level = "INTENSITAS TINGGI"
+        recommendation = "LANJUT ANALISIS - Hari ini layak dianalisis lebih dalam. Lanjutkan ke Point 2-6."
+        color = "success"
+        icon = "fa-fire"
+    elif significance_score >= 50:
+        significant = True
+        level = "INTENSITAS SEDANG"
+        recommendation = "PERTIMBANGKAN - Ada beberapa aktivitas menarik. Bisa lanjut analisis dengan hati-hati."
+        color = "info"
+        icon = "fa-thermometer-half"
+    elif significance_score >= 30:
+        significant = False
+        level = "INTENSITAS RENDAH"
+        recommendation = "CATAT SAJA - Hari ini cukup dicatat. Tidak perlu diulik terlalu dalam."
+        color = "warning"
+        icon = "fa-thermometer-quarter"
+    else:
+        significant = False
+        level = "INTENSITAS MINIMAL"
+        recommendation = "SKIP - Hari ini sepi dan tidak berbobot. Hemat energi untuk hari lain."
+        color = "danger"
+        icon = "fa-thermometer-empty"
+
+    # Decision type (dengan klarifikasi: harian, bukan tren)
+    if significant and (close_position > 0.7 or close_position < 0.3):
+        decision_type = "HARI KEPUTUSAN"
+        decision_desc = "Keputusan arah HARIAN, bukan konfirmasi tren"
+    else:
+        decision_type = "HARI TUNGGU"
+        decision_desc = "Belum ada kejelasan, lebih baik observasi"
+
+    return {
+        'significant': significant,
+        'significance_score': significance_score,
+        'significance_level': level,
+        'day_type': day_type,
+        'day_desc': day_desc,
+        'day_context': day_context,
+        'decision_type': decision_type,
+        'decision_desc': decision_desc,
+        'recommendation': recommendation,
+        'reasons': reasons,
+        'color': color,
+        'icon': icon
+    }
+
+
+def analyze_price_movement_anatomy(data: dict) -> dict:
+    """
+    POINT 2 - Price Movement Anatomy
+    Analyze HOW price moved, not WHY.
+    Returns narrative analysis of intraday price behavior.
+    """
+    if not data:
+        return {
+            'flow': {'type': 'UNKNOWN', 'narrative': 'Data tidak tersedia'},
+            'range_structure': {'type': 'UNKNOWN', 'narrative': 'Data tidak tersedia'},
+            'close_location': {'type': 'UNKNOWN', 'narrative': 'Data tidak tersedia'},
+            'rhythm': {'type': 'UNKNOWN', 'narrative': 'Data tidak tersedia'},
+            'avg_relation': {'type': 'UNKNOWN', 'narrative': 'Data tidak tersedia'},
+            'full_narrative': 'Data tidak tersedia untuk analisis.',
+            'summary_questions': {}
+        }
+
+    open_price = data.get('open', 0)
+    high = data.get('high', 0)
+    low = data.get('low', 0)
+    close = data.get('close', 0)
+    avg = data.get('avg', 0)
+    change = data.get('change', 0)
+
+    # Calculate key metrics
+    price_range = high - low if high > low else 1
+    close_position = (close - low) / price_range if price_range > 0 else 0.5
+    open_position = (open_price - low) / price_range if price_range > 0 else 0.5
+    range_percent = (price_range / low * 100) if low > 0 else 0
+
+    # ========== 2.1 ARAH GERAK INTRAHARI (FLOW) ==========
+    if open_position > 0.7 and close_position < 0.3:
+        flow_type = "DITEKAN"
+        flow_narrative = "Harga dibuka tinggi lalu ditekan turun hingga penutupan"
+        flow_icon = "fa-arrow-down"
+        flow_color = "danger"
+    elif open_position < 0.3 and close_position > 0.7:
+        flow_type = "DIPULIHKAN"
+        flow_narrative = "Harga dibuka rendah lalu dipulihkan hingga penutupan kuat"
+        flow_icon = "fa-arrow-up"
+        flow_color = "success"
+    elif open_position > 0.6 and close_position > 0.6:
+        flow_type = "DIPERTAHANKAN ATAS"
+        flow_narrative = "Harga dibuka dan ditutup di area atas, tekanan jual tidak efektif"
+        flow_icon = "fa-shield-alt"
+        flow_color = "success"
+    elif open_position < 0.4 and close_position < 0.4:
+        flow_type = "DIPERTAHANKAN BAWAH"
+        flow_narrative = "Harga dibuka dan ditutup di area bawah, tekanan beli tidak efektif"
+        flow_icon = "fa-shield-alt"
+        flow_color = "danger"
+    elif open_position > 0.5 and close_position < 0.5:
+        flow_type = "MELEMAH"
+        flow_narrative = "Harga dibuka di atas tengah lalu turun ke bawah tengah"
+        flow_icon = "fa-angle-double-down"
+        flow_color = "warning"
+    elif open_position < 0.5 and close_position > 0.5:
+        flow_type = "MENGUAT"
+        flow_narrative = "Harga dibuka di bawah tengah lalu naik ke atas tengah"
+        flow_icon = "fa-angle-double-up"
+        flow_color = "info"
+    else:
+        flow_type = "NETRAL"
+        flow_narrative = "Harga dibuka dan ditutup di area yang relatif sama"
+        flow_icon = "fa-minus"
+        flow_color = "secondary"
+
+    flow = {
+        'type': flow_type,
+        'narrative': flow_narrative,
+        'icon': flow_icon,
+        'color': flow_color,
+        'open_pos': f"{open_position*100:.0f}%",
+        'close_pos': f"{close_position*100:.0f}%"
+    }
+
+    # ========== 2.2 STRUKTUR RANGE ==========
+    # Get average range from previous days if available
+    avg_value = data.get('avg_value_20d', data.get('value', 0))
+    today_value = data.get('value', 0)
+    value_ratio = today_value / avg_value if avg_value > 0 else 1
+
+    # Determine range structure
+    is_wide_range = range_percent > 3  # > 3% range considered wide
+    is_directional = abs(close_position - 0.5) > 0.3  # Close far from middle
+
+    if is_wide_range and not is_directional:
+        range_type = "LEBAR & KASAR"
+        range_narrative = "Range lebar dengan penutupan tidak tegas - harga dilepas, kontrol rendah"
+        range_icon = "fa-expand-arrows-alt"
+        range_color = "warning"
+        range_control = "RENDAH"
+    elif is_wide_range and is_directional:
+        range_type = "LEBAR & TERARAH"
+        range_narrative = "Range lebar dengan arah jelas - dorongan satu arah yang kuat"
+        range_icon = "fa-arrows-alt-v"
+        range_color = "info"
+        range_control = "SEDANG"
+    elif not is_wide_range and is_directional:
+        range_type = "SEMPIT & TERARAH"
+        range_narrative = "Range sempit dengan arah jelas - pergerakan terkontrol dan efisien"
+        range_icon = "fa-compress-arrows-alt"
+        range_color = "success"
+        range_control = "TINGGI"
+    elif not is_wide_range and not is_directional:
+        range_type = "SEMPIT & RAPI"
+        range_narrative = "Range sempit dengan penutupan netral - harga dikurung, kontrol tinggi"
+        range_icon = "fa-lock"
+        range_color = "secondary"
+        range_control = "TINGGI"
+    else:
+        range_type = "NORMAL"
+        range_narrative = "Range dan struktur dalam batas normal"
+        range_icon = "fa-equals"
+        range_color = "secondary"
+        range_control = "SEDANG"
+
+    range_structure = {
+        'type': range_type,
+        'narrative': range_narrative,
+        'icon': range_icon,
+        'color': range_color,
+        'control': range_control,
+        'range_percent': f"{range_percent:.2f}%",
+        'range_value': f"{price_range:,.0f}"
+    }
+
+    # ========== 2.3 LOKASI PENUTUPAN ==========
+    if close_position >= 0.8:
+        close_type = "SANGAT DEKAT HIGH"
+        close_narrative = "Pembeli dominan penuh sampai akhir - penutupan sangat kuat"
+        close_icon = "fa-arrow-circle-up"
+        close_color = "success"
+        winner = "PEMBELI"
+    elif close_position >= 0.6:
+        close_type = "DEKAT HIGH"
+        close_narrative = "Pembeli dominan sampai akhir - penutupan cukup kuat"
+        close_icon = "fa-arrow-up"
+        close_color = "success"
+        winner = "PEMBELI"
+    elif close_position <= 0.2:
+        close_type = "SANGAT DEKAT LOW"
+        close_narrative = "Penjual dominan penuh sampai akhir - penutupan sangat lemah"
+        close_icon = "fa-arrow-circle-down"
+        close_color = "danger"
+        winner = "PENJUAL"
+    elif close_position <= 0.4:
+        close_type = "DEKAT LOW"
+        close_narrative = "Penjual dominan sampai akhir - penutupan cukup lemah"
+        close_icon = "fa-arrow-down"
+        close_color = "danger"
+        winner = "PENJUAL"
+    else:
+        close_type = "DI TENGAH"
+        close_narrative = "Tarik-menarik belum selesai - tidak ada pemenang jelas hari ini"
+        close_icon = "fa-arrows-alt-h"
+        close_color = "warning"
+        winner = "SERI"
+
+    close_location = {
+        'type': close_type,
+        'narrative': close_narrative,
+        'icon': close_icon,
+        'color': close_color,
+        'winner': winner,
+        'position_pct': f"{close_position*100:.0f}%"
+    }
+
+    # ========== 2.4 RITME PERGERAKAN ==========
+    # Sesuai spesifikasi: Volume, Freq, Range, Change
+    # Volume & Freq = intensitas partisipasi
+    # Range = lebar pergerakan
+    # Change = arah dan magnitude
+
+    # Get volume and frequency data
+    today_volume = data.get('volume', 0)
+    today_freq = data.get('frequency', 0)
+    avg_volume_20d = data.get('avg_volume_20d', today_volume)
+    avg_freq_20d = data.get('avg_freq_20d', today_freq)
+
+    # Calculate ratios
+    volume_ratio = today_volume / avg_volume_20d if avg_volume_20d > 0 else 1
+    freq_ratio = today_freq / avg_freq_20d if avg_freq_20d > 0 else 1
+
+    # Determine activity level (gabungan volume + freq)
+    is_high_volume = volume_ratio > 1.3
+    is_low_volume = volume_ratio < 0.7
+    is_high_freq = freq_ratio > 1.3
+    is_low_freq = freq_ratio < 0.7
+
+    # Combined activity score
+    is_ramai = is_high_volume and is_high_freq  # Keduanya tinggi = ramai
+    is_sepi = is_low_volume and is_low_freq      # Keduanya rendah = sepi
+    is_mixed = (is_high_volume and is_low_freq) or (is_low_volume and is_high_freq)
+
+    # Change magnitude untuk menentukan urgensi
+    change_magnitude = abs(change) if change else 0
+    is_big_move = change_magnitude > 2  # > 2% dianggap pergerakan besar
+    is_small_move = change_magnitude < 0.5  # < 0.5% dianggap pergerakan kecil
+
+    # Determine rhythm type berdasarkan kombinasi semua faktor
+    if is_wide_range and is_ramai and is_big_move:
+        rhythm_type = "CEPAT & RAMAI"
+        rhythm_narrative = f"Pergerakan cepat (range {range_percent:.1f}%) dengan volume {volume_ratio:.1f}x dan frekuensi {freq_ratio:.1f}x dari rata-rata - ada urgensi di pasar"
+        rhythm_icon = "fa-bolt"
+        rhythm_color = "danger"
+        rhythm_feel = "PANIC/EUFORIA"
+    elif is_wide_range and is_sepi:
+        rhythm_type = "LIAR & SEPI"
+        rhythm_narrative = f"Range lebar ({range_percent:.1f}%) tapi volume {volume_ratio:.1f}x dan frekuensi {freq_ratio:.1f}x rendah - pergerakan mudah dimanipulasi"
+        rhythm_icon = "fa-random"
+        rhythm_color = "warning"
+        rhythm_feel = "TIDAK NATURAL"
+    elif is_wide_range and is_mixed:
+        rhythm_type = "TIDAK SEIMBANG"
+        rhythm_narrative = f"Range lebar ({range_percent:.1f}%) dengan ketidakseimbangan volume/frekuensi - perlu perhatian"
+        rhythm_icon = "fa-exclamation-triangle"
+        rhythm_color = "warning"
+        rhythm_feel = "WASPADA"
+    elif not is_wide_range and is_ramai:
+        rhythm_type = "TERKONTROL & RAMAI"
+        rhythm_narrative = f"Pergerakan terkendali (range {range_percent:.1f}%) dengan volume {volume_ratio:.1f}x dan frekuensi {freq_ratio:.1f}x tinggi - ada yang mengatur"
+        rhythm_icon = "fa-hand-paper"
+        rhythm_color = "info"
+        rhythm_feel = "CONTROLLED"
+    elif not is_wide_range and is_sepi:
+        rhythm_type = "DIAM & SEPI"
+        rhythm_narrative = f"Range sempit ({range_percent:.1f}%) dan volume/frekuensi rendah - pasar tidak tertarik"
+        rhythm_icon = "fa-moon"
+        rhythm_color = "secondary"
+        rhythm_feel = "WAIT & SEE"
+    elif is_ramai and is_small_move:
+        rhythm_type = "RAMAI TAPI DATAR"
+        rhythm_narrative = f"Volume {volume_ratio:.1f}x dan frekuensi {freq_ratio:.1f}x tinggi tapi pergerakan hanya {change_magnitude:.1f}% - ada yang menahan"
+        rhythm_icon = "fa-compress-arrows-alt"
+        rhythm_color = "info"
+        rhythm_feel = "ABSORPTION"
+    elif is_sepi and is_big_move:
+        rhythm_type = "GERAK RINGAN"
+        rhythm_narrative = f"Pergerakan {change_magnitude:.1f}% dengan volume/frekuensi rendah - mudah berbalik"
+        rhythm_icon = "fa-feather"
+        rhythm_color = "warning"
+        rhythm_feel = "RAWAN REVERSAL"
+    else:
+        rhythm_type = "NORMAL"
+        rhythm_narrative = f"Ritme pergerakan dalam batas wajar (volume {volume_ratio:.1f}x, frekuensi {freq_ratio:.1f}x)"
+        rhythm_icon = "fa-heartbeat"
+        rhythm_color = "secondary"
+        rhythm_feel = "NORMAL"
+
+    rhythm = {
+        'type': rhythm_type,
+        'narrative': rhythm_narrative,
+        'icon': rhythm_icon,
+        'color': rhythm_color,
+        'feel': rhythm_feel,
+        'volume_ratio': f"{volume_ratio:.2f}x",
+        'freq_ratio': f"{freq_ratio:.2f}x",
+        'change_magnitude': f"{change_magnitude:.2f}%"
+    }
+
+    # ========== 2.5 HUBUNGAN DENGAN AVG ==========
+    if avg > 0:
+        close_vs_avg_pct = ((close - avg) / avg) * 100
+        open_vs_avg_pct = ((open_price - avg) / avg) * 100
+
+        if close > avg and open_price > avg:
+            avg_type = "SELALU DI ATAS AVG"
+            avg_narrative = "Sepanjang hari harga dominan di atas rata-rata transaksi - jalur pembeli"
+            avg_icon = "fa-level-up-alt"
+            avg_color = "success"
+            avg_dominance = "PEMBELI"
+        elif close < avg and open_price < avg:
+            avg_type = "SELALU DI BAWAH AVG"
+            avg_narrative = "Sepanjang hari harga dominan di bawah rata-rata transaksi - jalur penjual"
+            avg_icon = "fa-level-down-alt"
+            avg_color = "danger"
+            avg_dominance = "PENJUAL"
+        elif open_price > avg and close < avg:
+            avg_type = "TURUN MENEMBUS AVG"
+            avg_narrative = "Harga dibuka di atas avg lalu turun menembus - tekanan jual menerobos"
+            avg_icon = "fa-angle-double-down"
+            avg_color = "danger"
+            avg_dominance = "PENJUAL MENANG"
+        elif open_price < avg and close > avg:
+            avg_type = "NAIK MENEMBUS AVG"
+            avg_narrative = "Harga dibuka di bawah avg lalu naik menembus - tekanan beli menerobos"
+            avg_icon = "fa-angle-double-up"
+            avg_color = "success"
+            avg_dominance = "PEMBELI MENANG"
+        else:
+            avg_type = "BOLAK-BALIK AVG"
+            avg_narrative = "Harga bolak-balik menyeberangi rata-rata - tidak ada dominasi jelas"
+            avg_icon = "fa-sync"
+            avg_color = "warning"
+            avg_dominance = "TIDAK JELAS"
+    else:
+        avg_type = "N/A"
+        avg_narrative = "Data rata-rata tidak tersedia"
+        avg_icon = "fa-question"
+        avg_color = "secondary"
+        avg_dominance = "N/A"
+        close_vs_avg_pct = 0
+
+    avg_relation = {
+        'type': avg_type,
+        'narrative': avg_narrative,
+        'icon': avg_icon,
+        'color': avg_color,
+        'dominance': avg_dominance,
+        'close_vs_avg': f"{close_vs_avg_pct:+.2f}%"
+    }
+
+    # ========== GENERATE FULL NARRATIVE PARAGRAPH ==========
+    # Build narrative based on all components
+    direction_word = "turun" if change < 0 else ("naik" if change > 0 else "datar")
+
+    # Determine movement style word (aligned with summary_questions)
+    # KASAR = only for chaos/wild moves, TERARAH = directional even if wide
+    if range_control == "TINGGI":
+        movement_style = "terkontrol"
+    elif range_control == "SEDANG" and is_directional:
+        movement_style = "terarah"  # Wide but directional = terarah, not kasar
+    elif range_control == "RENDAH":
+        movement_style = "liar"  # Only truly chaotic moves
+    else:
+        movement_style = "normal"
+
+    narrative_parts = []
+
+    # Part 1: Opening and flow
+    if flow_type == "DITEKAN":
+        narrative_parts.append(f"Harga dibuka relatif tinggi, namun sejak awal tekanan jual muncul dan harga bergerak turun secara {movement_style}.")
+    elif flow_type == "DIPULIHKAN":
+        narrative_parts.append(f"Harga dibuka rendah, namun tekanan beli berhasil memulihkan harga secara {movement_style}.")
+    elif flow_type == "DIPERTAHANKAN ATAS":
+        narrative_parts.append("Harga dibuka dan dipertahankan di area atas sepanjang hari, tekanan jual tidak mampu menekan.")
+    elif flow_type == "DIPERTAHANKAN BAWAH":
+        narrative_parts.append("Harga dibuka dan terjebak di area bawah sepanjang hari, tekanan beli tidak mampu mengangkat.")
+    else:
+        narrative_parts.append(f"Harga bergerak {direction_word} dengan pola {flow_type.lower()}.")
+
+    # Part 2: Range structure
+    narrative_parts.append(f"Range pergerakan {range_type.lower()} ({range_percent:.1f}%), menunjukkan {range_narrative.split(' - ')[1] if ' - ' in range_narrative else 'pergerakan normal'}.")
+
+    # Part 3: Close location
+    narrative_parts.append(f"Penutupan terjadi {close_type.lower()} ({close_position*100:.0f}% dari range), {close_narrative.split(' - ')[1] if ' - ' in close_narrative else ''}.")
+
+    # Part 4: Avg relation
+    if avg > 0:
+        narrative_parts.append(f"Sepanjang hari, {avg_narrative.lower()}.")
+
+    full_narrative = " ".join(narrative_parts)
+
+    # ========== SUMMARY QUESTIONS ==========
+    # Aligned terminology: TERKONTROL / TERARAH / LIAR
+    if range_control == "TINGGI":
+        control_answer = "TERKONTROL"
+    elif range_control == "SEDANG" and is_directional:
+        control_answer = "TERARAH"
+    elif range_control == "RENDAH":
+        control_answer = "LIAR"
+    else:
+        control_answer = "NORMAL"
+
+    summary_questions = {
+        'didorong_ditekan_dikurung': flow_type,
+        'kasar_atau_terkontrol': control_answer,
+        'siapa_menang': winner,
+        'selesai_atau_proses': "SELESAI" if abs(close_position - 0.5) > 0.3 else "MASIH PROSES",
+        'selesai_note': "Keputusan intrahari, bukan konfirmasi tren"  # Clarification
+    }
+
+    return {
+        'flow': flow,
+        'range_structure': range_structure,
+        'close_location': close_location,
+        'rhythm': rhythm,
+        'avg_relation': avg_relation,
+        'full_narrative': full_narrative,
+        'summary_questions': summary_questions
+    }
+
+
+def get_multiday_data(stock_code: str, days: int = 10) -> list:
+    """
+    Get multi-day OHLCV data for compression & absorption analysis.
+    Returns list of daily data ordered from oldest to newest.
+    """
+    try:
+        query = """
+            SELECT date, open_price, high_price, low_price, close_price, avg_price,
+                   volume, value, frequency, net_foreign, change_value, change_percent
+            FROM stock_daily
+            WHERE stock_code = %s
+            ORDER BY date DESC
+            LIMIT %s
+        """
+        results = execute_query(query, (stock_code, days))
+
+        if not results:
+            return []
+
+        df = pd.DataFrame(results)
+        df['date'] = pd.to_datetime(df['date'])
+
+        # Sort by date ascending (oldest first) for proper change calculation
+        df = df.sort_values('date', ascending=True).reset_index(drop=True)
+
+        # Convert to list of dicts, ordered oldest to newest
+        data_list = []
+        prev_close = None
+
+        for idx, row in df.iterrows():
+            close_price = float(row['close_price']) if pd.notna(row['close_price']) else 0
+            open_price = float(row['open_price']) if pd.notna(row['open_price']) else 0
+            high_price = float(row['high_price']) if pd.notna(row['high_price']) else 0
+            low_price = float(row['low_price']) if pd.notna(row['low_price']) else 0
+
+            # Calculate change_percent
+            change_pct = float(row['change_percent']) if pd.notna(row.get('change_percent')) else 0
+
+            # If change_percent is 0 or NULL, calculate from previous close
+            if change_pct == 0 and prev_close is not None and prev_close != 0:
+                change_pct = ((close_price - prev_close) / prev_close) * 100
+            # If still 0 and no prev_close, try from change_value
+            elif change_pct == 0 and pd.notna(row.get('change_value')) and row['change_value'] != 0:
+                change_val = float(row['change_value'])
+                calc_prev = close_price - change_val
+                if calc_prev != 0:
+                    change_pct = (change_val / calc_prev) * 100
+
+            data_list.append({
+                'date': row['date'],
+                'open': open_price,
+                'high': high_price,
+                'low': low_price,
+                'close': close_price,
+                'avg': float(row['avg_price']) if pd.notna(row.get('avg_price')) else 0,
+                'volume': int(row['volume']) if pd.notna(row['volume']) else 0,
+                'value': float(row['value']) if pd.notna(row['value']) else 0,
+                'frequency': int(row['frequency']) if pd.notna(row.get('frequency')) else 0,
+                'net_foreign': float(row['net_foreign']) if pd.notna(row.get('net_foreign')) else 0,
+                'change': change_pct,
+            })
+
+            prev_close = close_price
+
+        return data_list
+    except Exception as e:
+        print(f"Error getting multiday data: {e}")
+        return []
+
+
+def get_weekly_analysis(stock_code: str) -> dict:
+    """
+    Get weekly ACCUMULATION analysis for 4 weeks (1, 2, 3, 4 minggu).
+    Uses V6 formula: Volume in lower half vs upper half to detect accumulation.
+    """
+    try:
+        # Get 20 trading days data (approx 4 weeks)
+        query = """
+            SELECT date, open_price, high_price, low_price, close_price,
+                   volume, value, change_percent,
+                   foreign_buy, foreign_sell, net_foreign
+            FROM stock_daily
+            WHERE stock_code = %s
+            ORDER BY date DESC
+            LIMIT 20
+        """
+        results = execute_query(query, (stock_code,))
+
+        if not results or len(results) < 5:
+            return {'error': 'Data tidak cukup', 'weeks': {}}
+
+        df = pd.DataFrame(results)
+        df['date'] = pd.to_datetime(df['date'])
+        df = df.sort_values('date', ascending=True).reset_index(drop=True)
+
+        # Convert numeric columns
+        for col in ['open_price', 'high_price', 'low_price', 'close_price', 'volume', 'value', 'change_percent', 'foreign_buy', 'foreign_sell', 'net_foreign']:
+            df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+
+        weeks_data = {}
+        total_days = len(df)
+
+        # Split into 4 weeks (5 trading days each)
+        for week_num in range(1, 5):
+            end_idx = total_days - (week_num - 1) * 5
+            start_idx = max(0, end_idx - 5)
+
+            if start_idx >= end_idx or end_idx <= 0:
+                continue
+
+            week_df = df.iloc[start_idx:end_idx].copy()
+
+            if len(week_df) == 0:
+                continue
+
+            # Calculate weekly price metrics
+            week_open = week_df['open_price'].iloc[0]
+            week_close = week_df['close_price'].iloc[-1]
+            week_high = week_df['high_price'].max()
+            week_low = week_df['low_price'].min()
+            week_range = ((week_high - week_low) / week_low * 100) if week_low > 0 else 0
+            week_avg_volume = week_df['volume'].mean()
+            week_total_volume = week_df['volume'].sum()
+
+            # === FOREIGN FLOW ===
+            week_foreign_buy = week_df['foreign_buy'].sum()
+            week_foreign_sell = week_df['foreign_sell'].sum()
+            week_net_foreign = week_df['net_foreign'].sum()
+
+            # Convert foreign from Rupiah to Lot (Value / AvgPrice / 100)
+            week_avg_price = week_df['close_price'].mean()
+            if week_avg_price > 0:
+                week_net_foreign_lot = week_net_foreign / week_avg_price / 100
+            else:
+                week_net_foreign_lot = 0
+
+            # === V6 ACCUMULATION ANALYSIS ===
+            # Calculate midpoint of weekly range
+            midpoint = (week_high + week_low) / 2
+
+            # Calculate volume in lower half vs upper half
+            vol_lower = 0
+            vol_upper = 0
+            days_lower = 0
+            days_upper = 0
+
+            for _, row in week_df.iterrows():
+                avg_price = (row['high_price'] + row['low_price'] + row['close_price']) / 3
+                if avg_price <= midpoint:
+                    vol_lower += row['volume']
+                    days_lower += 1
+                else:
+                    vol_upper += row['volume']
+                    days_upper += 1
+
+            # Calculate volume ratio (V6 formula)
+            vol_ratio = vol_lower / vol_upper if vol_upper > 0 else (2.0 if vol_lower > 0 else 1.0)
+
+            # Determine phase based on volume ratio (V6.1 - Updated threshold)
+            # ACCUMULATION requires VR > 3.0 (backtest proven)
+            if vol_ratio > 4.0:
+                phase = 'ACCUMULATION'
+                phase_color = 'success'
+                phase_icon = '🟢'
+            elif vol_ratio < 0.8:
+                phase = 'DISTRIBUTION'
+                phase_color = 'danger'
+                phase_icon = '🔴'
+            elif vol_ratio > 1.5:
+                phase = 'WEAK ACC'
+                phase_color = 'warning'
+                phase_icon = '🟡'
+            else:
+                phase = 'NEUTRAL'
+                phase_color = 'secondary'
+                phase_icon = '⚪'
+
+            # Calculate accumulation score (0-100)
+            if vol_ratio > 1:
+                acc_score = min(100, int((vol_ratio - 1) * 100))
+            else:
+                acc_score = max(0, int((1 - (1 / vol_ratio)) * -100)) if vol_ratio > 0 else 0
+
+            # Chart data for volume bars
+            chart_data = {
+                'dates': week_df['date'].dt.strftime('%d/%m').tolist(),
+                'volumes': week_df['volume'].tolist(),
+                'closes': week_df['close_price'].tolist(),
+                'vol_lower': vol_lower,
+                'vol_upper': vol_upper,
+            }
+
+            week_label = f"Minggu {week_num}" if week_num == 1 else f"{week_num} Minggu Lalu"
+
+            weeks_data[week_num] = {
+                'label': week_label,
+                'start_date': week_df['date'].iloc[0].strftime('%d %b'),
+                'end_date': week_df['date'].iloc[-1].strftime('%d %b'),
+                'high': week_high,
+                'low': week_low,
+                'midpoint': midpoint,
+                'range_pct': week_range,
+                'avg_volume': week_avg_volume,
+                'total_volume': week_total_volume,
+                # Foreign flow
+                'foreign_buy': week_foreign_buy,
+                'foreign_sell': week_foreign_sell,
+                'net_foreign': week_net_foreign,
+                'net_foreign_lot': week_net_foreign_lot,
+                'avg_price': week_avg_price,
+                # V6 Accumulation metrics
+                'vol_lower': vol_lower,
+                'vol_upper': vol_upper,
+                'vol_ratio': vol_ratio,
+                'days_lower': days_lower,
+                'days_upper': days_upper,
+                'phase': phase,
+                'phase_color': phase_color,
+                'phase_icon': phase_icon,
+                'acc_score': acc_score,
+                'chart_data': chart_data,
+                'days_count': len(week_df),
+            }
+
+        return {'weeks': weeks_data, 'total_days': total_days}
+
+    except Exception as e:
+        print(f"Error getting weekly analysis: {e}")
+        return {'error': str(e), 'weeks': {}}
+
+
+def analyze_compression_absorption(multiday_data: list) -> dict:
+    """
+    POINT 3 - Compression & Absorption Analysis
+    Analyzes multi-day data to detect:
+    - Compression: range narrowing, volatility decreasing
+    - Absorption: pressure failing to continue
+
+    Returns narrative analysis of market phase.
+    """
+    if not multiday_data or len(multiday_data) < 5:
+        return {
+            'compression': {'detected': False, 'type': 'N/A', 'narrative': 'Data tidak cukup untuk analisis (minimal 5 hari)'},
+            'absorption': {'detected': False, 'type': 'N/A', 'narrative': 'Data tidak cukup untuk analisis'},
+            'phase': 'TIDAK DAPAT DIANALISIS',
+            'full_narrative': 'Data historis tidak mencukupi untuk analisis compression & absorption.',
+            'key_questions': {},
+            'data_used': []
+        }
+
+    # ========== CALCULATE METRICS ==========
+    n = len(multiday_data)
+
+    # Extract arrays for analysis
+    ranges = [(d['high'] - d['low']) for d in multiday_data]
+    closes = [d['close'] for d in multiday_data]
+    highs = [d['high'] for d in multiday_data]
+    lows = [d['low'] for d in multiday_data]
+    volumes = [d['volume'] for d in multiday_data]
+    values = [d['value'] for d in multiday_data]
+    freqs = [d['frequency'] for d in multiday_data]
+    changes = [d['change'] for d in multiday_data]
+
+    # Split into periods for comparison (first half vs second half)
+    mid = n // 2
+    early_ranges = ranges[:mid]
+    recent_ranges = ranges[mid:]
+
+    avg_early_range = sum(early_ranges) / len(early_ranges) if early_ranges else 0
+    avg_recent_range = sum(recent_ranges) / len(recent_ranges) if recent_ranges else 0
+
+    # Range trend (is it narrowing?)
+    range_ratio = avg_recent_range / avg_early_range if avg_early_range > 0 else 1
+    is_range_narrowing = range_ratio < 0.8  # Recent range < 80% of early range
+    is_range_stable = 0.8 <= range_ratio <= 1.2
+    is_range_widening = range_ratio > 1.2
+
+    # Close position consistency (are closes clustering?)
+    recent_closes = closes[mid:]
+    close_std = pd.Series(recent_closes).std() if len(recent_closes) > 1 else 0
+    avg_close = sum(recent_closes) / len(recent_closes) if recent_closes else 0
+    close_cv = (close_std / avg_close * 100) if avg_close > 0 else 0  # Coefficient of variation
+    is_close_clustering = close_cv < 2  # Low variation = clustering
+
+    # ========== COMPRESSION ANALYSIS ==========
+    # Compression = range narrowing + close clustering + market still alive
+    avg_volume = sum(volumes) / len(volumes) if volumes else 0
+    recent_volume_ratio = (sum(volumes[mid:]) / len(volumes[mid:])) / avg_volume if avg_volume > 0 else 1
+    is_market_alive = recent_volume_ratio > 0.5  # Volume not dead
+
+    compression_detected = is_range_narrowing and is_market_alive
+    compression_strong = compression_detected and is_close_clustering
+
+    if compression_strong:
+        compression_type = "COMPRESSION KUAT"
+        compression_narrative = f"Range menyempit signifikan ({range_ratio:.0%} dari sebelumnya) dengan close yang mengumpul. Pasar masih hidup (volume {recent_volume_ratio:.1f}x rata-rata). Harga seperti sedang dikurung."
+        compression_icon = "fa-compress-arrows-alt"
+        compression_color = "info"
+    elif compression_detected:
+        compression_type = "COMPRESSION MODERAT"
+        compression_narrative = f"Range mulai menyempit ({range_ratio:.0%} dari sebelumnya). Volatilitas menurun meski pasar masih aktif."
+        compression_icon = "fa-compress"
+        compression_color = "primary"
+    elif is_range_stable:
+        compression_type = "TIDAK ADA COMPRESSION"
+        compression_narrative = "Range relatif stabil, tidak ada tanda-tanda pengurangan volatilitas yang signifikan."
+        compression_icon = "fa-equals"
+        compression_color = "secondary"
+    else:
+        compression_type = "EXPANSION"
+        compression_narrative = f"Range justru melebar ({range_ratio:.0%} dari sebelumnya). Volatilitas meningkat, bukan compression."
+        compression_icon = "fa-expand-arrows-alt"
+        compression_color = "warning"
+
+    compression = {
+        'detected': compression_detected,
+        'strong': compression_strong,
+        'type': compression_type,
+        'narrative': compression_narrative,
+        'icon': compression_icon,
+        'color': compression_color,
+        'range_ratio': f"{range_ratio:.0%}",
+        'close_clustering': f"{close_cv:.1f}%"
+    }
+
+    # ========== ABSORPTION ANALYSIS ==========
+    # Absorption = pressure comes but fails to continue
+    # Check if lows are holding (sell pressure absorbed) or highs are capped (buy pressure absorbed)
+
+    recent_lows = lows[mid:]
+    recent_highs = highs[mid:]
+    early_lows = lows[:mid]
+    early_highs = highs[:mid]
+
+    # Count down days and up days
+    down_days = sum(1 for c in changes[mid:] if c < -0.5)
+    up_days = sum(1 for c in changes[mid:] if c > 0.5)
+
+    # Check if lows are holding despite down pressure
+    min_early_low = min(early_lows) if early_lows else 0
+    min_recent_low = min(recent_lows) if recent_lows else 0
+    lows_holding = min_recent_low >= min_early_low * 0.98  # Recent low not breaking early low
+
+    # Check if highs are capped despite up pressure
+    max_early_high = max(early_highs) if early_highs else 0
+    max_recent_high = max(recent_highs) if recent_highs else 0
+    highs_capped = max_recent_high <= max_early_high * 1.02  # Recent high not breaking early high
+
+    # Determine absorption type
+    sell_absorption = down_days >= 2 and lows_holding
+    buy_absorption = up_days >= 2 and highs_capped
+
+    if sell_absorption and not buy_absorption:
+        absorption_type = "ABSORPTION JUAL"
+        absorption_narrative = f"Tekanan jual muncul ({down_days} hari turun) namun low tidak makin rendah. Tekanan jual mulai diserap."
+        absorption_icon = "fa-hand-holding"
+        absorption_color = "success"
+        absorption_detected = True
+        absorption_direction = "SELL ABSORBED"
+    elif buy_absorption and not sell_absorption:
+        absorption_type = "ABSORPTION BELI"
+        absorption_narrative = f"Tekanan beli muncul ({up_days} hari naik) namun high tidak makin tinggi. Tekanan beli mulai diserap."
+        absorption_icon = "fa-hand-paper"
+        absorption_color = "warning"
+        absorption_detected = True
+        absorption_direction = "BUY ABSORBED"
+    elif sell_absorption and buy_absorption:
+        absorption_type = "ABSORPTION DUA ARAH"
+        absorption_narrative = "Baik tekanan jual maupun beli tidak menghasilkan kelanjutan. Harga tertahan di area yang sama."
+        absorption_icon = "fa-hands"
+        absorption_color = "info"
+        absorption_detected = True
+        absorption_direction = "BOTH ABSORBED"
+    else:
+        absorption_type = "BELUM ADA ABSORPTION"
+        absorption_narrative = "Tekanan masih efektif menggerakkan harga. Belum ada tanda penyerapan."
+        absorption_icon = "fa-arrows-alt-v"
+        absorption_color = "secondary"
+        absorption_detected = False
+        absorption_direction = "NONE"
+
+    absorption = {
+        'detected': absorption_detected,
+        'type': absorption_type,
+        'narrative': absorption_narrative,
+        'icon': absorption_icon,
+        'color': absorption_color,
+        'direction': absorption_direction,
+        'down_days': down_days,
+        'up_days': up_days,
+        'lows_holding': lows_holding,
+        'highs_capped': highs_capped
+    }
+
+    # ========== DETERMINE PHASE ==========
+    # Each phase includes an education_note to help users understand the context
+    if compression_strong and absorption_detected:
+        if absorption_direction == "SELL ABSORBED":
+            phase = "COMPRESSION + ABSORPTION JUAL"
+            phase_narrative = "Fase penahanan harga (compression) terbentuk akibat tekanan jual yang mulai diserap. Range mengecil dan low bertahan."
+            phase_color = "success"
+            phase_implication = "Tekanan turun mulai kehilangan daya. Belum berarti naik, tapi turun mulai mentok."
+            education_note = "Fase ini menarik karena tekanan jual sudah tidak efektif. Perhatikan apakah kondisi ini berlanjut."
+        elif absorption_direction == "BUY ABSORBED":
+            phase = "COMPRESSION + ABSORPTION BELI"
+            phase_narrative = "Fase penahanan harga (compression) terbentuk akibat tekanan beli yang mulai diserap. Range mengecil dan high tertahan."
+            phase_color = "warning"
+            phase_implication = "Tekanan naik mulai kehilangan momentum. Belum berarti turun, tapi naik mulai berat."
+            education_note = "Fase ini menunjukkan kelelahan pembeli. Perhatikan apakah tekanan beli masih datang tanpa hasil."
+        else:
+            phase = "COMPRESSION + ABSORPTION DUA ARAH"
+            phase_narrative = "Fase penahanan harga (compression) dengan kedua tekanan yang diserap. Pasar dalam keseimbangan."
+            phase_color = "info"
+            phase_implication = "Pasar menunggu. Tidak ada arah jelas."
+            education_note = "Kedua sisi tertahan. Biasanya fase ini berakhir dengan breakout ke salah satu arah."
+    elif compression_detected:
+        phase = "COMPRESSION TANPA ABSORPTION JELAS"
+        phase_narrative = "Range menyempit tapi belum terlihat tekanan yang jelas diserap. Fase menunggu."
+        phase_color = "secondary"
+        phase_implication = "Volatilitas menurun, pasar dalam mode tunggu."
+        education_note = "Range mengecil tapi belum ada tekanan signifikan yang gagal. Tunggu konfirmasi lebih lanjut."
+    elif absorption_detected:
+        phase = f"ABSORPTION TANPA COMPRESSION"
+        phase_narrative = f"Tekanan mulai diserap tapi range belum menyempit. Proses mungkin baru dimulai."
+        phase_color = absorption['color']
+        phase_implication = "Ada perlawanan terhadap tekanan, tapi belum terkurung."
+        education_note = "Tanda awal ada yang mulai menahan tekanan. Jika berlanjut, range akan mulai menyempit."
+    else:
+        phase = "TIDAK ADA COMPRESSION/ABSORPTION"
+        phase_narrative = "Tidak terdeteksi fase penahanan atau penyerapan. Harga masih bergerak bebas."
+        phase_color = "secondary"
+        phase_implication = "Belum ada fase menarik untuk analisis lanjutan."
+        education_note = "Fase compression/absorption biasanya muncul setelah tekanan mulai gagal. Saat ini tekanan masih bekerja normal."
+
+    # ========== GENERATE FULL NARRATIVE ==========
+    # Determine prior trend for context
+    total_change = sum(changes)
+    if total_change < -5:
+        prior_trend = "setelah penurunan"
+    elif total_change > 5:
+        prior_trend = "setelah kenaikan"
+    else:
+        prior_trend = "dalam kondisi sideways"
+
+    full_narrative_parts = []
+    full_narrative_parts.append(f"{prior_trend.capitalize()}, {phase_narrative.lower()}")
+
+    if compression_detected:
+        full_narrative_parts.append(f"Range pergerakan menyempit menjadi {range_ratio:.0%} dari periode sebelumnya.")
+
+    if absorption_detected:
+        if absorption_direction == "SELL ABSORBED":
+            full_narrative_parts.append("Tekanan jual tidak lagi mendorong harga lebih rendah.")
+        elif absorption_direction == "BUY ABSORBED":
+            full_narrative_parts.append("Tekanan beli tidak lagi mendorong harga lebih tinggi.")
+
+    full_narrative_parts.append(phase_implication)
+    full_narrative = " ".join(full_narrative_parts)
+
+    # ========== KEY QUESTIONS ==========
+    key_questions = {
+        'tekanan_efektif': "TIDAK" if absorption_detected else "YA",
+        'harga_bebas': "TIDAK" if compression_detected else "YA",
+        'kegagalan_berulang': "YA" if absorption_detected and (down_days >= 3 or up_days >= 3) else "TIDAK",
+        'range_menyempit': "YA" if is_range_narrowing else "TIDAK"
+    }
+
+    # Data summary for display
+    data_summary = []
+    for d in multiday_data[-5:]:  # Last 5 days
+        data_summary.append({
+            'date': d['date'].strftime('%d %b') if hasattr(d['date'], 'strftime') else str(d['date'])[:10],
+            'range': f"{((d['high'] - d['low']) / d['low'] * 100):.1f}%" if d['low'] > 0 else "N/A",
+            'close_pos': f"{((d['close'] - d['low']) / (d['high'] - d['low']) * 100):.0f}%" if (d['high'] - d['low']) > 0 else "50%",
+            'change': f"{d['change']:+.1f}%",
+            'volume': d['volume']
+        })
+
+    return {
+        'compression': compression,
+        'absorption': absorption,
+        'phase': phase,
+        'phase_color': phase_color,
+        'phase_narrative': phase_narrative,
+        'phase_implication': phase_implication,
+        'education_note': education_note,
+        'full_narrative': full_narrative,
+        'key_questions': key_questions,
+        'data_summary': data_summary,
+        'prior_trend': prior_trend,
+        'days_analyzed': n
+    }
+
+
+def analyze_accumulation_distribution(point3_result: dict, multiday_data: list) -> dict:
+    """
+    POINT 4 - Akumulasi & Distribusi
+    Membaca NIAT pasar berdasarkan fase yang sudah tervalidasi di Point 3.
+
+    ATURAN ARSITEKTUR:
+    - Point 4 TIDAK BOLEH aktif jika Point 3 belum jelas
+    - Point 4 membaca arah niat, bukan bertindak
+
+    Returns one of three statuses:
+    - POTENSI AKUMULASI
+    - POTENSI DISTRIBUSI
+    - BELUM DAPAT DITENTUKAN
+    """
+
+    # ========== GATE CHECK: Point 3 harus valid dulu ==========
+    compression_detected = point3_result.get('compression', {}).get('detected', False)
+    absorption_detected = point3_result.get('absorption', {}).get('detected', False)
+    prior_trend = point3_result.get('prior_trend', '')
+
+    # Jika Point 3 belum jelas, Point 4 harus diam
+    if not compression_detected and not absorption_detected:
+        return {
+            'active': False,
+            'status': 'POINT 4 TIDAK AKTIF',
+            'status_color': 'secondary',
+            'reason': 'Point 3 belum mendeteksi compression atau absorption. Point 4 menunggu.',
+            'narrative': 'Fase penahanan harga belum terbentuk. Analisis akumulasi/distribusi belum dapat dilakukan karena harga masih bergerak bebas.',
+            'education_note': 'Point 4 hanya aktif setelah Point 3 mendeteksi fase penahanan. Ini mencegah analisis prematur.',
+            'signals': {},
+            'confidence': 0
+        }
+
+    # ========== CONTEXT CHECK: Akumulasi setelah turun, Distribusi setelah naik ==========
+    is_after_decline = 'penurunan' in prior_trend.lower()
+    is_after_rise = 'kenaikan' in prior_trend.lower()
+    is_sideways = 'sideways' in prior_trend.lower()
+
+    # Get absorption direction from Point 3
+    absorption_direction = point3_result.get('absorption', {}).get('direction', 'NONE')
+
+    # ========== ANALYZE MULTI-DAY DATA FOR ACCUMULATION/DISTRIBUTION SIGNALS ==========
+    if not multiday_data or len(multiday_data) < 5:
+        return {
+            'active': False,
+            'status': 'DATA TIDAK CUKUP',
+            'status_color': 'secondary',
+            'reason': 'Data historis tidak mencukupi untuk analisis akumulasi/distribusi.',
+            'narrative': 'Minimal 5 hari data diperlukan untuk analisis Point 4.',
+            'education_note': 'Akumulasi dan distribusi adalah proses, bukan peristiwa. Butuh data beberapa hari.',
+            'signals': {},
+            'confidence': 0
+        }
+
+    n = len(multiday_data)
+    mid = n // 2
+
+    # Extract data
+    closes = [d['close'] for d in multiday_data]
+    highs = [d['high'] for d in multiday_data]
+    lows = [d['low'] for d in multiday_data]
+    volumes = [d['volume'] for d in multiday_data]
+    changes = [d['change'] for d in multiday_data]
+
+    # Recent period analysis
+    recent_data = multiday_data[mid:]
+    recent_closes = closes[mid:]
+    recent_highs = highs[mid:]
+    recent_lows = lows[mid:]
+    recent_changes = changes[mid:]
+
+    # ========== SIGNAL ANALYSIS ==========
+
+    # 1. Arah tekanan yang GAGAL (Jantung Point 4)
+    down_days = sum(1 for c in recent_changes if c < -0.5)
+    up_days = sum(1 for c in recent_changes if c > 0.5)
+
+    # Check if lows are holding (sell pressure failing)
+    min_recent_low = min(recent_lows) if recent_lows else 0
+    min_early_low = min(lows[:mid]) if lows[:mid] else 0
+    lows_holding = min_recent_low >= min_early_low * 0.98
+
+    # Check if highs are capped (buy pressure failing)
+    max_recent_high = max(recent_highs) if recent_highs else 0
+    max_early_high = max(highs[:mid]) if highs[:mid] else 0
+    highs_capped = max_recent_high <= max_early_high * 1.02
+
+    # 2. Perilaku Close
+    # For accumulation: close often not at extreme low
+    avg_close_position = 0
+    for d in recent_data:
+        rng = d['high'] - d['low']
+        if rng > 0:
+            pos = (d['close'] - d['low']) / rng
+            avg_close_position += pos
+    avg_close_position = avg_close_position / len(recent_data) if recent_data else 0.5
+
+    close_not_at_low = avg_close_position > 0.35  # Close typically above 35% of range
+    close_not_at_high = avg_close_position < 0.65  # Close typically below 65% of range
+
+    # 3. Range behavior (from Point 3)
+    range_ratio = point3_result.get('compression', {}).get('range_ratio', '100%')
+    try:
+        range_ratio_val = float(range_ratio.replace('%', '')) / 100
+    except:
+        range_ratio_val = 1.0
+    range_narrowing = range_ratio_val < 0.9
+
+    # 4. Activity weight (ramai tapi tidak jalan)
+    avg_volume = sum(volumes) / len(volumes) if volumes else 0
+    recent_avg_volume = sum(volumes[mid:]) / len(volumes[mid:]) if volumes[mid:] else 0
+    volume_ratio = recent_avg_volume / avg_volume if avg_volume > 0 else 1
+
+    total_recent_change = sum(recent_changes)
+    active_but_stuck = volume_ratio > 0.8 and abs(total_recent_change) < 3  # Volume normal tapi harga tidak kemana-mana
+
+    # ========== DETERMINE ACCUMULATION OR DISTRIBUTION ==========
+
+    # Accumulation signals
+    accumulation_signals = {
+        'context_valid': is_after_decline,  # Must be after decline
+        'sell_pressure_failing': down_days >= 2 and lows_holding,
+        'close_behavior': close_not_at_low,
+        'range_narrowing': range_narrowing,
+        'active_but_stuck': active_but_stuck,
+        'absorption_type_match': absorption_direction in ['SELL ABSORBED', 'BOTH ABSORBED']
+    }
+
+    # Distribution signals
+    distribution_signals = {
+        'context_valid': is_after_rise,  # Must be after rise
+        'buy_pressure_failing': up_days >= 2 and highs_capped,
+        'close_behavior': close_not_at_high,
+        'range_narrowing': range_narrowing,
+        'active_but_stuck': active_but_stuck,
+        'absorption_type_match': absorption_direction in ['BUY ABSORBED', 'BOTH ABSORBED']
+    }
+
+    # Count signals
+    acc_score = sum(1 for v in accumulation_signals.values() if v)
+    dist_score = sum(1 for v in distribution_signals.values() if v)
+
+    # ========== DETERMINE STATUS ==========
+
+    if acc_score >= 4 and accumulation_signals['context_valid']:
+        status = "POTENSI AKUMULASI"
+        status_color = "success"
+        confidence = min(acc_score / 6 * 100, 100)
+        narrative = f"Terlihat fase penahanan setelah penurunan, di mana tekanan jual mulai kehilangan efektivitas. Low bertahan meski ada {down_days} hari tekanan turun. Close rata-rata di posisi {avg_close_position*100:.0f}% dari range (tidak di ekstrem bawah)."
+        education_note = "Akumulasi adalah proses pengumpulan. Banyak yang ingin jual, tapi harga tidak mau turun jauh. Ini BUKAN sinyal entry, tapi indikasi arah niat."
+
+        signals_detail = {
+            'Konteks (setelah turun)': '✓ Valid' if accumulation_signals['context_valid'] else '✗ Tidak valid',
+            'Tekanan jual gagal': f"✓ {down_days} hari turun tapi low bertahan" if accumulation_signals['sell_pressure_failing'] else '✗ Tekanan masih efektif',
+            'Close tidak di low': f"✓ Rata-rata {avg_close_position*100:.0f}%" if accumulation_signals['close_behavior'] else f'✗ Close di {avg_close_position*100:.0f}%',
+            'Range menyempit': '✓ Ya' if accumulation_signals['range_narrowing'] else '✗ Tidak',
+            'Aktif tapi stuck': '✓ Ya' if accumulation_signals['active_but_stuck'] else '✗ Tidak',
+        }
+
+    elif dist_score >= 4 and distribution_signals['context_valid']:
+        status = "POTENSI DISTRIBUSI"
+        status_color = "warning"
+        confidence = min(dist_score / 6 * 100, 100)
+        narrative = f"Terlihat fase penahanan setelah kenaikan, di mana dorongan beli mulai kehilangan lanjutan. High tertahan meski ada {up_days} hari tekanan naik. Close rata-rata di posisi {avg_close_position*100:.0f}% dari range (tidak di ekstrem atas)."
+        education_note = "Distribusi adalah proses pelepasan. Banyak yang ingin beli, tapi harga tidak mau naik jauh. Ini BUKAN sinyal exit, tapi indikasi arah niat."
+
+        signals_detail = {
+            'Konteks (setelah naik)': '✓ Valid' if distribution_signals['context_valid'] else '✗ Tidak valid',
+            'Tekanan beli gagal': f"✓ {up_days} hari naik tapi high tertahan" if distribution_signals['buy_pressure_failing'] else '✗ Tekanan masih efektif',
+            'Close tidak di high': f"✓ Rata-rata {avg_close_position*100:.0f}%" if distribution_signals['close_behavior'] else f'✗ Close di {avg_close_position*100:.0f}%',
+            'Range menyempit': '✓ Ya' if distribution_signals['range_narrowing'] else '✗ Tidak',
+            'Aktif tapi stuck': '✓ Ya' if distribution_signals['active_but_stuck'] else '✗ Tidak',
+        }
+
+    elif compression_detected or absorption_detected:
+        # Ada fase penahanan tapi belum cukup sinyal untuk akumulasi/distribusi
+        status = "BELUM DAPAT DITENTUKAN"
+        status_color = "info"
+        confidence = max(acc_score, dist_score) / 6 * 100
+
+        if is_sideways:
+            narrative = "Fase penahanan terdeteksi dalam kondisi sideways. Konteks belum jelas apakah ini akumulasi atau distribusi."
+            context_note = "Tanpa prior trend yang jelas (naik/turun), sulit menentukan niat di balik penahanan."
+        elif not accumulation_signals['context_valid'] and not distribution_signals['context_valid']:
+            narrative = "Fase penahanan terdeteksi, namun konteks tidak sesuai. Akumulasi butuh prior trend turun, distribusi butuh prior trend naik."
+            context_note = "Konteks adalah kunci. Akumulasi di puncak atau distribusi di dasar adalah kesalahan klasik."
+        else:
+            narrative = "Fase penahanan terdeteksi, namun sinyal belum cukup kuat untuk disimpulkan sebagai akumulasi atau distribusi."
+            context_note = "Tunggu lebih banyak konfirmasi. Proses ini butuh waktu."
+
+        education_note = context_note
+        signals_detail = {
+            'Skor Akumulasi': f"{acc_score}/6 sinyal",
+            'Skor Distribusi': f"{dist_score}/6 sinyal",
+            'Konteks setelah turun': '✓' if is_after_decline else '✗',
+            'Konteks setelah naik': '✓' if is_after_rise else '✗',
+        }
+    else:
+        # Fallback
+        status = "BELUM DAPAT DITENTUKAN"
+        status_color = "secondary"
+        confidence = 0
+        narrative = "Belum ada cukup data atau sinyal untuk menentukan akumulasi atau distribusi."
+        education_note = "Point 4 membutuhkan fase penahanan yang tervalidasi di Point 3."
+        signals_detail = {}
+
+    return {
+        'active': True if (compression_detected or absorption_detected) else False,
+        'status': status,
+        'status_color': status_color,
+        'confidence': confidence,
+        'narrative': narrative,
+        'education_note': education_note,
+        'signals': signals_detail,
+        'metrics': {
+            'down_days': down_days,
+            'up_days': up_days,
+            'lows_holding': lows_holding,
+            'highs_capped': highs_capped,
+            'avg_close_position': f"{avg_close_position*100:.0f}%",
+            'volume_ratio': f"{volume_ratio:.2f}x",
+            'total_recent_change': f"{total_recent_change:+.1f}%"
+        },
+        'prior_trend': prior_trend,
+        'acc_score': acc_score,
+        'dist_score': dist_score
+    }
+
+
+def analyze_entry_confirmation(point4_result: dict, point3_result: dict, multiday_data: list, snapshot: dict) -> dict:
+    """
+    POINT 5 - Entry Confirmation
+    Membaca apakah NIAT mulai DIEKSEKUSI oleh pasar.
+
+    ATURAN ARSITEKTUR:
+    - Point 5 HANYA aktif jika Point 4 AKTIF
+    - Point 5 mencari MOMEN eksekusi, bukan harga murah/mahal
+
+    Returns one of three statuses:
+    - ENTRY CONFIRMED — BULLISH (akumulasi → pelepasan ke atas)
+    - ENTRY CONFIRMED — BEARISH (distribusi → pelepasan ke bawah)
+    - ENTRY NOT CONFIRMED (niat ada, eksekusi belum)
+    """
+
+    # ========== GATE CHECK: Point 4 harus AKTIF ==========
+    point4_active = point4_result.get('active', False)
+    point4_status = point4_result.get('status', '')
+
+    if not point4_active:
+        return {
+            'active': False,
+            'status': 'POINT 5 TIDAK AKTIF',
+            'status_color': 'secondary',
+            'reason': 'Point 4 belum aktif. Entry confirmation menunggu fase akumulasi/distribusi tervalidasi.',
+            'narrative': 'Belum ada fase akumulasi atau distribusi yang terdeteksi. Point 5 tidak dapat mengkonfirmasi entry tanpa niat pasar yang jelas dari Point 4.',
+            'education_note': 'Point 5 hanya aktif setelah Point 4 mendeteksi potensi akumulasi atau distribusi. Ini pengaman sistem.',
+            'signals': {},
+            'entry_type': None
+        }
+
+    # Determine expected direction based on Point 4
+    is_accumulation = 'AKUMULASI' in point4_status.upper()
+    is_distribution = 'DISTRIBUSI' in point4_status.upper()
+
+    if not is_accumulation and not is_distribution:
+        return {
+            'active': False,
+            'status': 'POINT 5 MENUNGGU',
+            'status_color': 'info',
+            'reason': 'Point 4 aktif tapi belum menentukan akumulasi atau distribusi.',
+            'narrative': 'Fase penahanan terdeteksi namun arah niat belum jelas. Point 5 menunggu konfirmasi dari Point 4.',
+            'education_note': 'Entry harus berdasarkan niat yang sudah teridentifikasi, bukan tebakan.',
+            'signals': {},
+            'entry_type': None
+        }
+
+    # ========== GET DATA FOR ANALYSIS ==========
+    if not multiday_data or len(multiday_data) < 3:
+        return {
+            'active': True,
+            'status': 'DATA TIDAK CUKUP',
+            'status_color': 'secondary',
+            'reason': 'Data tidak mencukupi untuk analisis entry.',
+            'narrative': 'Minimal 3 hari data diperlukan untuk konfirmasi entry.',
+            'education_note': 'Entry confirmation membutuhkan data terbaru untuk melihat pelepasan.',
+            'signals': {},
+            'entry_type': 'ACCUMULATION' if is_accumulation else 'DISTRIBUTION'
+        }
+
+    # Get compression metrics from Point 3
+    compression_range_ratio = point3_result.get('compression', {}).get('range_ratio', '100%')
+    try:
+        compression_range_val = float(compression_range_ratio.replace('%', ''))
+    except:
+        compression_range_val = 100
+
+    # Latest day data (today)
+    today = multiday_data[-1]
+    yesterday = multiday_data[-2] if len(multiday_data) >= 2 else today
+    day_before = multiday_data[-3] if len(multiday_data) >= 3 else yesterday
+
+    # Calculate today's metrics
+    today_range = today['high'] - today['low']
+    today_range_pct = (today_range / today['low'] * 100) if today['low'] > 0 else 0
+    today_close_pos = (today['close'] - today['low']) / today_range if today_range > 0 else 0.5
+    today_change = today['change']
+
+    # Calculate average range during compression (last 5 days before today)
+    compression_days = multiday_data[-6:-1] if len(multiday_data) >= 6 else multiday_data[:-1]
+    avg_compression_range = sum((d['high'] - d['low']) for d in compression_days) / len(compression_days) if compression_days else today_range
+
+    # Range expansion check
+    range_expansion_ratio = today_range / avg_compression_range if avg_compression_range > 0 else 1
+    is_range_expanding = range_expansion_ratio > 1.3  # Range 30% lebih besar dari compression
+
+    # Activity check
+    avg_volume = sum(d['volume'] for d in compression_days) / len(compression_days) if compression_days else today['volume']
+    volume_ratio = today['volume'] / avg_volume if avg_volume > 0 else 1
+    is_volume_supporting = volume_ratio > 1.2  # Volume 20% lebih tinggi
+
+    # ========== ENTRY CONFIRMATION LOGIC ==========
+
+    if is_accumulation:
+        # Looking for BULLISH breakout
+        # 1. Price breaking out upward from compression
+        is_breaking_up = today_change > 1.5  # Significant up move
+        # 2. Close near high (not ambiguous)
+        is_close_strong = today_close_pos > 0.7  # Close in upper 30% of range
+        # 3. Range expanding with direction
+        is_directional_expansion = is_range_expanding and today_change > 0
+        # 4. Volume supporting
+        has_volume_support = is_volume_supporting
+
+        # Count confirmation signals
+        bullish_signals = {
+            'breaking_up': is_breaking_up,
+            'close_strong': is_close_strong,
+            'range_expanding': is_directional_expansion,
+            'volume_support': has_volume_support
+        }
+        confirmation_score = sum(1 for v in bullish_signals.values() if v)
+
+        if confirmation_score >= 3:
+            status = "ENTRY CONFIRMED — BULLISH"
+            status_color = "success"
+            narrative = f"Setelah fase penahanan pasca penurunan (akumulasi), harga mulai keluar dari area kurungan dengan pergerakan {today_change:+.1f}%. Range melebar {range_expansion_ratio:.1f}x dari fase compression. Penutupan di {today_close_pos*100:.0f}% (dekat high), dengan volume {volume_ratio:.1f}x dari rata-rata. Pelepasan ke atas mulai dieksekusi."
+            education_note = "Entry BULLISH terkonfirmasi. Ini bukan jaminan profit, tapi konfirmasi bahwa niat akumulasi mulai dieksekusi pasar."
+            signals_detail = {
+                'Breakout ke atas': f"✓ Change {today_change:+.1f}%" if is_breaking_up else f"✗ Change {today_change:+.1f}%",
+                'Close kuat (>70%)': f"✓ Close di {today_close_pos*100:.0f}%" if is_close_strong else f"✗ Close di {today_close_pos*100:.0f}%",
+                'Range melebar': f"✓ {range_expansion_ratio:.1f}x" if is_directional_expansion else f"✗ {range_expansion_ratio:.1f}x",
+                'Volume mendukung': f"✓ {volume_ratio:.1f}x" if has_volume_support else f"✗ {volume_ratio:.1f}x"
+            }
+        else:
+            status = "ENTRY NOT CONFIRMED"
+            status_color = "warning"
+            narrative = f"Meskipun terdapat fase akumulasi sebelumnya, harga belum menunjukkan pelepasan ke atas yang konsisten. Change hari ini {today_change:+.1f}%, close di {today_close_pos*100:.0f}%, range {range_expansion_ratio:.1f}x. Entry bullish belum terkonfirmasi."
+            education_note = "Niat akumulasi sudah ada, tapi eksekusi belum terlihat. Sabar menunggu konfirmasi."
+            signals_detail = {
+                'Breakout ke atas': f"✓ Change {today_change:+.1f}%" if is_breaking_up else f"✗ Change {today_change:+.1f}% (butuh >1.5%)",
+                'Close kuat (>70%)': f"✓ Close di {today_close_pos*100:.0f}%" if is_close_strong else f"✗ Close di {today_close_pos*100:.0f}%",
+                'Range melebar': f"✓ {range_expansion_ratio:.1f}x" if is_directional_expansion else f"✗ {range_expansion_ratio:.1f}x (butuh >1.3x)",
+                'Volume mendukung': f"✓ {volume_ratio:.1f}x" if has_volume_support else f"✗ {volume_ratio:.1f}x (butuh >1.2x)"
+            }
+
+        entry_type = 'BULLISH'
+
+    else:  # is_distribution
+        # Looking for BEARISH breakout
+        # 1. Price breaking down from compression
+        is_breaking_down = today_change < -1.5  # Significant down move
+        # 2. Close near low (decisive)
+        is_close_weak = today_close_pos < 0.3  # Close in lower 30% of range
+        # 3. Range expanding with direction
+        is_directional_expansion = is_range_expanding and today_change < 0
+        # 4. Volume supporting
+        has_volume_support = is_volume_supporting
+
+        # Count confirmation signals
+        bearish_signals = {
+            'breaking_down': is_breaking_down,
+            'close_weak': is_close_weak,
+            'range_expanding': is_directional_expansion,
+            'volume_support': has_volume_support
+        }
+        confirmation_score = sum(1 for v in bearish_signals.values() if v)
+
+        if confirmation_score >= 3:
+            status = "ENTRY CONFIRMED — BEARISH"
+            status_color = "danger"
+            narrative = f"Setelah fase penahanan pasca kenaikan (distribusi), harga mulai melemah keluar dari area kurungan dengan pergerakan {today_change:+.1f}%. Range melebar {range_expansion_ratio:.1f}x ke bawah. Penutupan di {today_close_pos*100:.0f}% (dekat low), dengan volume {volume_ratio:.1f}x. Pelepasan ke bawah mulai dieksekusi."
+            education_note = "Entry BEARISH terkonfirmasi. Ini konfirmasi bahwa niat distribusi mulai dieksekusi pasar."
+            signals_detail = {
+                'Breakout ke bawah': f"✓ Change {today_change:+.1f}%" if is_breaking_down else f"✗ Change {today_change:+.1f}%",
+                'Close lemah (<30%)': f"✓ Close di {today_close_pos*100:.0f}%" if is_close_weak else f"✗ Close di {today_close_pos*100:.0f}%",
+                'Range melebar': f"✓ {range_expansion_ratio:.1f}x" if is_directional_expansion else f"✗ {range_expansion_ratio:.1f}x",
+                'Volume mendukung': f"✓ {volume_ratio:.1f}x" if has_volume_support else f"✗ {volume_ratio:.1f}x"
+            }
+        else:
+            status = "ENTRY NOT CONFIRMED"
+            status_color = "warning"
+            narrative = f"Meskipun terdapat fase distribusi sebelumnya, harga belum menunjukkan pelepasan ke bawah yang konsisten. Change hari ini {today_change:+.1f}%, close di {today_close_pos*100:.0f}%, range {range_expansion_ratio:.1f}x. Entry bearish belum terkonfirmasi."
+            education_note = "Niat distribusi sudah ada, tapi eksekusi belum terlihat. Sabar menunggu konfirmasi."
+            signals_detail = {
+                'Breakout ke bawah': f"✓ Change {today_change:+.1f}%" if is_breaking_down else f"✗ Change {today_change:+.1f}% (butuh <-1.5%)",
+                'Close lemah (<30%)': f"✓ Close di {today_close_pos*100:.0f}%" if is_close_weak else f"✗ Close di {today_close_pos*100:.0f}%",
+                'Range melebar': f"✓ {range_expansion_ratio:.1f}x" if is_directional_expansion else f"✗ {range_expansion_ratio:.1f}x (butuh >1.3x)",
+                'Volume mendukung': f"✓ {volume_ratio:.1f}x" if has_volume_support else f"✗ {volume_ratio:.1f}x (butuh >1.2x)"
+            }
+
+        entry_type = 'BEARISH'
+
+    return {
+        'active': True,
+        'status': status,
+        'status_color': status_color,
+        'narrative': narrative,
+        'education_note': education_note,
+        'signals': signals_detail,
+        'entry_type': entry_type,
+        'confirmation_score': confirmation_score,
+        'metrics': {
+            'today_change': f"{today_change:+.1f}%",
+            'close_position': f"{today_close_pos*100:.0f}%",
+            'range_expansion': f"{range_expansion_ratio:.1f}x",
+            'volume_ratio': f"{volume_ratio:.1f}x",
+            'today_range_pct': f"{today_range_pct:.1f}%"
+        },
+        'point4_status': point4_status
+    }
+
+
+def analyze_risk_exit_management(point5_result: dict, multiday_data: list, snapshot: dict) -> dict:
+    """
+    POINT 6 - Risk, Exit & Trade Management
+    Mengelola posisi setelah Entry Confirmed (bukan cari sinyal baru).
+
+    ATURAN ARSITEKTUR:
+    - Point 6 HANYA aktif jika Point 5 = ENTRY CONFIRMED
+    - Point 6 bukan prediksi target, tapi aturan manajemen
+
+    Returns:
+    - Invalidation: batas salah (jika ditembus, tesis runtuh)
+    - Hold Management: SEHAT / WASPADA / TIDAK SEHAT
+    - Exit: DEFENSIF (stop) atau PROTEKSI (take profit)
+    """
+
+    # ========== GATE CHECK: Point 5 harus ENTRY CONFIRMED ==========
+    point5_status = point5_result.get('status', '')
+    point5_active = point5_result.get('active', False)
+    entry_type = point5_result.get('entry_type', None)
+
+    is_entry_confirmed = 'ENTRY CONFIRMED' in point5_status.upper()
+
+    if not is_entry_confirmed:
+        return {
+            'active': False,
+            'status': 'POINT 6 TIDAK AKTIF',
+            'status_color': 'secondary',
+            'reason': 'Point 5 belum mengkonfirmasi entry. Tidak ada posisi untuk dikelola.',
+            'narrative': 'Manajemen risiko dan exit hanya relevan setelah entry terkonfirmasi. Tanpa entry yang valid, Point 6 tidak boleh "mengarang exit".',
+            'education_note': 'Point 6 hanya aktif setelah Point 5 menyatakan ENTRY CONFIRMED. Ini mencegah manajemen posisi yang tidak ada.',
+            'hold_status': None,
+            'invalidation': None,
+            'exit_type': None,
+            'checklist': {}
+        }
+
+    # ========== GET DATA FOR ANALYSIS ==========
+    if not multiday_data or len(multiday_data) < 5:
+        return {
+            'active': True,
+            'status': 'DATA TIDAK CUKUP',
+            'status_color': 'secondary',
+            'reason': 'Data tidak mencukupi untuk analisis manajemen posisi.',
+            'narrative': 'Minimal 5 hari data diperlukan untuk menentukan level invalidation dan manajemen posisi.',
+            'education_note': 'Manajemen risiko membutuhkan konteks multi-hari.',
+            'hold_status': None,
+            'invalidation': None,
+            'exit_type': None,
+            'checklist': {}
+        }
+
+    is_bullish = entry_type == 'BULLISH'
+    is_bearish = entry_type == 'BEARISH'
+
+    # Latest data
+    today = multiday_data[-1]
+    yesterday = multiday_data[-2]
+
+    # Calculate key levels from compression phase (last 5-7 days)
+    compression_days = multiday_data[-7:-1] if len(multiday_data) >= 7 else multiday_data[:-1]
+
+    # Find invalidation level
+    if is_bullish:
+        # For bullish: invalidation is below the compression low
+        compression_low = min(d['low'] for d in compression_days)
+        invalidation_level = compression_low
+        invalidation_desc = f"di bawah Rp {compression_low:,.0f} (low fase penahanan)"
+    else:
+        # For bearish: invalidation is above the compression high
+        compression_high = max(d['high'] for d in compression_days)
+        invalidation_level = compression_high
+        invalidation_desc = f"di atas Rp {compression_high:,.0f} (high fase penahanan)"
+
+    # ========== HOLD MANAGEMENT ANALYSIS ==========
+    today_close = today['close']
+    today_change = today['change']
+    today_range = today['high'] - today['low']
+    today_close_pos = (today['close'] - today['low']) / today_range if today_range > 0 else 0.5
+
+    # Calculate trend metrics
+    recent_closes = [d['close'] for d in multiday_data[-5:]]
+    recent_changes = [d['change'] for d in multiday_data[-3:]]
+    avg_recent_change = sum(recent_changes) / len(recent_changes) if recent_changes else 0
+
+    # Volume analysis
+    recent_volumes = [d['volume'] for d in multiday_data[-5:]]
+    avg_volume = sum(recent_volumes) / len(recent_volumes) if recent_volumes else today['volume']
+    volume_ratio = today['volume'] / avg_volume if avg_volume > 0 else 1
+
+    # Check if still above/below invalidation
+    # Activity supporting or weakening
+    # For bullish: high volume on up days is good, high volume on down days is bad
+    up_days_volume = sum(d['volume'] for d in multiday_data[-5:] if d['change'] > 0)
+    down_days_volume = sum(d['volume'] for d in multiday_data[-5:] if d['change'] < 0)
+
+    if is_bullish:
+        thesis_valid = today_close > invalidation_level
+        moving_in_direction = avg_recent_change > 0
+        close_strength = today_close_pos > 0.5
+        activity_supporting = up_days_volume > down_days_volume
+
+        # Check for distribution signs (failure to make new highs)
+        recent_highs = [d['high'] for d in multiday_data[-3:]]
+        failing_highs = recent_highs[-1] < max(recent_highs[:-1]) if len(recent_highs) > 1 else False
+
+        # Count weak closes (close in lower 40% of range)
+        weak_close_count = 0
+        for d in multiday_data[-3:]:
+            rng = d['high'] - d['low']
+            if rng > 0:
+                close_pos = (d['close'] - d['low']) / rng
+                if close_pos < 0.4:
+                    weak_close_count += 1
+        weak_closes = weak_close_count >= 2
+
+        opposite_phase_signs = failing_highs or weak_closes
+    else:
+        thesis_valid = today_close < invalidation_level
+        moving_in_direction = avg_recent_change < 0
+        close_strength = today_close_pos < 0.5
+        activity_supporting = down_days_volume > up_days_volume
+
+        # Check for accumulation signs (failure to make new lows)
+        recent_lows = [d['low'] for d in multiday_data[-3:]]
+        failing_lows = recent_lows[-1] > min(recent_lows[:-1]) if len(recent_lows) > 1 else False
+
+        # Count strong closes (close in upper 60% of range)
+        strong_close_count = 0
+        for d in multiday_data[-3:]:
+            rng = d['high'] - d['low']
+            if rng > 0:
+                close_pos = (d['close'] - d['low']) / rng
+                if close_pos > 0.6:
+                    strong_close_count += 1
+        strong_closes = strong_close_count >= 2
+
+        opposite_phase_signs = failing_lows or strong_closes
+
+    # ========== DETERMINE HOLD STATUS ==========
+    checklist = {
+        'thesis_valid': thesis_valid,
+        'moving_in_direction': moving_in_direction,
+        'opposite_phase_signs': opposite_phase_signs,
+        'activity_supporting': activity_supporting
+    }
+
+    # Count positive signals
+    positive_count = sum([
+        thesis_valid,
+        moving_in_direction,
+        not opposite_phase_signs,
+        activity_supporting
+    ])
+
+    # Determine status
+    if not thesis_valid:
+        # Invalidation breached
+        hold_status = "EXIT (Defensif)"
+        hold_status_color = "danger"
+        exit_type = "DEFENSIF"
+        if is_bullish:
+            hold_narrative = f"Tesis bullish BATAL. Harga telah menembus area penahanan {invalidation_desc}. Tekanan jual kembali efektif dan fase akumulasi gagal. KELUAR dari posisi."
+        else:
+            hold_narrative = f"Tesis bearish BATAL. Harga telah menembus area penahanan {invalidation_desc}. Dorongan beli kembali efektif dan fase distribusi gagal. KELUAR dari posisi."
+        education_note = "Exit defensif adalah perlindungan modal. Salah cepat selesai lebih baik daripada salah berkepanjangan."
+
+    elif positive_count >= 3:
+        # Healthy hold
+        hold_status = "HOLD (Sehat)"
+        hold_status_color = "success"
+        exit_type = None
+        if is_bullish:
+            hold_narrative = f"Posisi masih VALID. Harga tetap di atas area penahanan (Rp {invalidation_level:,.0f}), bergerak searah tesis, dan belum menunjukkan tanda distribusi. Aktivitas pasar mendukung. Lanjutkan hold."
+        else:
+            hold_narrative = f"Posisi masih VALID. Harga tetap di bawah area penahanan (Rp {invalidation_level:,.0f}), bergerak searah tesis, dan belum menunjukkan tanda akumulasi. Aktivitas pasar mendukung. Lanjutkan hold."
+        education_note = "Hold sehat berarti tesis masih berjalan. Jangan keluar hanya karena profit kecil."
+
+    elif positive_count == 2:
+        # Cautious hold
+        hold_status = "HOLD (Waspada)"
+        hold_status_color = "warning"
+        exit_type = None
+        if is_bullish:
+            hold_narrative = f"Posisi belum batal, namun muncul tanda kehilangan momentum. Harga masih di atas Rp {invalidation_level:,.0f}, tapi {'' if moving_in_direction else 'tidak lagi bergerak naik, '}{'' if not opposite_phase_signs else 'mulai muncul tanda distribusi kecil, '}{'' if activity_supporting else 'aktivitas jual meningkat'}. Siapkan pengurangan posisi jika memburuk."
+        else:
+            hold_narrative = f"Posisi belum batal, namun muncul tanda kehilangan momentum. Harga masih di bawah Rp {invalidation_level:,.0f}, tapi {'' if moving_in_direction else 'tidak lagi bergerak turun, '}{'' if not opposite_phase_signs else 'mulai muncul tanda akumulasi kecil, '}{'' if activity_supporting else 'aktivitas beli meningkat'}. Siapkan pengurangan posisi jika memburuk."
+        education_note = "Waspada bukan berarti panik. Tapi mulai siapkan skenario exit jika kondisi memburuk."
+
+    else:
+        # Unhealthy / Take profit zone
+        hold_status = "TAKE PROFIT / REDUCE"
+        hold_status_color = "info"
+        exit_type = "PROTEKSI"
+        if is_bullish:
+            hold_narrative = f"Meskipun tesis belum batal secara teknis, muncul banyak tanda kelemahan: momentum hilang, tanda distribusi muncul, dan aktivitas tidak lagi mendukung. Pertimbangkan ambil profit atau kurangi posisi untuk melindungi keuntungan."
+        else:
+            hold_narrative = f"Meskipun tesis belum batal secara teknis, muncul banyak tanda kelemahan: momentum hilang, tanda akumulasi muncul, dan aktivitas tidak lagi mendukung. Pertimbangkan ambil profit atau kurangi posisi untuk melindungi keuntungan."
+        education_note = "Exit proteksi adalah kematangan. Profit yang direalisasi tidak bisa hilang."
+
+    # Build checklist descriptions
+    checklist_detail = {}
+    if is_bullish:
+        checklist_detail['Tesis masih valid?'] = f"{'✓ Ya' if thesis_valid else '✗ Tidak'} — harga {'masih di atas' if thesis_valid else 'sudah di bawah'} Rp {invalidation_level:,.0f}"
+        checklist_detail['Bergerak searah tesis?'] = f"{'✓ Ya' if moving_in_direction else '✗ Tidak'} — rata-rata change 3 hari: {avg_recent_change:+.2f}%"
+        checklist_detail['Tanda distribusi muncul?'] = f"{'✗ Ya (buruk)' if opposite_phase_signs else '✓ Tidak'} — {'gagal buat high baru / close lemah berulang' if opposite_phase_signs else 'belum ada tanda distribusi'}"
+        checklist_detail['Aktivitas mendukung?'] = f"{'✓ Ya' if activity_supporting else '✗ Tidak'} — volume up-days {'>' if activity_supporting else '<'} down-days"
+    else:
+        checklist_detail['Tesis masih valid?'] = f"{'✓ Ya' if thesis_valid else '✗ Tidak'} — harga {'masih di bawah' if thesis_valid else 'sudah di atas'} Rp {invalidation_level:,.0f}"
+        checklist_detail['Bergerak searah tesis?'] = f"{'✓ Ya' if moving_in_direction else '✗ Tidak'} — rata-rata change 3 hari: {avg_recent_change:+.2f}%"
+        checklist_detail['Tanda akumulasi muncul?'] = f"{'✗ Ya (buruk)' if opposite_phase_signs else '✓ Tidak'} — {'gagal buat low baru / close kuat berulang' if opposite_phase_signs else 'belum ada tanda akumulasi'}"
+        checklist_detail['Aktivitas mendukung?'] = f"{'✓ Ya' if activity_supporting else '✗ Tidak'} — volume down-days {'>' if activity_supporting else '<'} up-days"
+
+    return {
+        'active': True,
+        'status': hold_status,
+        'status_color': hold_status_color,
+        'narrative': hold_narrative,
+        'education_note': education_note,
+        'entry_type': entry_type,
+        'hold_status': hold_status,
+        'invalidation': {
+            'level': invalidation_level,
+            'description': invalidation_desc,
+            'breached': not thesis_valid
+        },
+        'exit_type': exit_type,
+        'checklist': checklist_detail,
+        'checklist_raw': checklist,
+        'positive_signals': positive_count,
+        'metrics': {
+            'today_close': f"Rp {today_close:,.0f}",
+            'today_change': f"{today_change:+.1f}%",
+            'avg_3d_change': f"{avg_recent_change:+.2f}%",
+            'volume_ratio': f"{volume_ratio:.1f}x",
+            'invalidation_level': f"Rp {invalidation_level:,.0f}"
+        }
+    }
+
+
+def create_accumulation_page(stock_code='CDIA'):
+    """Create Accumulation Analysis page - POINT 1, 2, 3, 4, 5, & 6:
+    - Point 1: Market Snapshot (EOD) - Hari ini hari apa?
+    - Point 2: Price Movement Anatomy - Harga bergerak dengan cara apa?
+    - Point 3: Compression & Absorption - Apakah ada fase penahanan/penyerapan?
+    - Point 4: Akumulasi & Distribusi - Jika ditahan, untuk tujuan apa?
+    - Point 5: Entry Confirmation - Apakah niat mulai dieksekusi?
+    - Point 6: Risk, Exit & Trade Management - Bagaimana mengelola posisi?
+    """
+    try:
+        # Get market snapshot data
+        snapshot = get_market_snapshot_data(stock_code)
+
+        if not snapshot:
+            return html.Div([
+                dbc.Alert(f"Data tidak tersedia untuk {stock_code}", color="warning"),
+                html.P("Pastikan data sudah diupload dengan benar")
+            ])
+
+        # Generate narratives
+        narrative = generate_market_narrative(snapshot)
+
+        # Determine day significance
+        conclusion = determine_day_significance(snapshot)
+
+        # Generate comparison with previous day
+        comparison = generate_comparison_narrative(snapshot)
+
+        # POINT 2: Price Movement Anatomy
+        anatomy = analyze_price_movement_anatomy(snapshot)
+
+        # POINT 3: Compression & Absorption (multi-day analysis)
+        multiday_data = get_multiday_data(stock_code, days=10)
+        point3 = analyze_compression_absorption(multiday_data)
+
+        # POINT 4: Akumulasi & Distribusi (berdasarkan Point 3)
+        point4 = analyze_accumulation_distribution(point3, multiday_data)
+
+        # POINT 5: Entry Confirmation (berdasarkan Point 4)
+        point5 = analyze_entry_confirmation(point4, point3, multiday_data, snapshot)
+
+        # POINT 6: Risk, Exit & Trade Management (berdasarkan Point 5)
+        point6 = analyze_risk_exit_management(point5, multiday_data, snapshot)
+
+        # V6 ANALYSIS - Adaptive Sideways & Phase Detection
+        v6_data = get_v6_analysis(stock_code)
+        v6_sideways = v6_data.get('sideways', {}) if not v6_data.get('error') else {}
+        v6_phase = v6_data.get('phase', {}) if not v6_data.get('error') else {}
+        v6_entry = v6_data.get('entry', {}) if not v6_data.get('error') else {}
+
+        # WEEKLY ANALYSIS - 4 weeks historical
+        weekly_data = get_weekly_analysis(stock_code)
+        weeks = weekly_data.get('weeks', {})
+
+        # Format values for display
+        def format_rupiah(val):
+            abs_val = abs(val)
+            sign = "-" if val < 0 else ""
+            if abs_val >= 1e12:
+                return f"Rp {sign}{abs_val/1e12:.2f}T"
+            elif abs_val >= 1e9:
+                return f"Rp {sign}{abs_val/1e9:.2f}B"
+            elif abs_val >= 1e6:
+                return f"Rp {sign}{abs_val/1e6:.2f}M"
+            else:
+                return f"Rp {val:,.0f}"
+
+        def format_volume(val):
+            if val >= 1e9:
+                return f"{val/1e9:.2f}B"
+            elif val >= 1e6:
+                return f"{val/1e6:.2f}M"
+            elif val >= 1e3:
+                return f"{val/1e3:.1f}K"
+            else:
+                return f"{val:,.0f}"
+
+        # Determine colors based on values
+        change_color = "success" if snapshot['change'] > 0 else ("danger" if snapshot['change'] < 0 else "secondary")
+        foreign_color = "success" if snapshot['net_foreign'] > 0 else ("danger" if snapshot['net_foreign'] < 0 else "secondary")
+
+        # Close vs Avg color
+        close_vs_avg_color = "success" if snapshot['close'] > snapshot['avg'] else "danger"
+
+        # Activity level color
+        value_ratio = snapshot['value'] / snapshot['avg_value_20d'] if snapshot['avg_value_20d'] > 0 else 1
+        activity_color = "success" if value_ratio > 1.2 else ("warning" if value_ratio > 0.8 else "danger")
 
     except Exception as e:
         return html.Div([
-            dbc.Alert(f"Error loading Accumulation analysis for {stock_code}: {str(e)}", color="danger"),
+            dbc.Alert(f"Error loading Market Snapshot for {stock_code}: {str(e)}", color="danger"),
             html.P("Pastikan data sudah diupload dengan benar")
         ])
 
     return html.Div([
-        # Page Header with submenu navigation
+        # Page Header
         html.Div([
             html.H4([
-                html.I(className="fas fa-cubes me-2"),
-                f"Accumulation Analysis - {stock_code}"
+                html.I(className="fas fa-chart-bar me-2"),
+                f"Market Snapshot - {stock_code}"
             ], className="mb-0 d-inline-block me-3"),
             create_submenu_nav('accumulation', stock_code),
         ], className="d-flex align-items-center flex-wrap mb-4"),
 
-        # ========== HERO SECTION - SIGNAL ACTION ==========
+        # ========== DATE IDENTIFIER ==========
         dbc.Card([
             dbc.CardBody([
                 dbc.Row([
-                    # Left: Big Action Icon & Label
                     dbc.Col([
                         html.Div([
-                            html.Span(action_info['icon'], style={"fontSize": "64px", "fontWeight": "bold"}),
-                            html.H2(action_info['action'], className=f"text-{action_info['color']} fw-bold mb-0 mt-2"),
-                            html.P(action_info['desc'], className="text-muted small mb-0"),
-                        ], className="text-center py-3")
-                    ], md=4, className="d-flex align-items-center justify-content-center border-end"),
-
-                    # Right: 3 Metrics
+                            html.I(className="fas fa-calendar-day me-2 text-info"),
+                            html.Span("Tanggal Data", className="text-muted small"),
+                        ]),
+                        html.H3(snapshot['date'].strftime('%d %B %Y'), className="mb-0 text-info"),
+                        html.Small(snapshot['date'].strftime('%A'), className="text-muted")
+                    ], md=4),
                     dbc.Col([
-                        dbc.Row([
-                            # Confidence Level
-                            dbc.Col([
-                                html.Div([
-                                    html.Small("Confidence Level", className="text-muted d-block"),
-                                    html.H4(conf_text, className=f"text-{conf_color} mb-0"),
-                                    html.Small(f"{passed}/{total} validasi", className="text-muted"),
-                                ], className="text-center py-2")
-                            ], width=4),
-                            # Pass Rate
-                            dbc.Col([
-                                html.Div([
-                                    html.Small("Pass Rate", className="text-muted d-block"),
-                                    html.H4(f"{pass_rate:.0f}%", className=f"text-{conf_color} mb-0"),
-                                    html.Small("Kriteria lolos", className="text-muted"),
-                                ], className="text-center py-2")
-                            ], width=4),
-                            # Current Price
-                            dbc.Col([
-                                html.Div([
-                                    html.Small("Harga Terakhir", className="text-muted d-block"),
-                                    html.H4(f"Rp {current_price:,.0f}" if current_price else "N/A", className="text-info mb-0"),
-                                    html.Small(f"Signal: {overall_signal}", className="text-muted"),
-                                ], className="text-center py-2")
-                            ], width=4),
-                        ])
-                    ], md=8, className="d-flex align-items-center"),
-                ]),
-                # Engine badge
-                html.Div([
-                    dbc.Badge([
-                        html.I(className="fas fa-cogs me-1"),
-                        "Wyckoff + Bandarmology Engine"
-                    ], color="dark", className="mt-2")
-                ], className="text-center")
+                        html.Div([
+                            html.I(className="fas fa-info-circle me-2 text-warning"),
+                            html.Span("Tujuan Snapshot", className="text-muted small"),
+                        ]),
+                        html.P("Menjawab 3 pertanyaan dasar: Bagaimana harga bergerak? Berat atau ringan? Siapa jadi angin (foreign)?",
+                               className="mb-0 small")
+                    ], md=8),
+                ], className="align-items-center")
             ])
-        ], className="mb-4", style={
-            "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)",
-            "border": "1px solid rgba(255,255,255,0.1)",
-            "borderRadius": "12px"
-        }),
+        ], className="mb-4", style={"borderLeft": "4px solid var(--bs-info)"}),
 
-        # ========== RISK & OPPORTUNITY ANALYSIS ==========
+        # ========== PRICE SECTION: Close & Change ==========
         dbc.Row([
-            # Peluang (Opportunities)
+            # Close Price & Change
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.I(className="fas fa-arrow-trend-up me-2 text-success"),
-                        html.Strong("Peluang", className="text-success")
-                    ], className="bg-success bg-opacity-10"),
+                        html.I(className="fas fa-dollar-sign me-2"),
+                        html.Strong("Harga Penutupan & Arah Hari Ini")
+                    ], className="bg-dark"),
                     dbc.CardBody([
-                        html.Ul([
-                            html.Li(opp, className="mb-2") for opp in opportunities
-                        ], className="mb-0 ps-3", style={"listStyleType": "none"})
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("CLOSE", className="text-muted d-block"),
+                                html.H2(f"Rp {snapshot['close']:,.0f}", className=f"text-{change_color} mb-0 fw-bold"),
+                            ], width=6),
+                            dbc.Col([
+                                html.Small("CHANGE", className="text-muted d-block"),
+                                html.H2(f"{snapshot['change']:+.2f}%", className=f"text-{change_color} mb-0 fw-bold"),
+                                html.Small(f"({snapshot['change_value']:+,.0f})", className="text-muted")
+                            ], width=6),
+                        ]),
+                        html.Hr(),
+                        html.Div([
+                            html.I(className=f"fas fa-{'arrow-up' if snapshot['change'] > 0 else ('arrow-down' if snapshot['change'] < 0 else 'minus')} me-2"),
+                            html.Span(
+                                "Hari Naik - Pasar Mengangkat" if snapshot['change'] > 0.5 else
+                                ("Hari Turun - Pasar Menggulung" if snapshot['change'] < -0.5 else "Hari Datar - Pasar Mengunci"),
+                                className="fw-bold"
+                            )
+                        ], className=f"text-{change_color} text-center p-2 rounded",
+                           style={"backgroundColor": f"rgba({'40,167,69' if change_color == 'success' else ('220,53,69' if change_color == 'danger' else '108,117,125')}, 0.1)"})
                     ])
-                ], className="h-100 border-success")
+                ], className="h-100")
             ], md=6, className="mb-3"),
 
-            # Resiko (Risks)
+            # OHLC Structure
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.I(className="fas fa-triangle-exclamation me-2 text-danger"),
-                        html.Strong("Resiko", className="text-danger")
-                    ], className="bg-danger bg-opacity-10"),
+                        html.I(className="fas fa-chart-candlestick me-2"),
+                        html.Strong("Struktur Pergerakan Harga (OHLC)")
+                    ], className="bg-dark"),
                     dbc.CardBody([
-                        html.Ul([
-                            html.Li(risk, className="mb-2") for risk in risks
-                        ], className="mb-0 ps-3", style={"listStyleType": "none"})
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("OPEN", className="text-muted d-block"),
+                                html.H5(f"{snapshot['open']:,.0f}", className="mb-0"),
+                            ], width=3, className="text-center"),
+                            dbc.Col([
+                                html.Small("HIGH", className="text-muted d-block"),
+                                html.H5(f"{snapshot['high']:,.0f}", className="mb-0 text-success"),
+                            ], width=3, className="text-center"),
+                            dbc.Col([
+                                html.Small("LOW", className="text-muted d-block"),
+                                html.H5(f"{snapshot['low']:,.0f}", className="mb-0 text-danger"),
+                            ], width=3, className="text-center"),
+                            dbc.Col([
+                                html.Small("CLOSE", className="text-muted d-block"),
+                                html.H5(f"{snapshot['close']:,.0f}", className=f"mb-0 text-{change_color}"),
+                            ], width=3, className="text-center"),
+                        ]),
+                        html.Hr(),
+                        # Close position indicator
+                        html.Div([
+                            html.Small("Posisi Close dalam Range:", className="text-muted d-block mb-2"),
+                            dbc.Progress([
+                                dbc.Progress(value=(snapshot['close']-snapshot['low'])/(snapshot['high']-snapshot['low'])*100 if snapshot['high'] > snapshot['low'] else 50,
+                                            color=change_color, bar=True)
+                            ], className="mb-2", style={"height": "20px"}),
+                            html.Small(
+                                "Close dekat High - Pembeli menang" if snapshot['high'] > snapshot['low'] and (snapshot['close']-snapshot['low'])/(snapshot['high']-snapshot['low']) > 0.7 else
+                                ("Close dekat Low - Penjual menang" if snapshot['high'] > snapshot['low'] and (snapshot['close']-snapshot['low'])/(snapshot['high']-snapshot['low']) < 0.3 else
+                                "Close di tengah - Tarik-menarik"),
+                                className="text-muted"
+                            )
+                        ])
                     ])
-                ], className="h-100 border-danger")
+                ], className="h-100")
             ], md=6, className="mb-3"),
-        ], className="mb-4"),
+        ]),
 
-        # ========== ACTIVE ALERTS ==========
+        # ========== AVG PRICE & ACTIVITY ==========
+        dbc.Row([
+            # Avg Price Analysis
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-balance-scale me-2"),
+                        html.Strong("Harga Rata-rata (Kualitas Penutupan)")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("AVG PRICE", className="text-muted d-block"),
+                                html.H3(f"Rp {snapshot['avg']:,.0f}", className="mb-0"),
+                            ], width=6),
+                            dbc.Col([
+                                html.Small("CLOSE vs AVG", className="text-muted d-block"),
+                                html.H3(
+                                    f"{((snapshot['close']-snapshot['avg'])/snapshot['avg']*100):+.2f}%" if snapshot['avg'] > 0 else "N/A",
+                                    className=f"mb-0 text-{close_vs_avg_color}"
+                                ),
+                            ], width=6),
+                        ]),
+                        html.Hr(),
+                        html.Div([
+                            html.I(className=f"fas fa-{'thumbs-up' if snapshot['close'] > snapshot['avg'] else 'thumbs-down'} me-2"),
+                            html.Span(
+                                "Penutupan KUAT - Close di atas rata-rata transaksi" if snapshot['close'] > snapshot['avg'] else
+                                "Penutupan LEMAH - Close di bawah rata-rata transaksi",
+                                className="fw-bold"
+                            )
+                        ], className=f"text-{close_vs_avg_color} text-center p-2 rounded",
+                           style={"backgroundColor": f"rgba({'40,167,69' if close_vs_avg_color == 'success' else '220,53,69'}, 0.1)"})
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+
+            # Market Activity
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className="fas fa-chart-area me-2"),
+                        html.Strong("Aktivitas Pasar (Bobot Pergerakan)")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("VALUE", className="text-muted d-block"),
+                                html.H5(format_rupiah(snapshot['value']), className="mb-1"),
+                                html.Small(f"{value_ratio:.1f}x avg", className=f"text-{activity_color}")
+                            ], width=4, className="text-center"),
+                            dbc.Col([
+                                html.Small("VOLUME", className="text-muted d-block"),
+                                html.H5(format_volume(snapshot['volume']), className="mb-1"),
+                                html.Small("lot", className="text-muted")
+                            ], width=4, className="text-center"),
+                            dbc.Col([
+                                html.Small("FREQ", className="text-muted d-block"),
+                                html.H5(f"{snapshot['frequency']:,}", className="mb-1"),
+                                html.Small("transaksi", className="text-muted")
+                            ], width=4, className="text-center"),
+                        ]),
+                        html.Hr(),
+                        html.Div([
+                            html.I(className=f"fas fa-{'fire' if activity_color == 'success' else ('minus' if activity_color == 'warning' else 'snowflake')} me-2"),
+                            html.Span(
+                                "RAMAI - Pergerakan berbobot & valid" if value_ratio > 1.2 else
+                                ("NORMAL - Pergerakan standar" if value_ratio > 0.8 else "SEPI - Pergerakan ringan, mudah dipengaruhi"),
+                                className="fw-bold"
+                            )
+                        ], className=f"text-{activity_color} text-center p-2 rounded",
+                           style={"backgroundColor": f"rgba({'40,167,69' if activity_color == 'success' else ('255,193,7' if activity_color == 'warning' else '220,53,69')}, 0.1)"})
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+        ]),
+
+        # ========== FOREIGN FLOW ==========
         dbc.Card([
             dbc.CardHeader([
-                html.H5("Active Alerts", className="mb-0 d-inline"),
-                dbc.Badge(f"{len(alerts)}", color="warning" if alerts else "secondary", className="ms-2")
-            ]),
+                html.I(className="fas fa-globe me-2"),
+                html.Strong("Foreign Flow (Konteks Asing)")
+            ], className="bg-dark"),
             dbc.CardBody([
-                create_enhanced_alerts_list(alerts) if alerts else dbc.Alert("Tidak ada alert aktif", color="secondary")
+                dbc.Row([
+                    dbc.Col([
+                        html.Small("F BUY", className="text-muted d-block"),
+                        html.H4(format_rupiah(snapshot['foreign_buy']), className="mb-0 text-success"),
+                    ], width=4, className="text-center"),
+                    dbc.Col([
+                        html.Small("F SELL", className="text-muted d-block"),
+                        html.H4(format_rupiah(snapshot['foreign_sell']), className="mb-0 text-danger"),
+                    ], width=4, className="text-center"),
+                    dbc.Col([
+                        html.Small("NET FOREIGN", className="text-muted d-block"),
+                        html.H4(format_rupiah(snapshot['net_foreign']), className=f"mb-0 text-{foreign_color} fw-bold"),
+                    ], width=4, className="text-center"),
+                ]),
+                html.Hr(),
+                html.Div([
+                    html.I(className=f"fas fa-{'plane-arrival' if snapshot['net_foreign'] > 0 else ('plane-departure' if snapshot['net_foreign'] < 0 else 'minus')} me-2"),
+                    html.Span(
+                        "Asing NET BUY - Mendukung hari ini" if snapshot['net_foreign'] > 0 else
+                        ("Asing NET SELL - Menekan hari ini" if snapshot['net_foreign'] < 0 else "Asing NETRAL"),
+                        className="fw-bold"
+                    )
+                ], className=f"text-{foreign_color} text-center p-2 rounded mb-3",
+                   style={"backgroundColor": f"rgba({'40,167,69' if foreign_color == 'success' else ('220,53,69' if foreign_color == 'danger' else '108,117,125')}, 0.1)"}),
+
+                # Anomaly detection
+                html.Div([
+                    html.Small("Anomali:", className="text-warning d-block"),
+                    html.Span(
+                        "⚠️ Asing jual tapi harga tidak jatuh → Ada PENAHAN" if snapshot['net_foreign'] < 0 and snapshot['change'] > 0 else
+                        ("⚠️ Asing beli tapi harga tidak kuat → Ada PELEPAS" if snapshot['net_foreign'] > 0 and snapshot['change'] < 0 else
+                        "✓ Tidak ada anomali - harga mengikuti arus asing"),
+                        className="small"
+                    )
+                ], className="text-center p-2 rounded", style={"backgroundColor": "rgba(255,193,7,0.1)"}) if (snapshot['net_foreign'] < 0 and snapshot['change'] > 0) or (snapshot['net_foreign'] > 0 and snapshot['change'] < 0) else None
             ])
         ], className="mb-4"),
 
-        # ========== NEW SIGNAL VALIDATION CARD (15 Elements) ==========
-        create_validation_card(stock_code),
+        # ========== 3 NARRATIVE SENTENCES ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-comment-alt me-2"),
+                html.Strong("Ringkasan Narasi (3 Kalimat)")
+            ], className="bg-warning text-dark"),
+            dbc.CardBody([
+                # Narrative 1: Closing
+                html.Div([
+                    dbc.Badge("1", color="primary", className="me-2"),
+                    html.Strong("Arah & Kualitas Penutupan:", className="me-2"),
+                    html.Span(narrative['closing'])
+                ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(0,123,255,0.1)"}),
+
+                # Narrative 2: Weight
+                html.Div([
+                    dbc.Badge("2", color="info", className="me-2"),
+                    html.Strong("Bobot Pergerakan:", className="me-2"),
+                    html.Span(narrative['weight'])
+                ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)"}),
+
+                # Narrative 3: Foreign
+                html.Div([
+                    dbc.Badge("3", color="success", className="me-2"),
+                    html.Strong("Konteks Asing:", className="me-2"),
+                    html.Span(narrative['foreign'])
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(40,167,69,0.1)"}),
+            ])
+        ], className="mb-4", style={"border": "2px solid var(--bs-warning)"}),
+
+        # ========== KESIMPULAN HARI (DAY CONCLUSION) ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-gavel me-2"),
+                html.Strong("KESIMPULAN HARI")
+            ], className=f"bg-{conclusion['color']} text-white"),
+            dbc.CardBody([
+                # Main conclusion row
+                dbc.Row([
+                    # Left: Intensity level with big icon
+                    dbc.Col([
+                        html.Div([
+                            html.I(className=f"fas {conclusion['icon']} fa-3x mb-2"),
+                            html.H4(conclusion['significance_level'], className="mb-1 fw-bold"),
+                            html.P(f"Intensitas: {conclusion['significance_score']}/100", className="mb-0 small text-muted")
+                        ], className=f"text-center text-{conclusion['color']}")
+                    ], md=3, className="d-flex align-items-center justify-content-center border-end"),
+
+                    # Middle: Day type indicators
+                    dbc.Col([
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("TIPE HARI", className="text-muted d-block"),
+                                    html.H5(conclusion['day_type'], className="mb-1 text-info fw-bold"),
+                                    html.Small(conclusion['day_desc'], className="text-muted d-block"),
+                                    html.Small(conclusion['day_context'], className="text-warning", style={"fontSize": "10px"})
+                                ], className="text-center")
+                            ], width=6),
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("STATUS", className="text-muted d-block"),
+                                    html.H5(conclusion['decision_type'], className=f"mb-1 fw-bold text-{'success' if conclusion['decision_type'] == 'HARI KEPUTUSAN' else 'warning'}"),
+                                    html.Small(conclusion['decision_desc'], className="text-muted")
+                                ], className="text-center")
+                            ], width=6),
+                        ])
+                    ], md=5, className="d-flex align-items-center"),
+
+                    # Right: Recommendation
+                    dbc.Col([
+                        html.Div([
+                            html.Small("REKOMENDASI", className="text-muted d-block mb-2"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'arrow-right' if conclusion['significant'] else 'pause'} me-2"),
+                                html.Span(conclusion['recommendation'])
+                            ], className=f"p-2 rounded bg-{conclusion['color']} bg-opacity-10 text-{conclusion['color']}")
+                        ])
+                    ], md=4, className="d-flex align-items-center"),
+                ]),
+
+                html.Hr(),
+
+                # Comparison with previous day
+                html.Div([
+                    html.I(className="fas fa-exchange-alt me-2 text-secondary"),
+                    html.Span(comparison, className="small")
+                ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(108,117,125,0.1)"}),
+
+                # Breakdown reasons
+                html.Div([
+                    html.Small("FAKTOR PENILAIAN:", className="text-muted d-block mb-2"),
+                    html.Div([
+                        dbc.Badge(reason, color="dark", className="me-2 mb-1")
+                        for reason in conclusion['reasons']
+                    ])
+                ])
+            ])
+        ], className="mb-4", style={"border": f"2px solid var(--bs-{conclusion['color']})"}),
+
+        # ========== FILTER NOISE SUMMARY ==========
+        dbc.Card([
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.I(className="fas fa-filter me-2 text-info"),
+                            html.Strong("Filter Noise", className="text-info")
+                        ]),
+                        html.P([
+                            "Berdasarkan snapshot, hari ini adalah ",
+                            html.Strong(f"hari {narrative['activity']}", className=f"text-{activity_color}"),
+                            " dengan pergerakan ",
+                            html.Strong(f"{narrative['direction']}", className=f"text-{change_color}"),
+                            ". "
+                        ] + ([
+                            html.Span("Jangan over-interpret pergerakan ini.", className="text-warning")
+                        ] if not conclusion['significant'] else [
+                            html.Span("Pergerakan ini layak dianalisis lebih lanjut.", className="text-success")
+                        ]), className="mb-0 small")
+                    ], md=8),
+                    dbc.Col([
+                        html.Div([
+                            html.Div([
+                                html.Span("LANJUT KE POINT 2-6?" if conclusion['significant'] else "CUKUP SAMPAI SINI?", className="small text-muted d-block"),
+                                html.H5("YA" if conclusion['significant'] else "TIDAK PERLU", className=f"mb-0 text-{conclusion['color']} fw-bold")
+                            ], className="text-center")
+                        ])
+                    ], md=4, className="d-flex align-items-center justify-content-center")
+                ])
+            ])
+        ], className="mb-4", style={"backgroundColor": f"rgba({'40,167,69' if conclusion['significant'] else '255,193,7'}, 0.05)", "borderLeft": f"3px solid var(--bs-{conclusion['color']})"}),
+
+        # ========== ANCHOR KALIMAT POINT 1 ==========
+        dbc.Alert([
+            html.I(className="fas fa-anchor me-2"),
+            html.Strong("INGAT: "),
+            "Snapshot ini berfungsi sebagai ",
+            html.Strong("konteks harian"),
+            " dan ",
+            html.Strong("bukan sinyal entry"),
+            ". Point 1 menjawab 'apa yang terjadi', bukan 'apa yang harus dilakukan'."
+        ], color="secondary", className="mb-4 text-center"),
+
+        # ================================================================
+        # POINT 2 — PRICE MOVEMENT ANATOMY
+        # ================================================================
+        html.Hr(className="my-4"),
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-route me-2 text-info"),
+                "POINT 2 — Price Movement Anatomy"
+            ], className="mb-1"),
+            html.P("Membedah BAGAIMANA harga bergerak, bukan KENAPA", className="text-muted small mb-0")
+        ], className="mb-4"),
+
+        # Point 2 Purpose
+        dbc.Card([
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.I(className="fas fa-question-circle me-2 text-info"),
+                        html.Span("Point 2 menjawab:", className="text-muted small"),
+                    ]),
+                    dbc.Col([
+                        html.Strong("\"Harga hari ini bergerak dengan CARA seperti apa?\"", className="text-info")
+                    ], md=9),
+                ], className="align-items-center")
+            ])
+        ], className="mb-4", style={"borderLeft": "4px solid var(--bs-info)"}),
+
+        # ========== 2.1 ARAH GERAK INTRAHARI (FLOW) ==========
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className=f"fas {anatomy['flow']['icon']} me-2"),
+                        html.Strong("2.1 Arah Gerak Intrahari (Flow)")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.Div([
+                            html.H4(anatomy['flow']['type'], className=f"text-{anatomy['flow']['color']} fw-bold mb-2"),
+                            html.P(anatomy['flow']['narrative'], className="mb-3"),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Small("Open Position", className="text-muted d-block"),
+                                    html.Span(anatomy['flow']['open_pos'], className="fw-bold")
+                                ], width=6, className="text-center"),
+                                dbc.Col([
+                                    html.Small("Close Position", className="text-muted d-block"),
+                                    html.Span(anatomy['flow']['close_pos'], className="fw-bold")
+                                ], width=6, className="text-center"),
+                            ])
+                        ])
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+
+            # ========== 2.2 STRUKTUR RANGE ==========
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className=f"fas {anatomy['range_structure']['icon']} me-2"),
+                        html.Strong("2.2 Struktur Range")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.Div([
+                            html.H4(anatomy['range_structure']['type'], className=f"text-{anatomy['range_structure']['color']} fw-bold mb-2"),
+                            html.P(anatomy['range_structure']['narrative'], className="mb-3"),
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Small("Range", className="text-muted d-block"),
+                                    html.Span(anatomy['range_structure']['range_percent'], className="fw-bold")
+                                ], width=4, className="text-center"),
+                                dbc.Col([
+                                    html.Small("Nilai Range", className="text-muted d-block"),
+                                    html.Span(anatomy['range_structure']['range_value'], className="fw-bold")
+                                ], width=4, className="text-center"),
+                                dbc.Col([
+                                    html.Small("Kontrol", className="text-muted d-block"),
+                                    html.Span(anatomy['range_structure']['control'], className=f"fw-bold text-{anatomy['range_structure']['color']}")
+                                ], width=4, className="text-center"),
+                            ])
+                        ])
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+        ]),
+
+        # ========== 2.3 LOKASI PENUTUPAN & 2.4 RITME ==========
+        dbc.Row([
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className=f"fas {anatomy['close_location']['icon']} me-2"),
+                        html.Strong("2.3 Lokasi Penutupan"),
+                        dbc.Badge("JANTUNG POINT 2", color="warning", className="ms-2")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.Div([
+                            html.H4(anatomy['close_location']['type'], className=f"text-{anatomy['close_location']['color']} fw-bold mb-2"),
+                            html.P(anatomy['close_location']['narrative'], className="mb-3"),
+                            html.Div([
+                                html.Span("PEMENANG HARI INI: ", className="text-muted"),
+                                html.Span(anatomy['close_location']['winner'], className=f"fw-bold text-{anatomy['close_location']['color']}")
+                            ], className="text-center p-2 rounded", style={"backgroundColor": f"rgba({'40,167,69' if anatomy['close_location']['color'] == 'success' else ('220,53,69' if anatomy['close_location']['color'] == 'danger' else '255,193,7')}, 0.1)"})
+                        ])
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className=f"fas {anatomy['rhythm']['icon']} me-2"),
+                        html.Strong("2.4 Ritme Pergerakan")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.Div([
+                            html.H4(anatomy['rhythm']['type'], className=f"text-{anatomy['rhythm']['color']} fw-bold mb-2"),
+                            html.P(anatomy['rhythm']['narrative'], className="mb-3"),
+                            # Data metrics row
+                            dbc.Row([
+                                dbc.Col([
+                                    html.Small("Volume", className="text-muted d-block"),
+                                    html.Span(anatomy['rhythm'].get('volume_ratio', 'N/A'), className="fw-bold")
+                                ], width=4, className="text-center"),
+                                dbc.Col([
+                                    html.Small("Frekuensi", className="text-muted d-block"),
+                                    html.Span(anatomy['rhythm'].get('freq_ratio', 'N/A'), className="fw-bold")
+                                ], width=4, className="text-center"),
+                                dbc.Col([
+                                    html.Small("Change", className="text-muted d-block"),
+                                    html.Span(anatomy['rhythm'].get('change_magnitude', 'N/A'), className="fw-bold")
+                                ], width=4, className="text-center"),
+                            ], className="mb-3"),
+                            html.Div([
+                                html.Span("FEEL: ", className="text-muted"),
+                                html.Span(anatomy['rhythm']['feel'], className=f"fw-bold text-{anatomy['rhythm']['color']}")
+                            ], className="text-center p-2 rounded", style={"backgroundColor": f"rgba({'40,167,69' if anatomy['rhythm']['color'] == 'success' else ('220,53,69' if anatomy['rhythm']['color'] == 'danger' else ('23,162,184' if anatomy['rhythm']['color'] == 'info' else '108,117,125'))}, 0.1)"})
+                        ])
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+        ]),
+
+        # ========== 2.5 HUBUNGAN DENGAN AVG ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className=f"fas {anatomy['avg_relation']['icon']} me-2"),
+                html.Strong("2.5 Hubungan dengan Avg (Kualitas Jalur Harga)")
+            ], className="bg-dark"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.H4(anatomy['avg_relation']['type'], className=f"text-{anatomy['avg_relation']['color']} fw-bold mb-2"),
+                        html.P(anatomy['avg_relation']['narrative'], className="mb-0"),
+                    ], md=8),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Dominasi Jalur", className="text-muted d-block"),
+                            html.H5(anatomy['avg_relation']['dominance'], className=f"text-{anatomy['avg_relation']['color']} fw-bold mb-1"),
+                            html.Small(f"Close vs Avg: {anatomy['avg_relation']['close_vs_avg']}", className="text-muted")
+                        ], className="text-center")
+                    ], md=4, className="d-flex align-items-center justify-content-center"),
+                ])
+            ])
+        ], className="mb-4"),
+
+        # ========== FULL NARRATIVE PARAGRAPH ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-paragraph me-2"),
+                html.Strong("Narasi Lengkap Point 2")
+            ], className="bg-info text-white"),
+            dbc.CardBody([
+                html.P(anatomy['full_narrative'], className="mb-0 lead", style={"fontStyle": "italic", "lineHeight": "1.8"})
+            ])
+        ], className="mb-4", style={"border": "2px solid var(--bs-info)"}),
+
+        # ========== 4 PERTANYAAN KUNCI ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-check-double me-2"),
+                html.Strong("4 Pertanyaan Kunci Point 2")
+            ], className="bg-dark"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Small("1. Didorong, Ditekan, atau Dikurung?", className="text-muted d-block"),
+                            html.H5(anatomy['summary_questions'].get('didorong_ditekan_dikurung', 'N/A'), className="text-info fw-bold mb-0")
+                        ], className="text-center p-2")
+                    ], md=3),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("2. Gaya Pergerakan?", className="text-muted d-block"),
+                            html.H5(anatomy['summary_questions'].get('kasar_atau_terkontrol', 'N/A'), className=f"fw-bold mb-0 text-{'success' if anatomy['summary_questions'].get('kasar_atau_terkontrol') == 'TERKONTROL' else ('info' if anatomy['summary_questions'].get('kasar_atau_terkontrol') == 'TERARAH' else ('danger' if anatomy['summary_questions'].get('kasar_atau_terkontrol') == 'LIAR' else 'secondary'))}")
+                        ], className="text-center p-2")
+                    ], md=3),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("3. Siapa yang Menang?", className="text-muted d-block"),
+                            html.H5(anatomy['summary_questions'].get('siapa_menang', 'N/A'), className=f"fw-bold mb-0 text-{'success' if anatomy['summary_questions'].get('siapa_menang') == 'PEMBELI' else ('danger' if anatomy['summary_questions'].get('siapa_menang') == 'PENJUAL' else 'warning')}")
+                        ], className="text-center p-2")
+                    ], md=3),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("4. Selesai atau Masih Proses?", className="text-muted d-block"),
+                            html.H5(anatomy['summary_questions'].get('selesai_atau_proses', 'N/A'), className=f"fw-bold mb-1 text-{'success' if anatomy['summary_questions'].get('selesai_atau_proses') == 'SELESAI' else 'warning'}"),
+                            html.Small(anatomy['summary_questions'].get('selesai_note', ''), className="text-muted", style={"fontSize": "9px"})
+                        ], className="text-center p-2")
+                    ], md=3),
+                ])
+            ])
+        ], className="mb-4"),
+
+        # ========== ANCHOR KALIMAT POINT 2 ==========
+        dbc.Alert([
+            html.I(className="fas fa-anchor me-2"),
+            html.Strong("INGAT: "),
+            "Point 2 hanya membaca ",
+            html.Strong("perilaku mekanis harga"),
+            ", bukan niat. Tidak ada bandar, tidak ada entry, tidak ada prediksi. ",
+            html.Strong("Perilaku dulu, interpretasi belakangan.")
+        ], color="info", className="mb-4 text-center"),
+
+        # ========================================================================
+        # POINT 3 — COMPRESSION & ABSORPTION
+        # Membaca APA yang terjadi SETELAH harga bergerak (multi-hari)
+        # ========================================================================
+        html.Hr(className="my-4"),
+
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-compress-alt me-2"),
+                "POINT 3 — COMPRESSION & ABSORPTION"
+            ], className="text-warning mb-1"),
+            html.P("Membaca APA yang terjadi SETELAH harga bergerak (analisis multi-hari)", className="text-muted mb-0 small")
+        ], className="mb-4"),
+
+        # ========== PHASE SUMMARY ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-area me-2"),
+                html.Strong("Fase Pasar Saat Ini"),
+                dbc.Badge(f"Analisis {point3.get('days_analyzed', 0)} Hari", color="secondary", className="ms-2")
+            ], className=f"bg-{point3.get('phase_color', 'secondary')} text-white"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.H3(point3.get('phase', 'N/A'), className=f"text-{point3.get('phase_color', 'secondary')} fw-bold mb-2"),
+                        html.P(point3.get('phase_narrative', ''), className="mb-2"),
+                        # Education note - helps users understand context
+                        html.P([
+                            html.I(className="fas fa-graduation-cap me-2 text-warning"),
+                            point3.get('education_note', '')
+                        ], className="small text-muted fst-italic mb-2", style={"backgroundColor": "rgba(255,193,7,0.1)", "padding": "8px", "borderRadius": "4px"}),
+                        dbc.Alert([
+                            html.I(className="fas fa-info-circle me-2"),
+                            html.Strong("Implikasi: "),
+                            point3.get('phase_implication', '')
+                        ], color="light", className="mb-0 py-2")
+                    ], md=8),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Prior Trend", className="text-muted d-block"),
+                            html.H5(point3.get('prior_trend', 'N/A').upper(), className="text-info fw-bold")
+                        ], className="text-center mb-3"),
+                    ], md=4, className="d-flex align-items-center justify-content-center")
+                ])
+            ])
+        ], className="mb-4", style={"border": f"2px solid var(--bs-{point3.get('phase_color', 'secondary')})"}),
+
+        # ========== COMPRESSION & ABSORPTION DETAILS ==========
+        dbc.Row([
+            # 3.1 COMPRESSION
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className=f"fas {point3['compression'].get('icon', 'fa-compress')} me-2"),
+                        html.Strong("3.1 Compression")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.H4(point3['compression'].get('type', 'N/A'), className=f"text-{point3['compression'].get('color', 'secondary')} fw-bold mb-2"),
+                        html.P(point3['compression'].get('narrative', ''), className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Range Ratio", className="text-muted d-block"),
+                                html.Span(point3['compression'].get('range_ratio', 'N/A'), className="fw-bold")
+                            ], width=6, className="text-center"),
+                            dbc.Col([
+                                html.Small("Close Clustering", className="text-muted d-block"),
+                                html.Span(point3['compression'].get('close_clustering', 'N/A'), className="fw-bold")
+                            ], width=6, className="text-center"),
+                        ]),
+                        html.Hr(),
+                        html.Small([
+                            html.I(className="fas fa-database me-1"),
+                            "Data: High, Low (multi-hari) + Volume/Freq"
+                        ], className="text-muted")
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+
+            # 3.2 ABSORPTION
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.I(className=f"fas {point3['absorption'].get('icon', 'fa-hand-paper')} me-2"),
+                        html.Strong("3.2 Absorption")
+                    ], className="bg-dark"),
+                    dbc.CardBody([
+                        html.H4(point3['absorption'].get('type', 'N/A'), className=f"text-{point3['absorption'].get('color', 'secondary')} fw-bold mb-2"),
+                        html.P(point3['absorption'].get('narrative', ''), className="mb-3"),
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Hari Turun", className="text-muted d-block"),
+                                html.Span(str(point3['absorption'].get('down_days', 0)), className="fw-bold text-danger")
+                            ], width=3, className="text-center"),
+                            dbc.Col([
+                                html.Small("Hari Naik", className="text-muted d-block"),
+                                html.Span(str(point3['absorption'].get('up_days', 0)), className="fw-bold text-success")
+                            ], width=3, className="text-center"),
+                            dbc.Col([
+                                html.Small("Low Bertahan", className="text-muted d-block"),
+                                html.Span("YA" if point3['absorption'].get('lows_holding') else "TIDAK", className=f"fw-bold text-{'success' if point3['absorption'].get('lows_holding') else 'danger'}")
+                            ], width=3, className="text-center"),
+                            dbc.Col([
+                                html.Small("High Tertahan", className="text-muted d-block"),
+                                html.Span("YA" if point3['absorption'].get('highs_capped') else "TIDAK", className=f"fw-bold text-{'warning' if point3['absorption'].get('highs_capped') else 'info'}")
+                            ], width=3, className="text-center"),
+                        ]),
+                        html.Hr(),
+                        html.Small([
+                            html.I(className="fas fa-database me-1"),
+                            "Data: Close, High, Low, Change (multi-hari) + Volume/Value"
+                        ], className="text-muted")
+                    ])
+                ], className="h-100")
+            ], md=6, className="mb-3"),
+        ]),
+
+        # ========== DATA SUMMARY TABLE ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-table me-2"),
+                html.Strong("Data 5 Hari Terakhir")
+            ], className="bg-dark"),
+            dbc.CardBody([
+                html.Table([
+                    html.Thead([
+                        html.Tr([
+                            html.Th("Tanggal", className="text-center"),
+                            html.Th("Range", className="text-center"),
+                            html.Th("Close Pos", className="text-center"),
+                            html.Th("Change", className="text-center"),
+                        ])
+                    ]),
+                    html.Tbody([
+                        html.Tr([
+                            html.Td(d['date'], className="text-center"),
+                            html.Td(d['range'], className="text-center"),
+                            html.Td(d['close_pos'], className="text-center"),
+                            html.Td(d['change'], className=f"text-center text-{'success' if '+' in d['change'] else 'danger'}"),
+                        ]) for d in point3.get('data_summary', [])
+                    ])
+                ], className="table table-sm table-dark mb-0")
+            ])
+        ], className="mb-4"),
+
+        # ========== FULL NARRATIVE POINT 3 ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-paragraph me-2"),
+                html.Strong("Narasi Lengkap Point 3")
+            ], className="bg-warning text-dark"),
+            dbc.CardBody([
+                html.P(point3.get('full_narrative', ''), className="mb-0 lead", style={"fontStyle": "italic", "lineHeight": "1.8"})
+            ])
+        ], className="mb-4", style={"border": "2px solid var(--bs-warning)"}),
+
+        # ========== 4 PERTANYAAN KUNCI POINT 3 ==========
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-question-circle me-2"),
+                html.Strong("4 Pertanyaan Kunci Point 3 (Edukatif)")
+            ], className="bg-dark"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Small("1. Apakah tekanan masih efektif?", className="text-muted d-block"),
+                            html.H5(point3.get('key_questions', {}).get('tekanan_efektif', 'N/A'), className=f"fw-bold mb-0 text-{'danger' if point3.get('key_questions', {}).get('tekanan_efektif') == 'YA' else 'success'}")
+                        ], className="text-center p-2")
+                    ], md=3),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("2. Apakah harga masih bebas bergerak?", className="text-muted d-block"),
+                            html.H5(point3.get('key_questions', {}).get('harga_bebas', 'N/A'), className=f"fw-bold mb-0 text-{'danger' if point3.get('key_questions', {}).get('harga_bebas') == 'YA' else 'success'}")
+                        ], className="text-center p-2")
+                    ], md=3),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("3. Apakah kegagalan tekanan berulang?", className="text-muted d-block"),
+                            html.H5(point3.get('key_questions', {}).get('kegagalan_berulang', 'N/A'), className=f"fw-bold mb-0 text-{'success' if point3.get('key_questions', {}).get('kegagalan_berulang') == 'YA' else 'secondary'}")
+                        ], className="text-center p-2")
+                    ], md=3),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("4. Apakah range makin menyempit?", className="text-muted d-block"),
+                            html.H5(point3.get('key_questions', {}).get('range_menyempit', 'N/A'), className=f"fw-bold mb-0 text-{'success' if point3.get('key_questions', {}).get('range_menyempit') == 'YA' else 'secondary'}")
+                        ], className="text-center p-2")
+                    ], md=3),
+                ])
+            ])
+        ], className="mb-4"),
+
+        # ========== ANCHOR KALIMAT POINT 3 ==========
+        dbc.Alert([
+            html.I(className="fas fa-anchor me-2"),
+            html.Strong("INGAT: "),
+            "Point 3 bukan jawaban, tapi ",
+            html.Strong("tanda bahwa pertanyaan sudah tepat"),
+            ". Kalau Point 3 belum jelas, Point 4 (Akumulasi/Distribusi) tidak boleh dipaksakan."
+        ], color="warning", className="mb-4 text-center"),
+
+        # ========== EOD DISCLAIMER ==========
+        dbc.Alert([
+            html.I(className="fas fa-exclamation-triangle me-2"),
+            html.Strong("Batasan Data EOD: "),
+            "Interpretasi compression & absorption berbasis data End-of-Day, sehingga menilai ",
+            html.Strong("perilaku hasil"),
+            ", bukan detail transaksi per detik (order flow)."
+        ], color="secondary", className="mb-4 text-center small"),
+
+        # ========================================================================
+        # V6 ANALYSIS — SIDEWAYS & PHASE DETECTION (ADAPTIVE)
+        # Formula V6: Percentile-based threshold, Volume Ratio phase detection
+        # ========================================================================
+        html.Hr(className="my-4"),
+
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-chart-area me-2"),
+                "ANALISIS V6 — SIDEWAYS & FASE PASAR"
+            ], className="text-info mb-1"),
+            html.P("Formula adaptif: Percentile 40 threshold + Volume Ratio untuk deteksi fase", className="text-muted mb-0 small")
+        ], className="mb-4"),
+
+        # V6 Main Status Card
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-line me-2"),
+                html.Strong("Status V6"),
+                dbc.Badge(
+                    v6_phase.get('phase', 'N/A') if v6_phase else 'N/A',
+                    color="success" if v6_phase.get('phase') == 'ACCUMULATION' else
+                          "danger" if v6_phase.get('phase') == 'DISTRIBUTION' else "secondary",
+                    className="ms-2"
+                )
+            ], className=f"bg-{'success' if v6_phase.get('phase') == 'ACCUMULATION' else 'danger' if v6_phase.get('phase') == 'DISTRIBUTION' else 'secondary'} text-white"),
+            dbc.CardBody([
+                dbc.Row([
+                    # Sideways Status
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Status Sideways", className="text-muted mb-2"),
+                            dbc.Badge(
+                                "SIDEWAYS" if v6_sideways.get('is_sideways') else "TRENDING",
+                                color="info" if v6_sideways.get('is_sideways') else "warning",
+                                className="fs-5 mb-2"
+                            ),
+                            html.Div([
+                                html.Small(f"Periode: {v6_sideways.get('days', 0)} hari", className="d-block"),
+                                html.Small(f"Range: Rp {v6_sideways.get('low', 0):,.0f} - Rp {v6_sideways.get('high', 0):,.0f}", className="d-block"),
+                                html.Small([
+                                    "Range%: ",
+                                    html.Span(f"{v6_sideways.get('range_pct', 0):.1f}%", className="text-info fw-bold")
+                                ], className="d-block"),
+                                html.Small([
+                                    "Threshold: < ",
+                                    html.Span(f"{v6_sideways.get('threshold_pct', 0):.1f}%", className="text-warning")
+                                ], className="d-block"),
+                            ])
+                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)" if v6_sideways.get('is_sideways') else "rgba(255,193,7,0.1)"})
+                    ], md=4),
+
+                    # Phase Analysis
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Fase Pasar (V6)", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span("🟢 " if v6_phase.get('phase') == 'ACCUMULATION' else "🔴 " if v6_phase.get('phase') == 'DISTRIBUTION' else "⚪ ", style={"fontSize": "32px"}),
+                                html.H4(v6_phase.get('phase', 'N/A') if v6_phase else 'N/A', className=f"text-{'success' if v6_phase.get('phase') == 'ACCUMULATION' else 'danger' if v6_phase.get('phase') == 'DISTRIBUTION' else 'secondary'} fw-bold mb-0")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small([
+                                    "Volume Ratio: ",
+                                    html.Span(f"{v6_phase.get('vol_ratio', 0):.2f}" if v6_phase else "N/A",
+                                             className=f"fw-bold text-{'success' if v6_phase and v6_phase.get('vol_ratio', 1) > 1.2 else 'danger' if v6_phase and v6_phase.get('vol_ratio', 1) < 0.8 else 'secondary'}")
+                                ], className="d-block"),
+                                html.Small([
+                                    "Vol Lower: ", html.Span(f"{v6_phase.get('vol_lower', 0):,.0f}" if v6_phase else "0", className="text-success")
+                                ], className="d-block"),
+                                html.Small([
+                                    "Vol Upper: ", html.Span(f"{v6_phase.get('vol_upper', 0):,.0f}" if v6_phase else "0", className="text-danger")
+                                ], className="d-block"),
+                            ])
+                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if v6_phase.get('phase') == 'ACCUMULATION' else '220,53,69' if v6_phase.get('phase') == 'DISTRIBUTION' else '108,117,125'},0.15)"})
+                    ], md=4),
+
+                    # Entry Signal
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Sinyal Aksi (V6)", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span(
+                                    "🟢" if v6_entry.get('action') == 'ENTRY' else
+                                    "👁️" if v6_entry.get('action') == 'WATCH' else
+                                    "🔴" if v6_entry.get('action') == 'EXIT' else "⏸️",
+                                    style={"fontSize": "32px"}
+                                ),
+                                html.H4(v6_entry.get('action', 'WAIT') if v6_entry else 'WAIT',
+                                       className=f"text-{'success' if v6_entry.get('action') == 'ENTRY' else 'info' if v6_entry.get('action') == 'WATCH' else 'danger' if v6_entry.get('action') == 'EXIT' else 'secondary'} fw-bold mb-0")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small([
+                                    "Konfirmasi: ",
+                                    html.Span(f"{v6_entry.get('score', 0)}/4" if v6_entry else "0/4", className="text-info fw-bold")
+                                ], className="d-block"),
+                                html.Small([
+                                    "R:R Ratio: ",
+                                    html.Span(f"{v6_entry.get('rr_ratio', 0):.1f}x" if v6_entry else "N/A",
+                                             className=f"fw-bold text-{'success' if v6_entry and v6_entry.get('rr_ratio', 0) >= 2 else 'warning' if v6_entry and v6_entry.get('rr_ratio', 0) >= 1.5 else 'danger'}")
+                                ], className="d-block"),
+                                html.Small([
+                                    "Near Support: ",
+                                    html.Span("✓" if v6_entry.get('near_support') else "✗", className=f"text-{'success' if v6_entry.get('near_support') else 'danger'}")
+                                ], className="d-block") if v6_entry else None,
+                            ])
+                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if v6_entry.get('action') == 'ENTRY' else '23,162,184' if v6_entry.get('action') == 'WATCH' else '220,53,69' if v6_entry.get('action') == 'EXIT' else '108,117,125'},0.15)"})
+                    ], md=4),
+                ])
+            ])
+        ], className="mb-4", style={"border": f"2px solid var(--bs-{'success' if v6_phase.get('phase') == 'ACCUMULATION' else 'danger' if v6_phase.get('phase') == 'DISTRIBUTION' else 'info'})"}),
+
+        # V6 Confirmations Detail
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-list-check me-2"),
+                html.Strong("Detail Konfirmasi V6")
+            ], className="bg-dark"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Span("✓" if v6_entry.get('near_support') else "✗", className=f"me-2 text-{'success' if v6_entry.get('near_support') else 'danger'}"),
+                            html.Strong("Near Support", className="me-2"),
+                            html.Small(f"(Harga dekat {v6_sideways.get('low', 0):,.0f})" if v6_entry.get('near_support') else "(Tidak dekat support)", className="text-muted")
+                        ], className="mb-2"),
+                        html.Div([
+                            html.Span("✓" if v6_entry.get('bullish_candle') else "✗", className=f"me-2 text-{'success' if v6_entry.get('bullish_candle') else 'danger'}"),
+                            html.Strong("Bullish Candle", className="me-2"),
+                            html.Small("(Close > Open)" if v6_entry.get('bullish_candle') else "(Bearish)", className="text-muted")
+                        ], className="mb-2"),
+                    ], md=6),
+                    dbc.Col([
+                        html.Div([
+                            html.Span("✓" if v6_entry.get('range_expansion') else "✗", className=f"me-2 text-{'success' if v6_entry.get('range_expansion') else 'danger'}"),
+                            html.Strong("Range Expansion", className="me-2"),
+                            html.Small("(Range > Rata-rata)" if v6_entry.get('range_expansion') else "(Range normal)", className="text-muted")
+                        ], className="mb-2"),
+                        html.Div([
+                            html.Span("✓" if v6_entry.get('volume_surge') else "✗", className=f"me-2 text-{'success' if v6_entry.get('volume_surge') else 'danger'}"),
+                            html.Strong("Volume Surge", className="me-2"),
+                            html.Small("(Volume > 1.2x avg)" if v6_entry.get('volume_surge') else "(Volume normal)", className="text-muted")
+                        ], className="mb-2"),
+                    ], md=6),
+                ])
+            ])
+        ], className="mb-4") if v6_entry else html.Div(),
+
+        # V6 Action Reason
+        dbc.Alert([
+            html.I(className="fas fa-bullhorn me-2"),
+            html.Strong("Kesimpulan V6: "),
+            html.Span(v6_entry.get('action_reason', 'Data tidak tersedia') if v6_entry else 'Data tidak tersedia')
+        ], color="success" if v6_entry.get('action') == 'ENTRY' else
+               "info" if v6_entry.get('action') == 'WATCH' else
+               "danger" if v6_entry.get('action') == 'EXIT' else "secondary",
+           className="mb-4"),
+
+        # V6 Formula Explanation
+        dbc.Alert([
+            html.I(className="fas fa-info-circle me-2"),
+            html.Strong("Formula V6: "),
+            "Sideways = Range% < Percentile_40 | ",
+            "Accumulation = Vol_Lower/Vol_Upper > 1.2 | ",
+            "Entry = Sideways + Accumulation + Near_Support + 2/4 konfirmasi"
+        ], color="secondary", className="mb-4 text-center small"),
+
+        # ========================================================================
+        # ANALISIS AKUMULASI 4 MINGGU (V6 FORMULA)
+        # Volume di bawah midpoint vs di atas midpoint
+        # ========================================================================
+        html.Hr(className="my-4"),
+
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-layer-group me-2"),
+                "ANALISIS AKUMULASI 4 MINGGU TERAKHIR"
+            ], className="text-warning mb-1"),
+            html.P("Deteksi akumulasi/distribusi per minggu menggunakan formula V6 (Volume Lower vs Upper)", className="text-muted mb-0 small")
+        ], className="mb-4"),
+
+        # ========== WEEKLY ACCUMULATION CARDS ==========
+        dbc.Row([
+            # Helper function for creating weekly card
+            dbc.Col([
+                dbc.Card([
+                    dbc.CardHeader([
+                        html.Span(weeks.get(w, {}).get('phase_icon', '⚪'), className="me-2", style={"fontSize": "20px"}),
+                        html.Strong(f"{'Minggu Ini' if w == 1 else f'{w} Minggu Lalu'}"),
+                        dbc.Badge(
+                            weeks.get(w, {}).get('phase', 'N/A'),
+                            color=weeks.get(w, {}).get('phase_color', 'secondary'),
+                            className="ms-2"
+                        )
+                    ], className=f"bg-{weeks.get(w, {}).get('phase_color', 'secondary')} text-white"),
+                    dbc.CardBody([
+                        # Date range
+                        html.Small(f"{weeks.get(w, {}).get('start_date', '')}-{weeks.get(w, {}).get('end_date', '')}", className="text-muted d-block text-center mb-2"),
+
+                        # Volume Ratio Bar Chart - Using Bootstrap Progress
+                        html.Div([
+                            html.Div([
+                                html.Small("Lower", className="text-success"),
+                                html.Small("Upper", className="text-danger float-end"),
+                            ], className="mb-1"),
+                            dbc.Progress([
+                                dbc.Progress(
+                                    value=weeks.get(w, {}).get('vol_lower', 0) / max(1, weeks.get(w, {}).get('vol_lower', 0) + weeks.get(w, {}).get('vol_upper', 0)) * 100,
+                                    color="success",
+                                    bar=True,
+                                    style={"height": "30px"}
+                                ),
+                                dbc.Progress(
+                                    value=weeks.get(w, {}).get('vol_upper', 0) / max(1, weeks.get(w, {}).get('vol_lower', 0) + weeks.get(w, {}).get('vol_upper', 0)) * 100,
+                                    color="danger",
+                                    bar=True,
+                                    style={"height": "30px"}
+                                ),
+                            ], style={"height": "30px"}),
+                        ], className="mb-3"),
+
+                        # Volume Ratio Display
+                        html.Div([
+                            html.H3(f"{weeks.get(w, {}).get('vol_ratio', 0):.2f}x", className=f"text-{weeks.get(w, {}).get('phase_color', 'secondary')} mb-0 text-center fw-bold"),
+                            html.Small("Vol Ratio", className="text-muted d-block text-center"),
+                        ], className="mb-2 p-2 rounded", style={"backgroundColor": f"rgba({'40,167,69' if weeks.get(w, {}).get('phase') == 'ACCUMULATION' else '220,53,69' if weeks.get(w, {}).get('phase') == 'DISTRIBUTION' else '108,117,125'}, 0.2)"}),
+
+                        # Metrics
+                        dbc.Row([
+                            dbc.Col([
+                                html.Small("Vol Lower", className="text-muted d-block"),
+                                html.Strong(f"{weeks.get(w, {}).get('vol_lower', 0)/1e6:.1f}M", className="text-success small")
+                            ], width=6, className="text-center"),
+                            dbc.Col([
+                                html.Small("Vol Upper", className="text-muted d-block"),
+                                html.Strong(f"{weeks.get(w, {}).get('vol_upper', 0)/1e6:.1f}M", className="text-danger small")
+                            ], width=6, className="text-center"),
+                        ], className="mb-2"),
+
+                        # Net Market (Total) - based on vol_lower - vol_upper
+                        html.Div([
+                            html.Small("Net Market (Total)", className="text-muted d-block text-center"),
+                            html.Strong([
+                                html.Span(
+                                    f"{'NET BUY' if weeks.get(w, {}).get('vol_lower', 0) > weeks.get(w, {}).get('vol_upper', 0) else 'NET SELL'} ",
+                                    className=f"text-{'success' if weeks.get(w, {}).get('vol_lower', 0) > weeks.get(w, {}).get('vol_upper', 0) else 'danger'}"
+                                ),
+                                html.Span(
+                                    f"{abs(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0))/100:,.0f} Lot",
+                                    className=f"text-{'success' if weeks.get(w, {}).get('vol_lower', 0) > weeks.get(w, {}).get('vol_upper', 0) else 'danger'}"
+                                )
+                            ], className="d-block text-center small")
+                        ], className="mb-1 p-1 rounded", style={"backgroundColor": f"rgba({'40,167,69' if weeks.get(w, {}).get('vol_lower', 0) > weeks.get(w, {}).get('vol_upper', 0) else '220,53,69'}, 0.1)"}),
+
+                        # Net Foreign (in Lot)
+                        html.Div([
+                            html.Small("Net Foreign", className="text-muted d-block text-center"),
+                            html.Strong([
+                                html.Span(
+                                    f"{'NET BUY' if weeks.get(w, {}).get('net_foreign_lot', 0) > 0 else 'NET SELL'} ",
+                                    className=f"text-{'success' if weeks.get(w, {}).get('net_foreign_lot', 0) > 0 else 'danger'}"
+                                ),
+                                html.Span(
+                                    f"{abs(weeks.get(w, {}).get('net_foreign_lot', 0)):,.0f} Lot",
+                                    className=f"text-{'success' if weeks.get(w, {}).get('net_foreign_lot', 0) > 0 else 'danger'}"
+                                )
+                            ], className="d-block text-center small")
+                        ], className="mb-2 p-1 rounded", style={"backgroundColor": f"rgba({'40,167,69' if weeks.get(w, {}).get('net_foreign_lot', 0) > 0 else '220,53,69'}, 0.1)"}),
+
+                        html.Hr(className="my-2"),
+                        html.Small([
+                            f"Range: Rp {weeks.get(w, {}).get('low', 0):,.0f} - {weeks.get(w, {}).get('high', 0):,.0f}"
+                        ], className="text-muted d-block text-center")
+                    ])
+                ], className="h-100", style={"border": f"2px solid var(--bs-{weeks.get(w, {}).get('phase_color', 'secondary')})"})
+            ], md=6, lg=3, className="mb-3") for w in [1, 2, 3, 4]
+        ]),
+
+        # Weekly Accumulation Summary
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-pie me-2"),
+                html.Strong("Ringkasan Akumulasi 4 Minggu")
+            ], className="bg-warning text-dark"),
+            dbc.CardBody([
+                dbc.Row([
+                    dbc.Col([
+                        html.H6("Fase per Minggu", className="text-muted mb-2"),
+                        html.Div([
+                            html.Span(weeks.get(4, {}).get('phase_icon', '⚪'), style={"fontSize": "24px"}),
+                            html.I(className="fas fa-arrow-right mx-2 text-muted"),
+                            html.Span(weeks.get(3, {}).get('phase_icon', '⚪'), style={"fontSize": "24px"}),
+                            html.I(className="fas fa-arrow-right mx-2 text-muted"),
+                            html.Span(weeks.get(2, {}).get('phase_icon', '⚪'), style={"fontSize": "24px"}),
+                            html.I(className="fas fa-arrow-right mx-2 text-muted"),
+                            html.Span(weeks.get(1, {}).get('phase_icon', '⚪'), style={"fontSize": "24px"}),
+                        ], className="text-center")
+                    ], md=4),
+                    dbc.Col([
+                        html.H6("Avg Vol Ratio 4 Minggu", className="text-muted mb-2"),
+                        html.H3(
+                            f"{sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4:.2f}x",
+                            className=f"text-{'success' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 3.0 else 'warning' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5 else 'danger' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 < 0.8 else 'secondary'} mb-0 text-center"
+                        ),
+                        html.Small(
+                            "ACCUMULATION" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 3.0 else "WEAK ACC" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5 else "DISTRIBUTION" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 < 0.8 else "NEUTRAL",
+                            className=f"text-{'success' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 3.0 else 'warning' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5 else 'danger' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 < 0.8 else 'secondary'} d-block text-center fw-bold"
+                        )
+                    ], md=4, className="text-center"),
+                    dbc.Col([
+                        html.H6("Net Foreign 4 Minggu", className="text-muted mb-2"),
+                        html.H4(
+                            f"{abs(sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5))):,.0f} Lot",
+                            className=f"text-{'success' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'danger'} mb-0 text-center"
+                        ),
+                        html.Small(
+                            f"{'NET BUY' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'NET SELL'}",
+                            className=f"text-{'success' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'danger'} d-block text-center fw-bold"
+                        )
+                    ], md=4, className="text-center"),
+                ]),
+                html.Hr(className="my-2"),
+                # Total Net Market
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Net Market (Total) 4 Minggu", className="text-muted d-block"),
+                            html.H5([
+                                html.Span(
+                                    f"{'NET BUY' if sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)) > 0 else 'NET SELL'} ",
+                                    className=f"text-{'success' if sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)) > 0 else 'danger'}"
+                                ),
+                                html.Span(
+                                    f"{abs(sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)))/100:,.0f} Lot",
+                                    className=f"text-{'success' if sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)) > 0 else 'danger'}"
+                                )
+                            ], className="mb-0"),
+                            html.Small("(Selisih Vol Lower - Vol Upper)", className="text-muted")
+                        ], className="p-2 rounded text-center", style={"backgroundColor": f"rgba({'40,167,69' if sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)) > 0 else '220,53,69'}, 0.15)"})
+                    ], md=12)
+                ], className="mb-2"),
+                html.Hr(className="my-2"),
+                # Count phases
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Span("🟢", style={"fontSize": "20px"}),
+                            html.Strong(f" {sum(1 for w in range(1, 5) if weeks.get(w, {}).get('phase') == 'ACCUMULATION')} minggu", className="text-success"),
+                            html.Small(" Akumulasi", className="text-muted")
+                        ])
+                    ], width=4, className="text-center"),
+                    dbc.Col([
+                        html.Div([
+                            html.Span("⚪", style={"fontSize": "20px"}),
+                            html.Strong(f" {sum(1 for w in range(1, 5) if weeks.get(w, {}).get('phase') == 'NEUTRAL')} minggu", className="text-secondary"),
+                            html.Small(" Netral", className="text-muted")
+                        ])
+                    ], width=4, className="text-center"),
+                    dbc.Col([
+                        html.Div([
+                            html.Span("🔴", style={"fontSize": "20px"}),
+                            html.Strong(f" {sum(1 for w in range(1, 5) if weeks.get(w, {}).get('phase') == 'DISTRIBUTION')} minggu", className="text-danger"),
+                            html.Small(" Distribusi", className="text-muted")
+                        ])
+                    ], width=4, className="text-center"),
+                ])
+            ])
+        ], className="mb-4"),
+
+        # Interpretation
+        dbc.Alert([
+            html.I(className="fas fa-lightbulb me-2"),
+            html.Strong("Cara Membaca: "),
+            "Vol Ratio > 4.0 = AKUMULASI KUAT (entry signal), Vol Ratio 1.5-4.0 = Weak Acc (observasi), Vol Ratio < 0.8 = Distribusi.",
+            "Jika 3-4 minggu konsisten akumulasi, kemungkinan breakout ke atas lebih tinggi."
+        ], color="info", className="mb-4"),
+
+        # ========== METHODOLOGY NOTE ==========
+        dbc.Card([
+            dbc.CardBody([
+                html.Div([
+                    html.I(className="fas fa-lightbulb me-2 text-warning"),
+                    html.Strong("Filosofi Analisis V6", className="text-warning")
+                ]),
+                html.P([
+                    "Point 1 & 2 membangun fondasi: ",
+                    html.Strong("apa yang terjadi dan bagaimana terjadinya"),
+                    ". Point 3: ",
+                    html.Strong("apakah ada fase penahanan (sideways)"),
+                    ". V6 Sideways: ",
+                    html.Strong("deteksi adaptif dengan Percentile 40"),
+                    ". V6 Phase: ",
+                    html.Strong("akumulasi/distribusi via Volume Ratio"),
+                    ". Weekly Analysis: ",
+                    html.Strong("pola pergerakan 4 minggu terakhir"),
+                    "."
+                ], className="mb-0 small text-muted")
+            ])
+        ], className="mb-4", style={"backgroundColor": "rgba(255,193,7,0.05)", "borderLeft": "3px solid var(--bs-warning)"}),
 
     ])
 
@@ -10228,6 +13590,15 @@ def create_analysis_page(stock_code='CDIA'):
             'status': 'NO_DATA', 'significance': 'INSUFFICIENT', 'horizons': {}, 'conclusion': 'Data tidak tersedia'
         }
 
+        # V6 Sideways Analysis for accurate Support/Resistance levels
+        v6_data = get_v6_analysis(stock_code)
+        v6_sideways = v6_data.get('sideways', {}) if not v6_data.get('error') else {}
+        v6_entry = v6_data.get('entry', {}) if not v6_data.get('error') else {}
+
+        # Weekly Analysis for 4-week accumulation data
+        weekly_data = get_weekly_analysis(stock_code)
+        weeks = weekly_data.get('weeks', {})
+
     except Exception as e:
         return html.Div([
             dbc.Alert(f"Error loading analysis for {stock_code}: {str(e)}", color="danger"),
@@ -10266,6 +13637,18 @@ def create_analysis_page(stock_code='CDIA'):
         insight_text = f"[~] {stock_code} dalam fase netral. Tidak ada sinyal kuat - observasi dulu."
         insight_color = "secondary"
 
+    # === V6 SYSTEM VARIABLES (BEFORE RETURN) ===
+    v6_action = v6_entry.get('action', 'WAIT') if v6_entry else 'WAIT'
+    v6_action_reason = v6_entry.get('action_reason', '') if v6_entry else ''
+    v6_phase = v6_data.get('phase', {}).get('phase', 'NEUTRAL') if v6_data and not v6_data.get('error') else 'NEUTRAL'
+    v6_action_map = {
+        'ENTRY': {'icon': '🟢', 'color': 'success', 'desc': 'Sinyal masuk - Akumulasi terdeteksi'},
+        'WATCH': {'icon': '👁️', 'color': 'info', 'desc': 'Observasi - Tunggu konfirmasi'},
+        'EXIT': {'icon': '🔴', 'color': 'danger', 'desc': 'Sinyal keluar - Distribusi terdeteksi'},
+        'WAIT': {'icon': '⏸️', 'color': 'secondary', 'desc': 'Tunggu - Belum ada sinyal jelas'}
+    }
+    v6_style = v6_action_map.get(v6_action, v6_action_map['WAIT'])
+
     # ========== BUILD THE PAGE ==========
     return html.Div([
         # === ONE-LINE INSIGHT BAR (TOP HEADLINE) - INDONESIAN ===
@@ -10294,16 +13677,16 @@ def create_analysis_page(stock_code='CDIA'):
             dcc.Link(dbc.Button([html.I(className="fas fa-cubes me-2"), "Accumulation"], color="warning", size="sm", className="mb-2 mb-lg-0"), href="/accumulation"),
         ], className="d-flex flex-wrap mb-3"),
 
-        # === 1. DECISION HERO CARD (PALING PENTING) ===
+        # === 1. DECISION HERO CARD (V6 SYSTEM) ===
         dbc.Card([
             dbc.CardBody([
                 dbc.Row([
-                    # Decision Icon & Action
+                    # Decision Icon & Action - NOW V6
                     dbc.Col([
                         html.Div([
-                            html.Span(decision.get('icon', '[~]'), style={"fontSize": "80px"}),
-                            html.H1(decision.get('action', 'WAIT'), className=f"text-{decision.get('color', 'secondary')} fw-bold mb-0"),
-                            html.P(decision.get('description', ''), className="text-muted")
+                            html.Span(v6_style['icon'], style={"fontSize": "80px"}),
+                            html.H1(v6_action, className=f"text-{v6_style['color']} fw-bold mb-0"),
+                            html.P(v6_style['desc'], className="text-muted")
                         ], className="text-center")
                     ], md=3, className="border-end d-flex align-items-center justify-content-center"),
 
@@ -10318,7 +13701,7 @@ def create_analysis_page(stock_code='CDIA'):
                                     color="success" if accum.get('decision_rule', {}).get('current_vs_entry') == 'IN_ZONE' else "warning" if accum.get('decision_rule', {}).get('current_vs_entry') == 'ABOVE' else "danger"
                                 )
                             ], className="mb-2"),
-                            html.P(decision.get('reason', ''), className="mb-2"),
+                            html.P(v6_action_reason if v6_action_reason else decision.get('reason', ''), className="mb-2"),
                         ]),
 
                         # Confidence Metrics Row
@@ -10344,9 +13727,9 @@ def create_analysis_page(stock_code='CDIA'):
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Signal", className="text-muted"),
+                                    html.Small("Fase (V6)", className="text-muted"),
                                     html.Div([
-                                        html.Strong(overall_signal, className='text-' + {'AKUMULASI': 'success', 'DISTRIBUSI': 'danger', 'NETRAL': 'secondary'}.get(overall_signal, 'secondary'))
+                                        html.Strong(v6_phase, className='text-' + {'ACCUMULATION': 'success', 'DISTRIBUTION': 'danger', 'NEUTRAL': 'secondary'}.get(v6_phase, 'secondary'))
                                     ])
                                 ], className="text-center")
                             ], width=4),
@@ -10376,7 +13759,7 @@ def create_analysis_page(stock_code='CDIA'):
                     ], md=9)
                 ])
             ])
-        ], className="mb-4", style={"border": f"3px solid var(--bs-{decision.get('color', 'secondary')})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
+        ], className="mb-4", style={"border": f"3px solid var(--bs-{v6_style['color']})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
 
         # === IMPULSE/MOMENTUM ALERT (tertinggi prioritas) - INDONESIAN ===
         dbc.Alert([
@@ -10447,106 +13830,6 @@ def create_analysis_page(stock_code='CDIA'):
             ]),
         ], color="warning", className="mb-3", style={"backgroundColor": "rgba(255,193,7,0.15)", "border": "2px solid #ffc107"})
         if markup_trigger.get('markup_triggered') and not impulse_signal.get('impulse_detected') else html.Div(),
-
-        # === EDUCATIONAL CARD - "Apa Artinya Ini?" ===
-        dbc.Card([
-            dbc.CardHeader([
-                html.Div([
-                    html.I(className="fas fa-graduation-cap me-2 text-info"),
-                    html.Strong("Apa Artinya Ini?", className="text-info"),
-                ], className="d-flex align-items-center")
-            ], className="bg-transparent border-info"),
-            dbc.CardBody([
-                # Dynamic educational content based on signal type
-                html.Div([
-                    # For Impulse/Momentum signal
-                    html.Div([
-                        html.P([
-                            html.Strong("[!] Sinyal Momentum/Impulse", className="text-danger d-block mb-2"),
-                            html.Span(impulse_signal.get('educational', 'Tidak ada data'), className="text-light"),
-                        ], className="mb-3"),
-                        html.Div([
-                            html.Small("Perbedaan dengan Akumulasi:", className="text-warning d-block mb-2"),
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Div([
-                                        html.Small("[#] Akumulasi", className="text-success d-block"),
-                                        html.Small("* Lambat, tersembunyi", className="text-muted d-block"),
-                                        html.Small("* Volume stabil", className="text-muted d-block"),
-                                        html.Small("* CPR rendah/sedang", className="text-muted d-block"),
-                                        html.Small("* Risiko lebih rendah", className="text-muted d-block"),
-                                    ])
-                                ], width=6),
-                                dbc.Col([
-                                    html.Div([
-                                        html.Small("[!] Momentum", className="text-danger d-block"),
-                                        html.Small("* Cepat, agresif", className="text-muted d-block"),
-                                        html.Small("* Volume spike >2x", className="text-muted d-block"),
-                                        html.Small("* CPR tinggi >55%", className="text-muted d-block"),
-                                        html.Small("* Risiko tinggi", className="text-muted d-block"),
-                                    ])
-                                ], width=6),
-                            ])
-                        ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
-                    ]) if impulse_signal.get('impulse_detected') or impulse_signal.get('near_impulse') else html.Div(),
-
-                    # For Markup Trigger signal
-                    html.Div([
-                        html.P([
-                            html.Strong("[FIRE] Sinyal Markup Trigger", className="text-warning d-block mb-2"),
-                            "Harga mulai bergerak naik setelah periode akumulasi. ",
-                            "Ini adalah transisi dari fase pengumpulan ke fase markup. ",
-                            "Volume dan momentum mendukung pergerakan ini."
-                        ], className="mb-2"),
-                        html.Small([
-                            html.I(className="fas fa-lightbulb me-1 text-warning"),
-                            "Tips: Jangan kejar harga yang sudah breakout. Tunggu pullback ke zona entry atau kelola posisi yang sudah ada."
-                        ], className="text-muted")
-                    ]) if markup_trigger.get('markup_triggered') and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') else html.Div(),
-
-                    # For Accumulation signal
-                    html.Div([
-                        html.P([
-                            html.Strong("[#] Sinyal Akumulasi", className="text-success d-block mb-2"),
-                            summary.get('what_means', 'Ada pihak yang mengumpulkan saham secara bertahap. Pola ini biasanya muncul sebelum kenaikan, namun timing tidak bisa diprediksi.')
-                        ], className="mb-2"),
-                        html.Small([
-                            html.I(className="fas fa-lightbulb me-1 text-warning"),
-                            "Tips: Masuk bertahap di zona entry. Jangan all-in. Siapkan stop loss di bawah invalidation level."
-                        ], className="text-muted")
-                    ]) if overall_signal == 'AKUMULASI' and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') and not markup_trigger.get('markup_triggered') else html.Div(),
-
-                    # For Distribution signal
-                    html.Div([
-                        html.P([
-                            html.Strong("[R] Sinyal Distribusi", className="text-danger d-block mb-2"),
-                            "Terdeteksi penjualan bertahap oleh pelaku besar. ",
-                            "Berhati-hati dengan posisi beli baru."
-                        ], className="mb-2"),
-                        html.Small([
-                            html.I(className="fas fa-exclamation-triangle me-1 text-danger"),
-                            "Warning: Hindari entry baru. Jika sudah punya posisi, pertimbangkan untuk mengurangi atau memasang stop loss ketat."
-                        ], className="text-muted")
-                    ]) if overall_signal == 'DISTRIBUSI' and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') else html.Div(),
-
-                    # For Neutral signal
-                    html.Div([
-                        html.P([
-                            html.Strong("[~] Kondisi Netral", className="text-secondary d-block mb-2"),
-                            "Pola belum terbentuk jelas. Tidak ada sinyal kuat dari akumulasi maupun distribusi. ",
-                            "Pantau perkembangan untuk konfirmasi arah selanjutnya."
-                        ], className="mb-2"),
-                        html.Small([
-                            html.I(className="fas fa-clock me-1 text-info"),
-                            "Tips: Sabar menunggu sinyal yang lebih jelas. Pasar tidak selalu memberikan peluang setiap saat."
-                        ], className="text-muted")
-                    ]) if overall_signal == 'NETRAL' and not impulse_signal.get('impulse_detected') and not impulse_signal.get('near_impulse') and not markup_trigger.get('markup_triggered') else html.Div(),
-                ])
-            ], className="py-2")
-        ], color="dark", outline=True, className="mb-4", style={"borderColor": "var(--bs-info)"}),
-
-        # === EDUKASI: KENAPA BELUM BUY / TUNGGU KONFIRMASI APA ===
-        create_signal_education_card(stock_code, validation_data=accum),
 
         # === 2. QUICK SUMMARY FROM 3 SUBMENUS (Cards) ===
         dbc.Row([
@@ -10699,53 +13982,64 @@ def create_analysis_page(stock_code='CDIA'):
             ], md=4),
         ], className="mb-4"),
 
-        # === 3. KEY PRICE LEVELS (Entry Zone, Support, Invalidation) ===
+        # === 3. KEY PRICE LEVELS (From V6 Sideways Analysis) ===
         dbc.Card([
             dbc.CardHeader([
-                html.H5([html.I(className="fas fa-map-marker-alt me-2"), "Level Harga Kunci"], className="mb-0"),
+                html.H5([html.I(className="fas fa-map-marker-alt me-2"), "Level Harga Kunci (V6)"], className="mb-0"),
             ]),
             dbc.CardBody([
                 dbc.Row([
-                    # Entry Zone
+                    # Support Level (V6 Low)
                     dbc.Col([
                         html.Div([
                             html.Div([
-                                html.I(className="fas fa-sign-in-alt text-success me-2", style={"fontSize": "24px"}),
-                                html.H6("ZONA ENTRY", className="text-success mb-0 d-inline"),
+                                html.I(className="fas fa-shield-alt text-success me-2", style={"fontSize": "24px"}),
+                                html.H6("SUPPORT", className="text-success mb-0 d-inline"),
                             ], className="mb-2"),
-                            html.H4([
-                                f"Rp {unified.get('entry_zone', {}).get('low', 0):,.0f}",
-                                html.Span(" - ", className="text-muted"),
-                                f"Rp {unified.get('entry_zone', {}).get('high', 0):,.0f}"
-                            ] if unified.get('entry_zone') else "N/A", className="text-success"),
-                            html.Small("Area ideal untuk entry (lower 40% range)", className="text-muted")
+                            html.H4(f"Rp {v6_sideways.get('low', 0):,.0f}" if v6_sideways.get('low') else "N/A", className="text-success"),
+                            html.Small(f"Low sideways ({v6_sideways.get('days', 0)} hari)", className="text-muted")
                         ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(40,167,69,0.1)"})
                     ], md=4),
 
-                    # Support Level
+                    # Resistance Level (V6 High)
                     dbc.Col([
                         html.Div([
                             html.Div([
-                                html.I(className="fas fa-shield-alt text-info me-2", style={"fontSize": "24px"}),
-                                html.H6("SUPPORT", className="text-info mb-0 d-inline"),
+                                html.I(className="fas fa-arrow-alt-circle-up text-info me-2", style={"fontSize": "24px"}),
+                                html.H6("RESISTANCE / TARGET", className="text-info mb-0 d-inline"),
                             ], className="mb-2"),
-                            html.H4(f"Rp {unified.get('support_level', 0):,.0f}" if unified.get('support_level') else "N/A", className="text-info"),
-                            html.Small("Level support terdekat (low 10 hari)", className="text-muted")
+                            html.H4(f"Rp {v6_sideways.get('high', 0):,.0f}" if v6_sideways.get('high') else "N/A", className="text-info"),
+                            html.Small(f"High sideways ({v6_sideways.get('days', 0)} hari)", className="text-muted")
                         ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)"})
                     ], md=4),
 
-                    # Invalidation
+                    # Stop Loss (V6 Invalidation)
                     dbc.Col([
                         html.Div([
                             html.Div([
                                 html.I(className="fas fa-exclamation-triangle text-danger me-2", style={"fontSize": "24px"}),
-                                html.H6("INVALIDATION", className="text-danger mb-0 d-inline"),
+                                html.H6("STOP LOSS", className="text-danger mb-0 d-inline"),
                             ], className="mb-2"),
-                            html.H4(f"Rp {unified.get('invalidation', 0):,.0f}" if unified.get('invalidation') else "N/A", className="text-danger"),
-                            html.Small("Tutup posisi jika tembus level ini", className="text-muted")
+                            html.H4(f"Rp {v6_entry.get('stop_loss', 0):,.0f}" if v6_entry.get('stop_loss') else "N/A", className="text-danger"),
+                            html.Small("Low - (Range × 2%)", className="text-muted")
                         ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(220,53,69,0.1)"})
                     ], md=4),
-                ])
+                ]),
+                # Additional info row
+                html.Div([
+                    html.Hr(className="my-3"),
+                    html.Div([
+                        html.Small([
+                            html.I(className="fas fa-info-circle me-2"),
+                            f"Range: {v6_sideways.get('range_pct', 0):.1f}% ",
+                            f"({'<' if v6_sideways.get('is_sideways') else '>'} threshold {v6_sideways.get('threshold', 0):.1f}%) | ",
+                            html.Span(
+                                "SIDEWAYS" if v6_sideways.get('is_sideways') else "TRENDING",
+                                className="text-info fw-bold" if v6_sideways.get('is_sideways') else "text-warning fw-bold"
+                            )
+                        ], className="text-muted")
+                    ], className="text-center")
+                ]) if v6_sideways else html.Div()
             ])
         ], className="mb-4", color="dark", outline=True),
 
@@ -10775,134 +14069,224 @@ def create_analysis_page(stock_code='CDIA'):
             ])
         ], className="mb-4", color="dark", outline=True),
 
-        # === 5. VOLUME VS PRICE (Multi-Horizon Summary) ===
+        # === 5. V6 SIDEWAYS & PHASE ANALYSIS ===
         dbc.Card([
             dbc.CardHeader([
-                html.H5([html.I(className="fas fa-balance-scale me-2"), "Volume vs Price Analysis"], className="mb-0 d-inline"),
+                html.H5([html.I(className="fas fa-chart-area me-2"), "Analisis Sideways V6"], className="mb-0 d-inline"),
                 dbc.Badge(
-                    vol_price_multi.get('significance', 'NONE'),
-                    color="success" if vol_price_multi.get('significance') == 'SIGNIFICANT' else
-                          "info" if vol_price_multi.get('significance') == 'MODERATE' else
-                          "warning" if vol_price_multi.get('significance') == 'EARLY' else "secondary",
+                    v6_phase if v6_phase else "N/A",
+                    color="success" if v6_phase == 'ACCUMULATION' else
+                          "danger" if v6_phase == 'DISTRIBUTION' else "secondary",
                     className="ms-2"
                 ),
             ]),
             dbc.CardBody([
-                # Formula Explanation
+                # V6 Formula Explanation
                 html.Div([
-                    html.H6([html.I(className="fas fa-flask me-2"), "Formula Analisis:"], className="text-info mb-2"),
+                    html.H6([html.I(className="fas fa-flask me-2"), "Formula V6:"], className="text-info mb-2"),
                     html.Div([
-                        html.Code("ABSORPTION = (Volume^ > 10%) AND (Price_Range < 8%)", className="d-block mb-1"),
-                        html.Code("SIGNIFICANT = Core(5d) + Micro(1d) Absorption", className="d-block mb-1"),
-                        html.Code("MODERATE = Core(5d) Absorption only", className="d-block mb-1"),
-                        html.Code("EARLY = Micro(1d) Absorption only (belum terkonfirmasi)", className="d-block"),
+                        html.Code("SIDEWAYS = Range% < Percentile_40(Historical_Ranges)", className="d-block mb-1"),
+                        html.Code("ACCUMULATION = Volume_Lower > Volume_Upper (buying di support)", className="d-block mb-1"),
+                        html.Code("DISTRIBUTION = Volume_Upper > Volume_Lower (selling di resistance)", className="d-block mb-1"),
+                        html.Code("ENTRY = Sideways + Accumulation + Near_Support + Konfirmasi", className="d-block"),
                     ], className="p-2 rounded small", style={"backgroundColor": "rgba(255,255,255,0.05)", "fontFamily": "monospace"})
                 ], className="mb-3"),
 
-                # Horizon Summary Table
-                html.Table([
-                    html.Thead([
-                        html.Tr([
-                            html.Th("Horizon", className="text-center"),
-                            html.Th("Vol D", className="text-center"),
-                            html.Th("Price D", className="text-center"),
-                            html.Th("Range", className="text-center"),
-                            html.Th("Status", className="text-center"),
-                        ])
-                    ]),
-                    html.Tbody([
-                        html.Tr([
-                            html.Td("1 Hari (Micro)", className="text-center"),
-                            html.Td(f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('volume_change_pct', 0):+.0f}%" if vol_price_multi.get('horizons', {}).get('1d') else "-",
-                                   className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('1d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"),
-                            html.Td(f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('price_change_pct', 0):+.1f}%" if vol_price_multi.get('horizons', {}).get('1d') else "-", className="text-center"),
-                            html.Td(f"{vol_price_multi.get('horizons', {}).get('1d', {}).get('price_range_pct', 0):.1f}%" if vol_price_multi.get('horizons', {}).get('1d') else "-", className="text-center"),
-                            html.Td(dbc.Badge("Absorption" if vol_price_multi.get('micro_absorption') else "-", color="success" if vol_price_multi.get('micro_absorption') else "secondary"), className="text-center"),
-                        ]),
-                        html.Tr([
-                            html.Td(html.Strong("5 Hari (Core)", className="text-warning"), className="text-center"),
-                            html.Td(html.Strong(f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('volume_change_pct', 0):+.0f}%" if vol_price_multi.get('horizons', {}).get('5d') else "-"),
-                                   className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('5d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"),
-                            html.Td(html.Strong(f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('price_change_pct', 0):+.1f}%" if vol_price_multi.get('horizons', {}).get('5d') else "-"), className="text-center"),
-                            html.Td(html.Strong(f"{vol_price_multi.get('horizons', {}).get('5d', {}).get('price_range_pct', 0):.1f}%" if vol_price_multi.get('horizons', {}).get('5d') else "-"), className="text-center"),
-                            html.Td(dbc.Badge("Absorption" if vol_price_multi.get('core_absorption') else "-", color="success" if vol_price_multi.get('core_absorption') else "secondary"), className="text-center"),
-                        ], style={"backgroundColor": "rgba(255,193,7,0.1)"}),
-                        html.Tr([
-                            html.Td("10 Hari (Structural)", className="text-center"),
-                            html.Td(f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('volume_change_pct', 0):+.0f}%" if vol_price_multi.get('horizons', {}).get('10d') else "-",
-                                   className=f"text-center text-{'success' if vol_price_multi.get('horizons', {}).get('10d', {}).get('volume_change_pct', 0) > 0 else 'danger'}"),
-                            html.Td(f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('price_change_pct', 0):+.1f}%" if vol_price_multi.get('horizons', {}).get('10d') else "-", className="text-center"),
-                            html.Td(f"{vol_price_multi.get('horizons', {}).get('10d', {}).get('price_range_pct', 0):.1f}%" if vol_price_multi.get('horizons', {}).get('10d') else "-", className="text-center"),
-                            html.Td(dbc.Badge("Absorption" if vol_price_multi.get('structural_absorption') else "-", color="success" if vol_price_multi.get('structural_absorption') else "secondary"), className="text-center"),
-                        ]),
-                    ])
-                ], className="table table-sm table-dark mb-3", style={"fontSize": "12px"}),
+                # V6 Analysis Results
+                dbc.Row([
+                    # Sideways Status
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Status Sideways", className="text-muted mb-2"),
+                            dbc.Badge(
+                                "SIDEWAYS" if v6_sideways.get('is_sideways') else "TRENDING",
+                                color="info" if v6_sideways.get('is_sideways') else "warning",
+                                className="fs-6 mb-2"
+                            ),
+                            html.Div([
+                                html.Small(f"Range: Rp {v6_sideways.get('low', 0):,.0f} - Rp {v6_sideways.get('high', 0):,.0f}", className="d-block"),
+                                html.Small(f"Range%: {v6_sideways.get('range_pct', 0):.1f}% ", className="d-block"),
+                                html.Small([
+                                    "Threshold: ",
+                                    html.Span(f"< {v6_sideways.get('threshold_pct', 0):.1f}%", className="text-info")
+                                ], className="d-block"),
+                                html.Small(f"Periode: {v6_sideways.get('days', 0)} hari", className="d-block text-muted"),
+                            ])
+                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)" if v6_sideways.get('is_sideways') else "rgba(255,193,7,0.1)"})
+                    ], md=4),
 
-                # Conclusion
+                    # Phase Analysis
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Fase Pasar", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span("🟢 " if v6_phase == 'ACCUMULATION' else "🔴 " if v6_phase == 'DISTRIBUTION' else "⚪ ", style={"fontSize": "24px"}),
+                                html.Strong(v6_phase if v6_phase else "N/A", className=f"text-{'success' if v6_phase == 'ACCUMULATION' else 'danger' if v6_phase == 'DISTRIBUTION' else 'secondary'}")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small([
+                                    "Vol Ratio: ",
+                                    html.Span(f"{v6_data.get('phase', {}).get('vol_ratio', 0):.2f}" if v6_data and not v6_data.get('error') else "N/A",
+                                             className=f"text-{'success' if v6_data and v6_data.get('phase', {}).get('vol_ratio', 1) > 1.2 else 'danger' if v6_data and v6_data.get('phase', {}).get('vol_ratio', 1) < 0.8 else 'secondary'}")
+                                ], className="d-block"),
+                                html.Small([
+                                    "ACC Score: ", html.Span(f"{v6_data.get('phase', {}).get('acc_score', 0)}" if v6_data else "0", className="text-success"),
+                                    " vs DIST Score: ", html.Span(f"{v6_data.get('phase', {}).get('dist_score', 0)}" if v6_data else "0", className="text-danger")
+                                ], className="d-block"),
+                            ])
+                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if v6_phase == 'ACCUMULATION' else '220,53,69' if v6_phase == 'DISTRIBUTION' else '108,117,125'},0.1)"})
+                    ], md=4),
+
+                    # Entry Signal
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Sinyal Aksi", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span(v6_style['icon'], style={"fontSize": "24px"}),
+                                html.Strong(f" {v6_action}", className=f"text-{v6_style['color']}")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Small(v6_action_reason[:50] + "..." if len(v6_action_reason) > 50 else v6_action_reason, className="d-block text-muted"),
+                                html.Small([
+                                    "Konfirmasi: ",
+                                    html.Span(f"{v6_entry.get('score', 0)}/4" if v6_entry else "0/4", className="text-info")
+                                ], className="d-block") if v6_entry else None,
+                                html.Small([
+                                    "R:R Ratio: ",
+                                    html.Span(f"{v6_entry.get('rr_ratio', 0):.1f}x" if v6_entry else "N/A",
+                                             className=f"text-{'success' if v6_entry and v6_entry.get('rr_ratio', 0) >= 2 else 'warning' if v6_entry and v6_entry.get('rr_ratio', 0) >= 1.5 else 'danger'}")
+                                ], className="d-block") if v6_entry else None,
+                            ])
+                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba(var(--bs-{v6_style['color']}-rgb), 0.1)"})
+                    ], md=4),
+                ], className="mb-3"),
+
+                # V6 Conclusion
                 html.Div([
-                    html.Strong([html.I(className="fas fa-clipboard-check me-2"), "Kesimpulan: "], className="text-info"),
+                    html.Strong([html.I(className="fas fa-clipboard-check me-2"), "Kesimpulan V6: "], className="text-info"),
                     html.Span(
-                        vol_price_multi.get('conclusion', 'Data tidak tersedia'),
-                        className="fw-bold " + (
-                            "text-success" if vol_price_multi.get('significance') in ['SIGNIFICANT', 'MODERATE'] else
-                            "text-warning" if vol_price_multi.get('significance') == 'EARLY' else
-                            "text-muted"
-                        )
+                        v6_action_reason if v6_action_reason else "Data tidak tersedia untuk analisis V6",
+                        className=f"fw-bold text-{v6_style['color']}"
                     )
                 ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
 
-                # Explanation
+                # V6 Explanation
                 html.Hr(className="my-3"),
                 html.Small([
                     html.I(className="fas fa-info-circle me-1"),
-                    "Volume dinilai signifikan jika peningkatan bertahan minimal 3-5 hari tanpa pelebaran range harga. ",
-                    "Lonjakan volume 1 hari belum tentu akumulasi - sistem mencari konsistensi."
+                    "V6 menggunakan adaptive threshold (Percentile 40) untuk deteksi sideways. ",
+                    "Entry signal membutuhkan: Sideways + Fase Akumulasi + Dekat Support + Konfirmasi (bullish candle, range expansion, volume surge)."
                 ], className="text-muted fst-italic")
             ])
         ], className="mb-4", color="dark", outline=True),
 
-        # === 6. DECISION GUIDE (Panduan Keputusan) ===
+        # === 6. WEEKLY ACCUMULATION ANALYSIS (Key Point dari Accumulation) ===
         dbc.Card([
             dbc.CardHeader([
-                html.H5([html.I(className="fas fa-compass me-2"), "Panduan Keputusan Trading"], className="mb-0"),
+                html.H5([html.I(className="fas fa-layer-group me-2"), "Akumulasi 4 Minggu Terakhir"], className="mb-0 d-inline"),
+                dbc.Badge(
+                    f"Avg VR: {sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4:.2f}x",
+                    color="success" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 4.0 else
+                          "warning" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5 else
+                          "danger" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 < 0.8 else "secondary",
+                    className="ms-2"
+                ),
             ]),
             dbc.CardBody([
+                # Weekly Vol Ratio Cards - Compact
                 dbc.Row([
                     dbc.Col([
                         html.Div([
-                            html.H6([html.Span("[~]", className="me-2"), "WAIT"], className="text-secondary"),
-                            html.P("Pasar belum jelas, observasi dulu. Validasi <4/6, range >20%, atau CPR netral.", className="small text-muted mb-0")
-                        ], className="p-2 rounded mb-2", style={"backgroundColor": "rgba(108,117,125,0.1)"})
-                    ], md=6),
-                    dbc.Col([
-                        html.Div([
-                            html.H6([html.Span("[G]", className="me-2"), "ENTRY"], className="text-success"),
-                            html.P("Akumulasi terdeteksi, masuk bertahap 30-50%. Harga di zona entry ideal.", className="small text-muted mb-0")
-                        ], className="p-2 rounded mb-2", style={"backgroundColor": "rgba(40,167,69,0.1)"})
-                    ], md=6),
-                ]),
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.H6([html.Span("[+]", className="me-2"), "ADD"], className="text-primary"),
-                            html.P("Akumulasi terkonfirmasi kuat (>=5/6 validasi). Layak tambah posisi saat pullback.", className="small text-muted mb-0")
-                        ], className="p-2 rounded mb-2", style={"backgroundColor": "rgba(0,123,255,0.1)"})
-                    ], md=6),
-                    dbc.Col([
-                        html.Div([
-                            html.H6([html.Span("[H]", className="me-2"), "HOLD"], className="text-info"),
-                            html.P("Markup sudah berjalan atau konsolidasi. Jangan kejar, kelola posisi yang ada.", className="small text-muted mb-0")
-                        ], className="p-2 rounded mb-2", style={"backgroundColor": "rgba(23,162,184,0.1)"})
-                    ], md=6),
-                ]),
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.H6([html.Span("[!!]", className="me-2"), "EXIT"], className="text-danger"),
-                            html.P("Distribusi terdeteksi atau breakdown support. Pertimbangkan keluar/kurangi posisi.", className="small text-muted mb-0")
-                        ], className="p-2 rounded", style={"backgroundColor": "rgba(220,53,69,0.1)"})
-                    ], md=12),
-                ]),
+                            html.Small(f"{'Minggu Ini' if w == 1 else f'{w}W Lalu'}", className="text-muted d-block text-center"),
+                            html.Div([
+                                html.Span(weeks.get(w, {}).get('phase_icon', '?'), style={"fontSize": "18px"}),
+                                html.Strong(f" {weeks.get(w, {}).get('vol_ratio', 0):.1f}x",
+                                           className=f"text-{weeks.get(w, {}).get('phase_color', 'secondary')}")
+                            ], className="text-center"),
+                            # Vol Lower vs Upper bar
+                            dbc.Progress([
+                                dbc.Progress(
+                                    value=weeks.get(w, {}).get('vol_lower', 0) / max(1, weeks.get(w, {}).get('vol_lower', 0) + weeks.get(w, {}).get('vol_upper', 0)) * 100,
+                                    color="success", bar=True
+                                ),
+                                dbc.Progress(
+                                    value=weeks.get(w, {}).get('vol_upper', 0) / max(1, weeks.get(w, {}).get('vol_lower', 0) + weeks.get(w, {}).get('vol_upper', 0)) * 100,
+                                    color="danger", bar=True
+                                ),
+                            ], style={"height": "8px"}, className="mt-1"),
+                            # Net Market & Foreign compact
+                            html.Small([
+                                html.Span(
+                                    f"{'B' if weeks.get(w, {}).get('vol_lower', 0) > weeks.get(w, {}).get('vol_upper', 0) else 'S'} ",
+                                    className=f"text-{'success' if weeks.get(w, {}).get('vol_lower', 0) > weeks.get(w, {}).get('vol_upper', 0) else 'danger'} fw-bold"
+                                ),
+                                html.Span(f"{abs(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0))/100/1000:.0f}K", className="text-muted")
+                            ], className="d-block text-center"),
+                            html.Small([
+                                html.Span("F:", className="text-muted"),
+                                html.Span(
+                                    f"{'B' if weeks.get(w, {}).get('net_foreign_lot', 0) > 0 else 'S'}",
+                                    className=f"text-{'success' if weeks.get(w, {}).get('net_foreign_lot', 0) > 0 else 'danger'} fw-bold"
+                                ),
+                                html.Span(f"{abs(weeks.get(w, {}).get('net_foreign_lot', 0))/1000:.0f}K", className="text-muted")
+                            ], className="d-block text-center"),
+                        ], className="p-2 rounded", style={"backgroundColor": f"rgba({'40,167,69' if weeks.get(w, {}).get('phase') == 'ACCUMULATION' else '220,53,69' if weeks.get(w, {}).get('phase') == 'DISTRIBUTION' else '108,117,125'}, 0.15)"})
+                    ], width=3) for w in [1, 2, 3, 4]
+                ], className="mb-3"),
+
+                # Phase Progression & Summary
+                html.Div([
+                    # Phase progression icons
+                    html.Div([
+                        html.Span(weeks.get(4, {}).get('phase_icon', '?'), style={"fontSize": "20px"}),
+                        html.I(className="fas fa-arrow-right mx-1 text-muted small"),
+                        html.Span(weeks.get(3, {}).get('phase_icon', '?'), style={"fontSize": "20px"}),
+                        html.I(className="fas fa-arrow-right mx-1 text-muted small"),
+                        html.Span(weeks.get(2, {}).get('phase_icon', '?'), style={"fontSize": "20px"}),
+                        html.I(className="fas fa-arrow-right mx-1 text-muted small"),
+                        html.Span(weeks.get(1, {}).get('phase_icon', '?'), style={"fontSize": "20px"}),
+                    ], className="text-center mb-2"),
+
+                    # Summary stats
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small("Net Market 4W", className="text-muted d-block text-center"),
+                            html.Strong([
+                                html.Span(
+                                    f"{'BUY' if sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)) > 0 else 'SELL'} ",
+                                    className=f"text-{'success' if sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)) > 0 else 'danger'}"
+                                ),
+                                html.Span(f"{abs(sum(weeks.get(w, {}).get('vol_lower', 0) - weeks.get(w, {}).get('vol_upper', 0) for w in range(1, 5)))/100/1e6:.2f}M Lot")
+                            ], className="d-block text-center small")
+                        ], width=4),
+                        dbc.Col([
+                            html.Small("Net Foreign 4W", className="text-muted d-block text-center"),
+                            html.Strong([
+                                html.Span(
+                                    f"{'BUY' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'SELL'} ",
+                                    className=f"text-{'success' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'danger'}"
+                                ),
+                                html.Span(f"{abs(sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)))/1e6:.2f}M Lot")
+                            ], className="d-block text-center small")
+                        ], width=4),
+                        dbc.Col([
+                            html.Small("Minggu Akumulasi", className="text-muted d-block text-center"),
+                            html.Strong([
+                                html.Span(f"{sum(1 for w in range(1, 5) if weeks.get(w, {}).get('phase') == 'ACCUMULATION')}/4",
+                                         className=f"text-{'success' if sum(1 for w in range(1, 5) if weeks.get(w, {}).get('phase') == 'ACCUMULATION') >= 3 else 'warning' if sum(1 for w in range(1, 5) if weeks.get(w, {}).get('phase') == 'ACCUMULATION') >= 2 else 'danger'}")
+                            ], className="d-block text-center")
+                        ], width=4),
+                    ])
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.03)"}),
+
+                # Vol Ratio Threshold Guide
+                html.Hr(className="my-2"),
+                html.Small([
+                    html.I(className="fas fa-info-circle me-1"),
+                    html.Span("VR>4.0", className="text-success fw-bold"), "=Akumulasi Kuat | ",
+                    html.Span("VR 1.5-4.0", className="text-warning fw-bold"), "=Weak Acc | ",
+                    html.Span("VR<0.8", className="text-danger fw-bold"), "=Distribusi"
+                ], className="text-muted text-center d-block")
             ])
         ], className="mb-4", color="dark", outline=True),
     ])
