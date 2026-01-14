@@ -13590,6 +13590,27 @@ def create_analysis_page(stock_code='CDIA'):
             'status': 'NO_DATA', 'significance': 'INSUFFICIENT', 'horizons': {}, 'conclusion': 'Data tidak tersedia'
         }
 
+        # Calculate price changes (today, 1 week, 1 month)
+        change_today = 0
+        change_1w = 0
+        change_1m = 0
+        if not price_df.empty and len(price_df) > 0:
+            price_df_sorted = price_df.sort_values('date', ascending=False).reset_index(drop=True)
+            if len(price_df_sorted) >= 1:
+                current = price_df_sorted['close'].iloc[0]
+                # Today change
+                if len(price_df_sorted) >= 2:
+                    prev_day = price_df_sorted['close'].iloc[1]
+                    change_today = ((current - prev_day) / prev_day * 100) if prev_day else 0
+                # 1 week change (5 trading days)
+                if len(price_df_sorted) >= 6:
+                    prev_week = price_df_sorted['close'].iloc[5]
+                    change_1w = ((current - prev_week) / prev_week * 100) if prev_week else 0
+                # 1 month change (20 trading days)
+                if len(price_df_sorted) >= 21:
+                    prev_month = price_df_sorted['close'].iloc[20]
+                    change_1m = ((current - prev_month) / prev_month * 100) if prev_month else 0
+
         # V6 Sideways Analysis for accurate Support/Resistance levels
         v6_data = get_v6_analysis(stock_code)
         v6_sideways = v6_data.get('sideways', {}) if not v6_data.get('error') else {}
@@ -13700,6 +13721,21 @@ def create_analysis_page(stock_code='CDIA'):
                                     f"{accum.get('decision_rule', {}).get('current_vs_entry', 'N/A')}",
                                     color="success" if accum.get('decision_rule', {}).get('current_vs_entry') == 'IN_ZONE' else "warning" if accum.get('decision_rule', {}).get('current_vs_entry') == 'ABOVE' else "danger"
                                 )
+                            ], className="mb-2"),
+                            # Price changes: Today, 1W, 1M
+                            html.Div([
+                                html.Span([
+                                    html.Small("Hari Ini: ", className="text-muted"),
+                                    html.Span(f"{change_today:+.2f}%", className=f"fw-bold text-{'success' if change_today > 0 else 'danger' if change_today < 0 else 'secondary'}")
+                                ], className="me-3"),
+                                html.Span([
+                                    html.Small("1 Minggu: ", className="text-muted"),
+                                    html.Span(f"{change_1w:+.2f}%", className=f"fw-bold text-{'success' if change_1w > 0 else 'danger' if change_1w < 0 else 'secondary'}")
+                                ], className="me-3"),
+                                html.Span([
+                                    html.Small("1 Bulan: ", className="text-muted"),
+                                    html.Span(f"{change_1m:+.2f}%", className=f"fw-bold text-{'success' if change_1m > 0 else 'danger' if change_1m < 0 else 'secondary'}")
+                                ]),
                             ], className="mb-2"),
                             html.P(v6_action_reason if v6_action_reason else decision.get('reason', ''), className="mb-2"),
                         ]),
