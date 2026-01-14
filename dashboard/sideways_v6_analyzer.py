@@ -10,19 +10,24 @@ Module untuk analisis sideways dengan formula V6:
 
 Digunakan oleh dashboard analysis page.
 """
+import os
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from datetime import datetime, timedelta
 
 
 def get_db_connection():
-    """Get database connection"""
-    return psycopg2.connect(
-        host='localhost',
-        database='stock_analysis',
-        user='postgres',
-        password='postgres'
-    )
+    """Get database connection - uses DATABASE_URL for Railway, localhost for local dev"""
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        return psycopg2.connect(database_url)
+    else:
+        return psycopg2.connect(
+            host='localhost',
+            database='stock_analysis',
+            user='postgres',
+            password='postgres'
+        )
 
 
 def load_stock_data(stock_code, conn=None):
