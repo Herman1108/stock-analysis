@@ -13597,18 +13597,18 @@ def create_analysis_page(stock_code='CDIA'):
         if not price_df.empty and len(price_df) > 0:
             price_df_sorted = price_df.sort_values('date', ascending=False).reset_index(drop=True)
             if len(price_df_sorted) >= 1:
-                current = price_df_sorted['close'].iloc[0]
+                current = price_df_sorted['close_price'].iloc[0]
                 # Today change
                 if len(price_df_sorted) >= 2:
-                    prev_day = price_df_sorted['close'].iloc[1]
+                    prev_day = price_df_sorted['close_price'].iloc[1]
                     change_today = ((current - prev_day) / prev_day * 100) if prev_day else 0
                 # 1 week change (5 trading days)
                 if len(price_df_sorted) >= 6:
-                    prev_week = price_df_sorted['close'].iloc[5]
+                    prev_week = price_df_sorted['close_price'].iloc[5]
                     change_1w = ((current - prev_week) / prev_week * 100) if prev_week else 0
                 # 1 month change (20 trading days)
                 if len(price_df_sorted) >= 21:
-                    prev_month = price_df_sorted['close'].iloc[20]
+                    prev_month = price_df_sorted['close_price'].iloc[20]
                     change_1m = ((current - prev_month) / prev_month * 100) if prev_month else 0
 
         # V6 Sideways Analysis for accurate Support/Resistance levels
