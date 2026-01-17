@@ -5,7 +5,18 @@ Supports all stocks from zones_config.py
 """
 
 import sys
-sys.stdout.reconfigure(encoding='utf-8')
+import os
+
+# Safe stdout encoding (may fail on some platforms)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, OSError):
+    pass
+
+# Ensure app directory is in path for database import
+app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
 
 from psycopg2.extras import RealDictCursor
 from zones_config import STOCK_ZONES, DEFAULT_PARAMS
@@ -186,8 +197,12 @@ def run_backtest(stock_code, params=None, start_date='2024-01-01', verbose=False
 
     zh = ZoneHelper(zones)
 
-    with get_connection() as conn:
-        all_data = get_stock_data(stock_code, conn)
+    try:
+        with get_connection() as conn:
+            all_data = get_stock_data(stock_code, conn)
+    except Exception as e:
+        print(f"Database error for {stock_code}: {e}")
+        return None
 
     if not all_data or len(all_data) < 30:
         print(f"Insufficient data for {stock_code}")
