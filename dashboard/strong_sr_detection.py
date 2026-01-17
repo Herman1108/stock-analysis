@@ -9,35 +9,43 @@ Menggunakan beberapa metode:
 4. Cluster Zones (gabungkan level berdekatan)
 5. Round Number Psychology (level psikologis)
 """
+import os
+import sys
 import psycopg2
 from psycopg2.extras import RealDictCursor
-import sys
 from datetime import datetime
 from collections import defaultdict
 
-sys.stdout.reconfigure(encoding='utf-8')
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, OSError):
+    pass
 
-# Database connection
-conn = psycopg2.connect(
-    host='localhost',
-    database='stock_analysis',
-    user='postgres',
-    password='postgres'
-)
-cur = conn.cursor(cursor_factory=RealDictCursor)
+# Ensure app directory is in path for database import
+app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+
+from database import get_connection
+
+# Module-level connection removed - use get_connection() context manager instead
+conn = None
+cur = None
 
 
 def get_stock_data(stock_code):
     """Ambil data saham dari database"""
-    cur.execute('''
-        SELECT date, open_price as open, high_price as high,
-               low_price as low, close_price as close, volume,
-               change_percent as change
-        FROM stock_daily
-        WHERE stock_code = %s
-        ORDER BY date ASC
-    ''', (stock_code,))
-    return cur.fetchall()
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute('''
+            SELECT date, open_price as open, high_price as high,
+                   low_price as low, close_price as close, volume,
+                   change_percent as change
+            FROM stock_daily
+            WHERE stock_code = %s
+            ORDER BY date ASC
+        ''', (stock_code,))
+        return cur.fetchall()
 
 
 # ============================================================

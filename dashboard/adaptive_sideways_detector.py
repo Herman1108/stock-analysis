@@ -9,31 +9,41 @@ Menentukan threshold sideways berdasarkan karakteristik historis saham.
 2. Percentile-Based: Range di bawah percentile tertentu dari history
 3. Standard Deviation: Range dalam X std dev dari mean
 """
+import os
+import sys
 import psycopg2
 from psycopg2.extras import RealDictCursor
 import statistics
-import sys
-sys.stdout.reconfigure(encoding='utf-8')
 
-conn = psycopg2.connect(
-    host='localhost',
-    database='stock_analysis',
-    user='postgres',
-    password='postgres'
-)
-cur = conn.cursor(cursor_factory=RealDictCursor)
+try:
+    sys.stdout.reconfigure(encoding='utf-8')
+except (AttributeError, OSError):
+    pass
+
+# Ensure app directory is in path for database import
+app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
+if app_dir not in sys.path:
+    sys.path.insert(0, app_dir)
+
+from database import get_connection
+
+# Module-level connection removed - use get_connection() context manager instead
+conn = None
+cur = None
 
 
 def load_stock_data(stock_code):
     """Load data saham"""
-    cur.execute('''
-        SELECT date, high_price as high, low_price as low,
-               close_price as close, volume
-        FROM stock_daily
-        WHERE stock_code = %s
-        ORDER BY date ASC
-    ''', (stock_code,))
-    all_data = cur.fetchall()
+    with get_connection() as conn:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute('''
+            SELECT date, high_price as high, low_price as low,
+                   close_price as close, volume
+            FROM stock_daily
+            WHERE stock_code = %s
+            ORDER BY date ASC
+        ''', (stock_code,))
+        all_data = cur.fetchall()
 
     data_list = []
     for i, row in enumerate(all_data):
