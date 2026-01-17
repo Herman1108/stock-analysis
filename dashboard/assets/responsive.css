@@ -1564,41 +1564,45 @@ body.light-mode .navbar .btn-warning:hover {
 }
 
 /* ============================================
-   STOCK DROPDOWN - CRITICAL MOBILE FIX
-   Force dropdown menu to be visible on all devices
+   STOCK DROPDOWN - CRITICAL FIX
+   Ensure dropdown menu is fully visible
    ============================================ */
 
 /* Global - ensure all containers allow overflow */
 .navbar,
-.navbar *,
 .navbar-expand-lg,
 .container,
-.container-fluid {
+.container-fluid,
+#main-navbar,
+.navbar > .container-fluid {
   overflow: visible !important;
 }
 
-/* Stock dropdown container */
+/* Stock dropdown container - higher z-index */
 .stock-dropdown {
   position: relative !important;
   z-index: 10000 !important;
 }
 
-/* The dropdown menu itself */
+/* The dropdown menu itself - FIXED: ensure proper positioning */
 .stock-dropdown .Select-menu-outer {
   position: absolute !important;
-  top: 100% !important;
+  top: calc(100% + 2px) !important;  /* Small gap below the control */
   left: 0 !important;
   width: 140px !important;
-  max-height: 250px !important;
+  max-height: 300px !important;  /* Increased height */
   overflow-y: auto !important;
   z-index: 100000 !important;
   background-color: #16213e !important;
   border: 1px solid #0f3460 !important;
   border-radius: 4px !important;
-  box-shadow: 0 4px 15px rgba(0,0,0,0.4) !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
   display: block !important;
   visibility: visible !important;
   opacity: 1 !important;
+  margin-top: 0 !important;
+  clip: auto !important;
+  clip-path: none !important;
 }
 
 /* Options container */
@@ -1672,13 +1676,14 @@ div[class*="dropdown"] .Select-menu-outer {
 
 /* Mobile: ensure menu is visible and touchable */
 @media screen and (max-width: 991px) {
-  .Select-menu-outer {
-    position: fixed !important;
-    left: 10px !important;
-    right: 10px !important;
-    width: auto !important;
-    max-width: 200px !important;
-    max-height: 60vh !important;
+  /* Keep absolute positioning, don't use fixed - prevents clipping */
+  .stock-dropdown .Select-menu-outer {
+    position: absolute !important;
+    top: calc(100% + 4px) !important;
+    left: 0 !important;
+    right: auto !important;
+    width: 160px !important;
+    max-height: 50vh !important;
     z-index: 999999 !important;
     background-color: #16213e !important;
     border: 2px solid #17a2b8 !important;
@@ -1686,25 +1691,65 @@ div[class*="dropdown"] .Select-menu-outer {
     box-shadow: 0 8px 32px rgba(0,0,0,0.5) !important;
   }
 
-  .Select-menu {
-    max-height: 55vh !important;
+  .stock-dropdown .Select-menu {
+    max-height: calc(50vh - 20px) !important;
     overflow-y: auto !important;
     -webkit-overflow-scrolling: touch !important;
   }
 
-  .Select-option {
-    padding: 16px 14px !important;
-    font-size: 16px !important;
-    min-height: 50px !important;
+  .stock-dropdown .Select-option {
+    padding: 14px 12px !important;
+    font-size: 15px !important;
+    min-height: 44px !important;
     border-bottom: 1px solid rgba(255,255,255,0.1) !important;
   }
 
-  body.light-mode .Select-menu-outer {
+  body.light-mode .stock-dropdown .Select-menu-outer {
     background-color: #ffffff !important;
     border: 2px solid #0066cc !important;
   }
 
-  body.light-mode .Select-option {
+  body.light-mode .stock-dropdown .Select-option {
     border-bottom: 1px solid rgba(0,0,0,0.1) !important;
   }
 }
+
+/* ============================================
+   ADDITIONAL NAVBAR OVERFLOW FIX
+   Prevent any clipping of dropdown menus
+   ============================================ */
+
+/* Ensure navbar and all parents allow overflow */
+#main-navbar,
+.navbar.navbar-expand-lg,
+.navbar-dark,
+nav.navbar {
+  overflow: visible !important;
+  position: relative !important;
+}
+
+/* The d-flex container in navbar */
+.navbar .d-flex,
+.navbar .align-items-center {
+  overflow: visible !important;
+}
+
+/* React-Select specific: ensure menu portal renders correctly */
+.Select.is-open {
+  z-index: 10001 !important;
+}
+
+.Select.is-open .Select-control {
+  z-index: 10001 !important;
+}
+
+.Select.is-open .Select-menu-outer {
+  z-index: 100000 !important;
+}
+
+/* Fix for Dash Core Components dropdown */
+div[class*="dash-dropdown"],
+.dash-dropdown {
+  overflow: visible !important;
+}
+
