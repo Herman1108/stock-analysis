@@ -30,6 +30,61 @@ def get_db_connection():
         )
 
 
+# Cache untuk formula custom (agar tidak query database terus-menerus)
+_formula_cache = {}
+
+def get_custom_formula(stock_code, conn=None):
+    """
+    Load formula custom dari tabel stock_formula untuk emiten tertentu.
+    Returns None jika tidak ada formula custom.
+
+    Formula custom tersedia untuk: PANI, BREN, MBMA
+    """
+    global _formula_cache
+
+    # Check cache first
+    if stock_code in _formula_cache:
+        return _formula_cache[stock_code]
+
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+        cur.execute('''
+            SELECT * FROM stock_formula WHERE stock_code = %s
+        ''', (stock_code,))
+        formula = cur.fetchone()
+
+        if formula:
+            # Convert to dict and cache
+            formula_dict = dict(formula)
+            _formula_cache[stock_code] = formula_dict
+            return formula_dict
+
+        # Cache None result too
+        _formula_cache[stock_code] = None
+        return None
+
+    except Exception as e:
+        print(f"Error loading formula for {stock_code}: {e}")
+        return None
+    finally:
+        if close_conn:
+            conn.close()
+
+
+def has_custom_formula(stock_code):
+    """Check if stock has custom formula V8 (10 emiten)"""
+    V8_STOCKS = [
+        'PTRO', 'MBMA', 'TINS', 'DSNG', 'BRPT',
+        'BREN', 'HRUM', 'CBDK', 'WIFI', 'NCKL'
+    ]
+    return stock_code.upper() in V8_STOCKS
+
+
 def load_stock_data(stock_code, conn=None):
     """Load stock data from database"""
     close_conn = False
@@ -39,7 +94,7 @@ def load_stock_data(stock_code, conn=None):
 
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute('''
-        SELECT date, high_price as high, low_price as low,
+        SELECT date, open_price as open, high_price as high, low_price as low,
                close_price as close, volume
         FROM stock_daily
         WHERE stock_code = %s
@@ -60,6 +115,7 @@ def load_stock_data(stock_code, conn=None):
         change = ((float(row['close']) - float(prev_close)) / float(prev_close) * 100) if prev_close else 0
         data_list.append({
             'date': row['date'],
+            'open': float(row['open']) if row['open'] else float(row['close']),
             'high': float(row['high']),
             'low': float(row['low']),
             'close': float(row['close']),
@@ -278,15 +334,20 @@ def analyze_accumulation_distribution(data, sideways_info):
     }
 
 
-def check_entry_signal(data, sideways_info, phase_info):
+def check_entry_signal(data, sideways_info, phase_info, stock_code=None):
     """
-    Check apakah ada entry signal dengan konfirmasi
+    Check apakah ada entry signal dengan konfirmasi.
+    Untuk PANI, BREN, MBMA menggunakan formula custom dari database.
     """
     if not sideways_info:
         return None
 
     today = data[-1]
     comp_days = data[-6:-1] if len(data) >= 6 else data[:-1]
+
+    # Load custom formula jika tersedia (PANI, BREN, MBMA)
+    custom_formula = get_custom_formula(stock_code) if stock_code else None
+    use_custom = custom_formula is not None
 
     # Position dalam range
     if sideways_info['range'] > 0:
@@ -331,33 +392,76 @@ def check_entry_signal(data, sideways_info, phase_info):
 
     score = sum(1 for s in signals.values() if s['passed'])
 
-    # Risk Management
-    acc_range = sideways_info['range']
-    stop_loss = sideways_info['low'] - (acc_range * 0.02)
-    target = sideways_info['high']
+    # =====================================================
+    # RISK MANAGEMENT - Formula berbeda untuk PANI/BREN/MBMA
+    # =====================================================
+    if use_custom:
+        # FORMULA CUSTOM: Stop Loss = Support - X%, Target = Resistance - Y%
+        sl_pct = float(custom_formula.get('stop_loss_pct', 5.0)) / 100  # Default 5%
+        tp_pct = float(custom_formula.get('take_profit_pct', 2.0)) / 100  # Default 2%
+
+        # Support = Low sideways, Resistance = High sideways
+        support = sideways_info['low']
+        resistance = sideways_info['high']
+
+        stop_loss = support * (1 - sl_pct)  # Support - 5%
+        target = resistance * (1 - tp_pct)   # Resistance - 2%
+
+        # Info untuk display
+        formula_info = {
+            'type': 'CUSTOM',
+            'stock': stock_code,
+            'sl_formula': f"Support ({support:,.0f}) - {sl_pct*100:.0f}%",
+            'tp_formula': f"Resistance ({resistance:,.0f}) - {tp_pct*100:.0f}%"
+        }
+    else:
+        # FORMULA DEFAULT (lama)
+        acc_range = sideways_info['range']
+        stop_loss = sideways_info['low'] - (acc_range * 0.02)
+        target = sideways_info['high']
+        formula_info = {'type': 'DEFAULT'}
 
     risk_pct = (today['close'] - stop_loss) / today['close'] * 100
     reward_pct = (target - today['close']) / today['close'] * 100
     rr_ratio = reward_pct / risk_pct if risk_pct > 0 else 0
 
-    # Entry criteria - STRICT VERSION
-    # - Sideways must be detected
-    # - Phase MUST be ACCUMULATION (not NEUTRAL or DISTRIBUTION)
-    # - Near support (pos_in_range < 50%)
-    # - At least 2/4 confirmation signals
-    # - R:R ratio >= 1.5
+    # =====================================================
+    # ENTRY CRITERIA - Logic berbeda untuk PANI/BREN/MBMA
+    # =====================================================
+    if use_custom:
+        # CUSTOM FORMULA: Check phase against valid_phases from database
+        # Use 'or' to handle None values from database
+        valid_phases = custom_formula.get('valid_phases') or ['STRONG_ACCUMULATION', 'ACCUMULATION', 'WEAK_ACCUMULATION']
+        current_phase = phase_info['phase'] if phase_info else 'UNKNOWN'
 
-    is_accumulation = phase_info and phase_info['phase'] == 'ACCUMULATION'
-    is_distribution = phase_info and phase_info['phase'] == 'DISTRIBUTION'
-    is_neutral = phase_info and phase_info['phase'] == 'NEUTRAL'
+        is_valid_phase = current_phase in valid_phases
+        is_accumulation = current_phase in ['ACCUMULATION', 'STRONG_ACCUMULATION']
+        is_weak_accumulation = current_phase == 'WEAK_ACCUMULATION'
+        is_distribution = current_phase in ['DISTRIBUTION', 'STRONG_DISTRIBUTION']
+        is_neutral = current_phase == 'NEUTRAL'
 
-    confirmed = (
-        sideways_info['is_sideways'] and
-        is_accumulation and  # MUST be ACCUMULATION for entry
-        score >= 2 and
-        near_support and
-        rr_ratio >= 1.5
-    )
+        # Entry confirmed jika phase valid dan kondisi terpenuhi
+        confirmed = (
+            sideways_info['is_sideways'] and
+            is_valid_phase and
+            near_support and
+            score >= 2
+        )
+    else:
+        # DEFAULT LOGIC (lama)
+        is_accumulation = phase_info and phase_info['phase'] == 'ACCUMULATION'
+        is_distribution = phase_info and phase_info['phase'] == 'DISTRIBUTION'
+        is_neutral = phase_info and phase_info['phase'] == 'NEUTRAL'
+        is_valid_phase = is_accumulation
+        is_weak_accumulation = phase_info and phase_info['phase'] == 'WEAK_ACCUMULATION'
+
+        confirmed = (
+            sideways_info['is_sideways'] and
+            is_accumulation and  # MUST be ACCUMULATION for entry
+            score >= 2 and
+            near_support and
+            rr_ratio >= 1.5
+        )
 
     # Determine action - STRICT LOGIC
     if is_distribution:
@@ -393,7 +497,10 @@ def check_entry_signal(data, sideways_info, phase_info):
         'rr_ratio': rr_ratio,
         'is_accumulation': is_accumulation,
         'is_distribution': is_distribution,
-        'is_neutral': is_neutral
+        'is_neutral': is_neutral,
+        'is_weak_accumulation': is_weak_accumulation,
+        'formula_info': formula_info,
+        'near_support': near_support
     }
 
 
@@ -544,7 +651,7 @@ def get_v6_analysis(stock_code, conn=None):
     phase = analyze_accumulation_distribution(data, sideways) if sideways else None
 
     # 3. Check Entry Signal
-    entry = check_entry_signal(data, sideways, phase)
+    entry = check_entry_signal(data, sideways, phase, stock_code)
 
     # 4. Build comprehensive result
     result = {
@@ -710,6 +817,210 @@ berdasarkan backtest NCKL + PANI yang menunjukkan:
 """
 
     return content
+
+
+def get_signal_history(stock_code, start_date='2025-01-02', conn=None):
+    """
+    Get historical signals and their results for a stock.
+    Simulates what signals would have been generated and tracks their outcomes.
+
+    Returns list of signals with entry, exit, and PnL.
+    """
+    close_conn = False
+    if conn is None:
+        conn = get_db_connection()
+        close_conn = True
+
+    try:
+        cur = conn.cursor(cursor_factory=RealDictCursor)
+
+        # Get all data from start_date
+        cur.execute('''
+            SELECT date, open_price as open, high_price as high,
+                   low_price as low, close_price as close, volume
+            FROM stock_daily
+            WHERE stock_code = %s AND date >= %s
+            AND open_price IS NOT NULL AND close_price IS NOT NULL
+            ORDER BY date ASC
+        ''', (stock_code, start_date))
+        period_data = cur.fetchall()
+
+        if len(period_data) < 30:
+            return {'error': 'Data tidak cukup', 'signals': []}
+
+        # Get all historical data for analysis
+        all_data = load_stock_data(stock_code, conn)
+
+        # Load custom formula if available
+        custom_formula = get_custom_formula(stock_code, conn)
+        use_custom = custom_formula is not None
+
+        # Get SL/TP percentages
+        if use_custom:
+            sl_pct = float(custom_formula.get('stop_loss_pct', 5.0)) / 100
+            tp_pct = float(custom_formula.get('take_profit_pct', 2.0)) / 100
+            valid_phases = custom_formula.get('valid_phases', ['STRONG_ACCUMULATION', 'ACCUMULATION', 'WEAK_ACCUMULATION'])
+        else:
+            sl_pct = 0.02  # 2% range
+            tp_pct = 0
+            valid_phases = ['ACCUMULATION']
+
+        signals = []
+        position = None
+
+        # Find start index in all_data
+        start_idx = None
+        for i, d in enumerate(all_data):
+            if str(d['date']) >= start_date:
+                start_idx = i
+                break
+
+        if start_idx is None or start_idx < 80:
+            start_idx = 80
+
+        for i in range(start_idx, len(all_data)):
+            data_until_now = all_data[:i+1]
+            today = all_data[i]
+
+            if position is None:
+                # Check for entry signal
+                if len(data_until_now) < 80:
+                    continue
+
+                sideways = detect_sideways_adaptive(data_until_now)
+                if not sideways:
+                    continue
+
+                phase = analyze_accumulation_distribution(data_until_now, sideways)
+                if not phase:
+                    continue
+
+                current_phase = phase['phase']
+
+                # Check if phase is valid for entry
+                if use_custom:
+                    phase_valid = current_phase in valid_phases
+                else:
+                    phase_valid = current_phase == 'ACCUMULATION'
+
+                if not phase_valid:
+                    continue
+
+                # Check if near support
+                if sideways['range'] > 0:
+                    pos_in_range = (today['close'] - sideways['low']) / sideways['range']
+                else:
+                    pos_in_range = 0.5
+
+                if pos_in_range > 0.5:  # Not near support
+                    continue
+
+                # Entry signal detected - entry at OPEN next day
+                if i + 1 >= len(all_data):
+                    continue
+
+                next_day = all_data[i + 1]
+                entry_price = next_day['open']
+
+                # Calculate SL and TP
+                support = sideways['low']
+                resistance = sideways['high']
+
+                if use_custom:
+                    stop_loss = support * (1 - sl_pct)
+                    target = resistance * (1 - tp_pct)
+                else:
+                    stop_loss = support - (sideways['range'] * sl_pct)
+                    target = resistance
+
+                position = {
+                    'signal_date': today['date'],
+                    'entry_date': next_day['date'],
+                    'entry_price': entry_price,
+                    'support': support,
+                    'resistance': resistance,
+                    'stop_loss': stop_loss,
+                    'target': target,
+                    'phase': current_phase,
+                    'vr': phase['vol_ratio']
+                }
+
+            else:
+                # Check for exit
+                price = today['close']
+                exit_reason = None
+
+                if price <= position['stop_loss']:
+                    exit_reason = 'STOP_LOSS'
+                elif price >= position['target']:
+                    exit_reason = 'TARGET'
+                else:
+                    # Check for distribution
+                    sideways = detect_sideways_adaptive(data_until_now)
+                    if sideways:
+                        phase = analyze_accumulation_distribution(data_until_now, sideways)
+                        if phase and phase['vol_ratio'] <= 0.8:
+                            exit_reason = 'DISTRIBUTION'
+
+                if exit_reason:
+                    pnl = (price - position['entry_price']) / position['entry_price'] * 100
+                    signals.append({
+                        **position,
+                        'exit_date': today['date'],
+                        'exit_price': price,
+                        'exit_reason': exit_reason,
+                        'pnl': pnl,
+                        'result': 'WIN' if pnl > 0 else 'LOSS',
+                        'days_held': (today['date'] - position['entry_date']).days
+                    })
+                    position = None
+
+        # If still in position, mark as OPEN
+        if position:
+            last_price = all_data[-1]['close']
+            pnl = (last_price - position['entry_price']) / position['entry_price'] * 100
+            signals.append({
+                **position,
+                'exit_date': all_data[-1]['date'],
+                'exit_price': last_price,
+                'exit_reason': 'OPEN',
+                'pnl': pnl,
+                'result': 'OPEN',
+                'days_held': (all_data[-1]['date'] - position['entry_date']).days
+            })
+
+        # Calculate summary
+        closed_signals = [s for s in signals if s['exit_reason'] != 'OPEN']
+        wins = [s for s in closed_signals if s['pnl'] > 0]
+        losses = [s for s in closed_signals if s['pnl'] <= 0]
+
+        summary = {
+            'stock_code': stock_code,
+            'period': f"{start_date} - sekarang",
+            'total_signals': len(signals),
+            'closed_trades': len(closed_signals),
+            'open_trades': len(signals) - len(closed_signals),
+            'wins': len(wins),
+            'losses': len(losses),
+            'win_rate': len(wins) / len(closed_signals) * 100 if closed_signals else 0,
+            'total_pnl': sum(s['pnl'] for s in closed_signals),
+            'avg_pnl': sum(s['pnl'] for s in closed_signals) / len(closed_signals) if closed_signals else 0,
+            'formula_type': 'CUSTOM' if use_custom else 'DEFAULT'
+        }
+
+        return {
+            'summary': summary,
+            'signals': signals
+        }
+
+    except Exception as e:
+        print(f"Error getting signal history: {e}")
+        import traceback
+        traceback.print_exc()
+        return {'error': str(e), 'signals': []}
+    finally:
+        if close_conn:
+            conn.close()
 
 
 # For testing
