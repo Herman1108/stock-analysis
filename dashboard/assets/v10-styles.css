@@ -1,0 +1,76 @@
+/* V10 Running Animation Styles */
+@keyframes v10-blink {
+    0%, 100% {
+        opacity: 1;
+        text-shadow: 0 0 5px #00ff00, 0 0 10px #00ff00;
+    }
+    50% {
+        opacity: 0.7;
+        text-shadow: 0 0 20px #00ff00, 0 0 30px #00ff00, 0 0 40px #00ff00;
+    }
+}
+
+/* V10 Running Background Blink Animation */
+@keyframes v10-bg-blink {
+    0%, 100% {
+        background: linear-gradient(135deg, #1a3d1a 0%, #0d2818 100%);
+        box-shadow: 0 0 10px rgba(0, 255, 0, 0.3);
+    }
+    50% {
+        background: linear-gradient(135deg, #1f4d1f 0%, #0f3320 100%);
+        box-shadow: 0 0 20px rgba(0, 255, 0, 0.5);
+    }
+}
+
+/* Card header with running V10 position */
+.v10-running-header {
+    animation: v10-bg-blink 2s ease-in-out infinite !important;
+    border-bottom: 3px solid #00ff00 !important;
+}
+
+.v10-running-header h3,
+.v10-running-header h3 a {
+    color: #00ff00 !important;
+}
+
+/* Stock card ticker - RUNNING (green blinking) */
+.stock-ticker-running,
+span.stock-ticker-running,
+a .stock-ticker-running,
+h3 .stock-ticker-running {
+    color: #00ff00 !important;
+    animation: v10-blink 1.5s ease-in-out infinite !important;
+}
+
+/* Stock card ticker - NORMAL (orange) */
+.stock-ticker-normal,
+span.stock-ticker-normal,
+a .stock-ticker-normal,
+h3 .stock-ticker-normal {
+    color: #ff9800 !important;
+}
+
+/* Force orange color on stock card header links and h3 */
+.card-header h3,
+.card-header h3 a,
+.card-header .h3,
+.card-header .h3 a {
+    color: #ff9800 !important;
+}
+
+.card-header h3 a:hover,
+.card-header .h3 a:hover {
+    color: #ffb74d !important;
+    text-decoration: none !important;
+}
+
+/* Ensure link doesn't override colors */
+a:hover .stock-ticker-running {
+    color: #00ff00 !important;
+    text-decoration: none !important;
+}
+
+a:hover .stock-ticker-normal {
+    color: #ffb74d !important;
+    text-decoration: none !important;
+}

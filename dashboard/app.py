@@ -24,6 +24,64 @@ import numpy as np
 from datetime import datetime, timedelta
 
 from database import execute_query, get_cursor, clear_cache, clear_stock_cache, get_cache_stats, preload_stock_data
+from zones_config import STOCK_ZONES, get_zones
+try:
+    from backtest_v10_universal import run_backtest as run_v10_backtest
+except ImportError:
+    run_v10_backtest = None
+
+def get_v10_open_position(stock_code):
+    """Get current open V10 position if any"""
+    if not run_v10_backtest or not get_zones(stock_code):
+        return None
+    try:
+        result = run_v10_backtest(stock_code)
+        if result and result.get('trades'):
+            # Find open position
+            for trade in result['trades']:
+                if trade.get('exit_reason') == 'OPEN':
+                    return {
+                        'type': trade.get('type', 'UNKNOWN'),
+                        'entry_date': trade.get('entry_date', ''),
+                        'entry_price': trade.get('entry_price', 0),
+                        'sl': trade.get('sl', 0),
+                        'tp': trade.get('tp', 0),
+                        'zone_num': trade.get('zone_num', 0),
+                        'current_pnl': trade.get('pnl', 0),
+                        'entry_conditions': trade.get('entry_conditions'),  # V10 checklist at entry
+                    }
+        return None
+    except Exception:
+        return None
+
+# Cache for V10 running stocks (to avoid repeated backtests)
+_v10_running_cache = {}
+_v10_cache_time = None
+
+def get_all_v10_running_stocks():
+    """Get all stocks with V10 running positions (cached for 5 minutes)"""
+    global _v10_running_cache, _v10_cache_time
+    from datetime import datetime, timedelta
+
+    # Check cache validity (5 minutes)
+    if _v10_cache_time and datetime.now() - _v10_cache_time < timedelta(minutes=5):
+        return _v10_running_cache
+
+    # Rebuild cache
+    _v10_running_cache = {}
+    if run_v10_backtest:
+        for stock_code in STOCK_ZONES.keys():
+            try:
+                result = run_v10_backtest(stock_code)
+                if result and result.get('trades'):
+                    for trade in result['trades']:
+                        if trade.get('exit_reason') == 'OPEN':
+                            _v10_running_cache[stock_code] = True
+                            break
+            except:
+                pass
+    _v10_cache_time = datetime.now()
+    return _v10_running_cache
 from analyzer import (
     get_price_data, get_broker_data, run_full_analysis,
     get_top_accumulators, get_top_distributors,
@@ -66,11 +124,31 @@ from decision_panel import create_decision_panel, create_why_signal_checklist
 
 # V6 Sideways Analyzer - Adaptive Threshold + Accumulation/Distribution
 try:
-    from sideways_v6_analyzer import get_v6_analysis
+    from sideways_v6_analyzer import get_v6_analysis, has_custom_formula
     print('sideways_v6_analyzer loaded OK')
 except Exception as e:
     print(f'Warning: sideways_v6_analyzer error - {e}')
     def get_v6_analysis(stock_code, conn=None): return {'error': 'Module not loaded'}
+    def has_custom_formula(stock_code): return False
+
+# Signal History for custom formula stocks (PANI, BREN, MBMA)
+try:
+    from signal_history_sr import get_signal_history_sr, get_current_strong_sr, get_signal_history_auto, get_signal_history_v9
+    print('signal_history_sr loaded OK')
+except Exception as e:
+    print(f'Warning: signal_history_sr error - {e}')
+    def get_signal_history_sr(stock_code, start_date='2025-01-02'): return {'error': 'Module not loaded', 'signals': []}
+    def get_current_strong_sr(stock_code): return None
+    def get_signal_history_auto(stock_code, start_date='2025-01-02'): return get_signal_history_sr(stock_code, start_date)
+    def get_signal_history_v9(stock_code, start_date='2025-01-02'): return {'error': 'Module not loaded', 'signals': []}
+
+# Strong S/R Analyzer V8 for PTRO, CBDK, BREN, BRPT, CDIA (ATR-Quality based)
+try:
+    from strong_sr_v8_atr import get_strong_sr_analysis
+    print('strong_sr_v8_atr loaded OK')
+except Exception as e:
+    print(f'Warning: strong_sr_v8_atr error - {e}')
+    def get_strong_sr_analysis(stock_code): return {'error': 'Module not loaded'}
 
 # News service for stock news
 try:
@@ -302,6 +380,21 @@ SKELETON_CSS = """
 @keyframes skeleton-shimmer {
     0% { background-position: -200% 0; }
     100% { background-position: 200% 0; }
+}
+@keyframes v10-blink {
+    0%, 100% { opacity: 1; text-shadow: 0 0 5px #00ff00, 0 0 10px #00ff00; }
+    50% { opacity: 0.7; text-shadow: 0 0 20px #00ff00, 0 0 30px #00ff00, 0 0 40px #00ff00; }
+}
+.v10-running, .v10-running h3, .v10-running * {
+    animation: v10-blink 1.5s ease-in-out infinite !important;
+    color: #00ff00 !important;
+}
+.v10-running:hover, .v10-running:hover h3 {
+    color: #00ff00 !important;
+    text-decoration: none !important;
+}
+a.v10-running, a .v10-running {
+    color: #00ff00 !important;
 }
 """
 
@@ -2591,7 +2684,16 @@ def create_help_icon(metric_key: str) -> html.Span:
 # ============================================================
 
 def create_navbar():
-    stocks = get_available_stocks()
+    # Get stocks with fallback - callback will refresh options on page load
+    try:
+        stocks = get_available_stocks()
+    except Exception as e:
+        print(f"Warning: Failed to get stocks in navbar: {e}")
+        stocks = []
+
+    # Default value - will be updated by callback if stocks available
+    default_value = stocks[0] if stocks else 'CDIA'
+
     return dbc.Navbar(
         dbc.Container([
             # LEFT SIDE: Brand + Stock Selector + Content Menus
@@ -2600,16 +2702,15 @@ def create_navbar():
                 dbc.NavbarBrand("HermanStock", href="/", className="me-2", style={"fontSize": "0.95rem"}),
 
                 # Stock Selector - searchable dropdown
+                # Options will be populated by refresh_stock_dropdown callback
                 dcc.Dropdown(
                     id='stock-selector',
-                    options=[{'label': s, 'value': s} for s in stocks],
-                    value=stocks[0] if stocks else 'PANI',
+                    options=[{'label': s, 'value': s} for s in stocks] if stocks else [],
+                    value=default_value,
                     style={'width': '100px', 'minWidth': '100px'},
                     clearable=False,
                     searchable=True,
                     placeholder="Emiten",
-                    persistence=True,
-                    persistence_type='session',
                     className="stock-dropdown me-2"
                 ),
 
@@ -2701,10 +2802,16 @@ def create_navbar():
 # PAGE: LANDING / HOME
 # ============================================================
 
-def create_landing_page(is_admin: bool = False):
+def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_expired: bool = False):
     """Create landing page with stock selection and overview using unified analysis data from 3 submenus.
     During maintenance, regular users only see stocks from snapshot."""
     stocks = get_available_stocks_for_user(is_admin)
+
+    # Check if user can access analysis (logged in and not expired)
+    can_access_analysis = is_logged_in and not is_expired
+
+    # Get all V10 running stocks (cached for 5 minutes - fast!)
+    v10_running_stocks = get_all_v10_running_stocks()
 
     if not stocks:
         return html.Div([
@@ -2767,22 +2874,40 @@ def create_landing_page(is_admin: bool = False):
             roe = fundamental.get('roe', 0)
             has_fundamental = fundamental.get('has_data', False)
 
+            # Check if V10 is running for this stock
+            v10_running = stock_code in v10_running_stocks
+
             # Create attractive TEASER card with Profile & Fundamental
             card = dbc.Col([
                 dbc.Card([
-                    # Header - Stock code and company name
+                    # Header - Stock code and company name (blinking bg if V10 running)
                     dbc.CardHeader([
                         html.Div([
                             html.Div([
-                                html.H3(stock_code, className="mb-0 fw-bold text-warning"),
+                                # Stock code - green if running, orange if not
+                                html.H3(
+                                    html.A(
+                                        stock_code,
+                                        href=f"/analysis?stock={stock_code}",
+                                        style={"textDecoration": "none"}
+                                    ) if can_access_analysis else stock_code,
+                                    className="mb-0 fw-bold"
+                                ),
                                 html.Small(company_name[:25] + "..." if len(company_name) > 25 else company_name, className="text-muted d-block")
                             ]),
-                            dbc.Badge([
-                                html.I(className="fas fa-crown me-1"),
-                                "Premium"
-                            ], color="warning", className="fs-6 px-3 py-2")
+                            html.Div([
+                                dbc.Badge([
+                                    html.I(className="fas fa-play-circle me-1"),
+                                    "RUNNING"
+                                ], color="success", className="fs-6 px-2 py-1 me-1") if v10_running else None,
+                                dbc.Badge([
+                                    html.I(className="fas fa-crown me-1"),
+                                    "Premium"
+                                ], color="warning", className="fs-6 px-3 py-2")
+                            ], className="d-flex align-items-center")
                         ], className="d-flex align-items-center justify-content-between")
-                    ], className="bg-dark", style={"borderBottom": "3px solid var(--bs-warning)", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
+                    ], className="v10-running-header" if v10_running else "bg-dark",
+                       style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"} if not v10_running else {}),
 
                     dbc.CardBody([
                         # Price & Change Row
@@ -6990,25 +7115,67 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
     summary = avg_buy_analysis.get('summary', {})
     current_price = avg_buy_analysis.get('current_price', 0)
     resistance_levels = avg_buy_analysis.get('resistance_levels', [])  # Above current price
-    interest_zone = avg_buy_analysis.get('interest_zone', None)
+    interest_zone_value = avg_buy_analysis.get('interest_zone', None)
 
-    # Use multi-method S/R analysis if available
-    if sr_analysis and 'key_support' in sr_analysis:
+    # Check if stock has V10 zones
+    v10_zones = get_zones(stock_code)
+
+    # Get Support Zone (from V10 zones if available)
+    if v10_zones:
+        # Find nearest support zone below current price
+        support_zone = None
+        for zone_num, zone_data in sorted(v10_zones.items(), reverse=True):
+            if zone_data['high'] < current_price:
+                support_zone = zone_data
+                support_zone['num'] = zone_num
+                break
+
+        if support_zone:
+            support_display = f"Rp {support_zone['low']:,.0f} - {support_zone['high']:,.0f}"
+            support_class = "text-success"
+            support_pct = (current_price - support_zone['high']) / current_price * 100
+            support_note = f"Z{support_zone['num']} (-{abs(support_pct):.1f}%)"
+        else:
+            support_display = "-"
+            support_class = "text-muted"
+            support_note = "(di bawah semua zona)"
+    elif sr_analysis and 'key_support' in sr_analysis:
+        # Fallback to dynamic S/R
         support_price = sr_analysis['key_support']
-        support_display = f"Rp {support_price:,.0f}"
+        support_low = support_price * 0.98  # Create zone ±2%
+        support_high = support_price * 1.02
+        support_display = f"Rp {support_low:,.0f} - {support_high:,.0f}"
         support_class = "text-success"
         support_pct = sr_analysis.get('interpretation', {}).get('support_distance_pct', 0)
-        support_note = f"(-{abs(support_pct):.1f}% dari harga sekarang)"
+        support_note = f"(-{abs(support_pct):.1f}%)"
     else:
-        # Fallback: estimasi -5%
         estimated_support = current_price * 0.95
         support_display = f"~Rp {estimated_support:,.0f}"
         support_class = "text-warning"
         support_note = "(estimasi -5%)"
 
-    # Determine interest zone display (where loss brokers bought)
-    if interest_zone and interest_zone > current_price:
-        interest_display = f"Rp {interest_zone:,.0f}"
+    # Get Interest/Resistance Zone (from V10 zones if available)
+    if v10_zones:
+        # Find nearest resistance zone above current price
+        interest_zone = None
+        for zone_num, zone_data in sorted(v10_zones.items()):
+            if zone_data['low'] > current_price:
+                interest_zone = zone_data
+                interest_zone['num'] = zone_num
+                break
+
+        if interest_zone:
+            interest_display = f"Rp {interest_zone['low']:,.0f} - {interest_zone['high']:,.0f}"
+            interest_pct = (interest_zone['low'] - current_price) / current_price * 100
+            interest_note = f"Z{interest_zone['num']} (+{interest_pct:.1f}%)"
+        else:
+            interest_display = "-"
+            interest_note = "(di atas semua zona)"
+    elif interest_zone_value and interest_zone_value > current_price:
+        # Fallback to broker-based interest zone
+        interest_low = interest_zone_value * 0.98
+        interest_high = interest_zone_value * 1.02
+        interest_display = f"Rp {interest_low:,.0f} - {interest_high:,.0f}"
         interest_note = f"({len(resistance_levels)} broker loss)"
     else:
         interest_display = "-"
@@ -7051,29 +7218,29 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
                 dbc.Col([
                     html.Div([
                         html.H6([
-                            "Support Level ",
+                            "Support Zone ",
                             html.I(className="fas fa-arrow-down", style={"fontSize": "10px"})
                         ], className="text-muted small"),
-                        html.H4(support_display, className=f"{support_class} mb-0"),
+                        html.H4(support_display, className=f"{support_class} mb-0", style={"fontSize": "1.1rem"}),
                         html.Small(support_note, className="text-muted", style={"fontSize": "10px"})
                     ], className="text-center")
                 ], width=3),
             ], className="mb-2"),
 
-            # Second row: Interest Zone (if exists)
+            # Second row: Interest/Resistance Zone (if exists)
             dbc.Row([
                 dbc.Col(width=9),
                 dbc.Col([
                     html.Div([
                         html.H6([
-                            "Interest Zone ",
+                            "Resistance Zone ",
                             html.I(className="fas fa-arrow-up", style={"fontSize": "10px"})
                         ], className="text-muted small"),
-                        html.H4(interest_display, className="text-danger mb-0") if interest_zone else html.H4("-", className="text-muted mb-0"),
+                        html.H4(interest_display, className="text-danger mb-0", style={"fontSize": "1.1rem"}),
                         html.Small(interest_note, className="text-muted", style={"fontSize": "10px"}) if interest_note else None
                     ], className="text-center")
                 ], width=3),
-            ], className="mb-3") if interest_zone else None,
+            ], className="mb-3") if interest_display != "-" else None,
 
             html.Hr(),
 
@@ -7081,15 +7248,11 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
             html.Small([
                 html.Strong("Cara Baca: "),
                 html.Br(),
-                html.Span("* Support Level", className="text-success"), " = Avg Buy broker PROFIT (di bawah harga sekarang)",
+                html.Span("* Support Zone", className="text-success"), " = Area di bawah harga dimana harga cenderung mantul naik",
                 html.Br(),
-                html.Span("* Interest Zone", className="text-danger"), " = Avg Buy broker LOSS (di atas harga sekarang)",
+                html.Span("* Resistance Zone", className="text-danger"), " = Area di atas harga yang menjadi penghalang kenaikan",
                 html.Br(),
-                "* Broker PROFIT sudah untung ^ mungkin hold/jual",
-                html.Br(),
-                "* Broker LOSS floating rugi ^ mungkin averaging down atau defend di area Avg Buy mereka",
-                html.Br(),
-                html.Strong("Tips: "), "Interest Zone adalah area dimana broker besar membeli. Jika harga naik ke sana, ada tekanan jual."
+                html.Strong("Tips: "), "Zona ini berdasarkan Formula V10 (jika tersedia) atau analisis dinamis."
             ], className="text-muted")
         ])
     ], className="mb-4", color="dark", outline=True)
@@ -7182,45 +7345,50 @@ def create_sr_chart(stock_code: str, sr_analysis: dict, days: int = 60):
         row=2, col=1
     )
 
-    # Add Support lines (green)
-    support_colors = ['#00E676', '#00C853', '#00A844', '#008B35', '#006D27']
-    for i, sup in enumerate(supports[:5]):
-        level = sup['level']
-        color = support_colors[min(i, len(support_colors)-1)]
-        confirmations = sup.get('confirmations', 1)
-        line_width = 1 + confirmations  # Thicker for multi-confirmed
+    # Check if stock has V10 zones - if yes, skip dynamic S/R lines
+    fixed_zones = get_zones(stock_code)
 
-        fig.add_hline(
-            y=level,
-            line_dash="dash",
-            line_color=color,
-            line_width=line_width,
-            annotation_text=f"S: {level:,.0f}",
-            annotation_position="left",
-            annotation_font_color=color,
-            annotation_font_size=10,
-            row=1, col=1
-        )
+    # Only show dynamic S/R lines if NO V10 zones configured
+    if not fixed_zones:
+        # Add Support lines (green) - only for stocks without V10 zones
+        support_colors = ['#00E676', '#00C853', '#00A844', '#008B35', '#006D27']
+        for i, sup in enumerate(supports[:5]):
+            level = sup['level']
+            color = support_colors[min(i, len(support_colors)-1)]
+            confirmations = sup.get('confirmations', 1)
+            line_width = 1 + confirmations
 
-    # Add Resistance lines (red)
-    resistance_colors = ['#FF5252', '#FF1744', '#D50000', '#B71C1C', '#8B0000']
-    for i, res in enumerate(resistances[:5]):
-        level = res['level']
-        color = resistance_colors[min(i, len(resistance_colors)-1)]
-        confirmations = res.get('confirmations', 1)
-        line_width = 1 + confirmations
+            fig.add_hline(
+                y=level,
+                line_dash="dash",
+                line_color=color,
+                line_width=line_width,
+                annotation_text=f"S: {level:,.0f}",
+                annotation_position="left",
+                annotation_font_color=color,
+                annotation_font_size=10,
+                row=1, col=1
+            )
 
-        fig.add_hline(
-            y=level,
-            line_dash="dash",
-            line_color=color,
-            line_width=line_width,
-            annotation_text=f"R: {level:,.0f}",
-            annotation_position="right",
-            annotation_font_color=color,
-            annotation_font_size=10,
-            row=1, col=1
-        )
+        # Add Resistance lines (red) - only for stocks without V10 zones
+        resistance_colors = ['#FF5252', '#FF1744', '#D50000', '#B71C1C', '#8B0000']
+        for i, res in enumerate(resistances[:5]):
+            level = res['level']
+            color = resistance_colors[min(i, len(resistance_colors)-1)]
+            confirmations = res.get('confirmations', 1)
+            line_width = 1 + confirmations
+
+            fig.add_hline(
+                y=level,
+                line_dash="dash",
+                line_color=color,
+                line_width=line_width,
+                annotation_text=f"R: {level:,.0f}",
+                annotation_position="right",
+                annotation_font_color=color,
+                annotation_font_size=10,
+                row=1, col=1
+            )
 
     # Add current price line (blue)
     fig.add_hline(
@@ -7233,6 +7401,28 @@ def create_sr_chart(stock_code: str, sr_analysis: dict, days: int = 60):
         annotation_font_color="#2196F3",
         row=1, col=1
     )
+
+    # Add Fixed V10 Zones as horizontal bands (use variable already defined above)
+    if fixed_zones:
+        zone_colors = ['rgba(255,193,7,0.2)', 'rgba(255,152,0,0.2)', 'rgba(255,87,34,0.2)',
+                      'rgba(233,30,99,0.2)', 'rgba(156,39,176,0.2)']
+        for i, (zone_num, zone_data) in enumerate(sorted(fixed_zones.items())):
+            zone_low = zone_data['low']
+            zone_high = zone_data['high']
+            zone_color = zone_colors[min(i, len(zone_colors)-1)]
+
+            # Add shaded area for zone
+            fig.add_hrect(
+                y0=zone_low,
+                y1=zone_high,
+                fillcolor=zone_color,
+                line=dict(color="rgba(255,193,7,0.6)", width=1),
+                annotation_text=f"Z{zone_num}",
+                annotation_position="top left",
+                annotation_font_color="#ffc107",
+                annotation_font_size=10,
+                row=1, col=1
+            )
 
     # Update layout
     fig.update_layout(
@@ -7254,6 +7444,557 @@ def create_sr_chart(stock_code: str, sr_analysis: dict, days: int = 60):
     fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)')
 
     return dcc.Graph(figure=fig, config={'displayModeBar': True, 'scrollZoom': True})
+
+
+def create_v8_sr_chart(stock_code: str, v8_data: dict, days: int = 60):
+    """
+    Create candlestick chart with V8 ATR-Quality Support/Resistance zones.
+
+    V8 Method:
+    - ATR(14) for dynamic tolerance
+    - Pivot detection (fractal 3L/3R)
+    - Clustering levels into buckets
+    - Filter: Touches >= 3, Quality >= 0.5
+    """
+    import plotly.graph_objects as go
+    from plotly.subplots import make_subplots
+
+    if not v8_data or 'error' in v8_data:
+        return html.Div([
+            dbc.Alert("V8 S/R Analysis tidak tersedia untuk emiten ini", color="warning"),
+            html.Small("V8 hanya untuk: PTRO, CBDK, BREN, BRPT, CDIA", className="text-muted")
+        ])
+
+    price_df = get_price_data(stock_code)
+
+    if price_df.empty:
+        return html.Div("No price data available", className="text-muted p-4")
+
+    # Get last N days
+    df = price_df.sort_values('date').tail(days).copy()
+
+    # Convert to float
+    for col in ['open_price', 'high_price', 'low_price', 'close_price', 'volume']:
+        if col in df.columns:
+            df[col] = df[col].astype(float)
+
+    # Get V8 data
+    current_price = v8_data.get('current_price', 0)
+    support_price = v8_data.get('support', 0)
+    resistance_price = v8_data.get('resistance', 0)
+    stop_loss = v8_data.get('stop_loss', 0)
+    target = v8_data.get('target', 0)
+    tolerance = v8_data.get('tolerance', 0)
+    support_touches = v8_data.get('support_touches', 0)
+    support_quality = v8_data.get('support_quality', 0)
+    resistance_touches = v8_data.get('resistance_touches', 0)
+    resistance_quality = v8_data.get('resistance_quality', 0)
+    all_supports = v8_data.get('all_supports', [])
+    all_resistances = v8_data.get('all_resistances', [])
+
+    # Create figure with secondary y-axis for volume
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.03,
+        row_heights=[0.7, 0.3],
+        subplot_titles=('', '')
+    )
+
+    # Candlestick chart
+    fig.add_trace(
+        go.Candlestick(
+            x=df['date'],
+            open=df['open_price'],
+            high=df['high_price'],
+            low=df['low_price'],
+            close=df['close_price'],
+            name='Price',
+            increasing_line_color='#00C853',
+            decreasing_line_color='#FF1744',
+            increasing_fillcolor='#00C853',
+            decreasing_fillcolor='#FF1744'
+        ),
+        row=1, col=1
+    )
+
+    # Volume bars
+    colors = ['#00C853' if close >= open_p else '#FF1744'
+              for close, open_p in zip(df['close_price'], df['open_price'])]
+
+    fig.add_trace(
+        go.Bar(
+            x=df['date'],
+            y=df['volume'],
+            name='Volume',
+            marker_color=colors,
+            opacity=0.7
+        ),
+        row=2, col=1
+    )
+
+    # Add Support Zone (with tolerance as shaded area)
+    if support_price > 0 and tolerance > 0:
+        fig.add_hrect(
+            y0=support_price - tolerance,
+            y1=support_price + tolerance,
+            fillcolor="rgba(0,200,83,0.15)",
+            line_width=0,
+            row=1, col=1
+        )
+        fig.add_hline(
+            y=support_price,
+            line_dash="solid",
+            line_color="#00C853",
+            line_width=2,
+            annotation_text=f"Support: {support_price:,.0f} (Q:{support_quality:.0%}, {support_touches}x)",
+            annotation_position="left",
+            annotation_font_color="#00C853",
+            annotation_font_size=11,
+            row=1, col=1
+        )
+
+    # Add Resistance Zone (with tolerance as shaded area)
+    if resistance_price > 0 and tolerance > 0:
+        fig.add_hrect(
+            y0=resistance_price - tolerance,
+            y1=resistance_price + tolerance,
+            fillcolor="rgba(255,23,68,0.15)",
+            line_width=0,
+            row=1, col=1
+        )
+        fig.add_hline(
+            y=resistance_price,
+            line_dash="solid",
+            line_color="#FF1744",
+            line_width=2,
+            annotation_text=f"Resistance: {resistance_price:,.0f} (Q:{resistance_quality:.0%}, {resistance_touches}x)",
+            annotation_position="right",
+            annotation_font_color="#FF1744",
+            annotation_font_size=11,
+            row=1, col=1
+        )
+
+    # Add other support levels (lighter)
+    for i, sup in enumerate(all_supports[1:4]):  # Skip first (main support)
+        level = sup.get('level', 0)
+        touches = sup.get('touches', 0)
+        quality = sup.get('quality', 0)
+        if level > 0:
+            fig.add_hline(
+                y=level,
+                line_dash="dot",
+                line_color="rgba(0,200,83,0.5)",
+                line_width=1,
+                annotation_text=f"S{i+2}: {level:,.0f} ({touches}x)",
+                annotation_position="left",
+                annotation_font_color="rgba(0,200,83,0.7)",
+                annotation_font_size=9,
+                row=1, col=1
+            )
+
+    # Add other resistance levels (lighter)
+    for i, res in enumerate(all_resistances[1:4]):  # Skip first (main resistance)
+        level = res.get('level', 0)
+        touches = res.get('touches', 0)
+        quality = res.get('quality', 0)
+        if level > 0:
+            fig.add_hline(
+                y=level,
+                line_dash="dot",
+                line_color="rgba(255,23,68,0.5)",
+                line_width=1,
+                annotation_text=f"R{i+2}: {level:,.0f} ({touches}x)",
+                annotation_position="right",
+                annotation_font_color="rgba(255,23,68,0.7)",
+                annotation_font_size=9,
+                row=1, col=1
+            )
+
+    # Add Stop Loss line
+    if stop_loss > 0:
+        fig.add_hline(
+            y=stop_loss,
+            line_dash="dash",
+            line_color="#FF5722",
+            line_width=1,
+            annotation_text=f"SL: {stop_loss:,.0f}",
+            annotation_position="left",
+            annotation_font_color="#FF5722",
+            annotation_font_size=10,
+            row=1, col=1
+        )
+
+    # Add Target line
+    if target > 0:
+        fig.add_hline(
+            y=target,
+            line_dash="dash",
+            line_color="#4CAF50",
+            line_width=1,
+            annotation_text=f"TP: {target:,.0f}",
+            annotation_position="right",
+            annotation_font_color="#4CAF50",
+            annotation_font_size=10,
+            row=1, col=1
+        )
+
+    # Add current price line
+    fig.add_hline(
+        y=current_price,
+        line_dash="solid",
+        line_color="#2196F3",
+        line_width=2,
+        annotation_text=f"Current: {current_price:,.0f}",
+        annotation_position="right",
+        annotation_font_color="#2196F3",
+        annotation_font_size=11,
+        row=1, col=1
+    )
+
+    # Update layout
+    phase = v8_data.get('phase', 'NEUTRAL')
+    phase_color = {'STRONG_ACCUMULATION': '#00C853', 'ACCUMULATION': '#4CAF50',
+                   'WEAK_ACCUMULATION': '#8BC34A', 'NEUTRAL': '#9E9E9E',
+                   'WEAK_DISTRIBUTION': '#FF9800', 'DISTRIBUTION': '#FF5722',
+                   'STRONG_DISTRIBUTION': '#F44336'}.get(phase, '#9E9E9E')
+
+    fig.update_layout(
+        title=dict(
+            text=f'{stock_code} - V8 ATR-Quality S/R ({days} days) | Phase: {phase}',
+            font=dict(size=14, color=phase_color)
+        ),
+        template='plotly_dark',
+        height=450,
+        margin=dict(l=60, r=100, t=50, b=30),
+        showlegend=False,
+        xaxis_rangeslider_visible=False,
+        hovermode='x unified'
+    )
+
+    fig.update_yaxes(title_text="Price (Rp)", row=1, col=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_yaxes(title_text="Volume", row=2, col=1, gridcolor='rgba(128,128,128,0.2)')
+    fig.update_xaxes(gridcolor='rgba(128,128,128,0.2)')
+
+    return dcc.Graph(figure=fig, config={'displayModeBar': True, 'scrollZoom': True})
+
+
+def create_v8_sr_card(stock_code: str, v8_data: dict):
+    """
+    Create V8 ATR-Quality Support/Resistance information card.
+    Shows key V8 metrics: Support, Resistance, Quality, Touches, Phase.
+    """
+    if not v8_data or 'error' in v8_data:
+        return dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-chart-line me-2"),
+                html.Strong("V8 ATR-Quality S/R")
+            ], className="bg-secondary"),
+            dbc.CardBody([
+                dbc.Alert([
+                    html.I(className="fas fa-info-circle me-2"),
+                    "V8 Analysis tidak tersedia untuk emiten ini. ",
+                    html.Br(),
+                    html.Small("V8 hanya untuk: PTRO, CBDK, BREN, BRPT, CDIA", className="text-muted")
+                ], color="warning")
+            ])
+        ], className="mb-4")
+
+    # Extract V8 data
+    current_price = v8_data.get('current_price', 0)
+    support = v8_data.get('support', 0)
+    resistance = v8_data.get('resistance', 0)
+    support_touches = v8_data.get('support_touches', 0)
+    support_quality = v8_data.get('support_quality', 0)
+    resistance_touches = v8_data.get('resistance_touches', 0)
+    resistance_quality = v8_data.get('resistance_quality', 0)
+    stop_loss = v8_data.get('stop_loss', 0)
+    target = v8_data.get('target', 0)
+    phase = v8_data.get('phase', 'NEUTRAL')
+    vr = v8_data.get('vr', 0)
+    action = v8_data.get('action', 'WAIT')
+    action_reason = v8_data.get('action_reason', '')
+    dist_from_support = v8_data.get('dist_from_support', 0)
+    dist_from_resistance = v8_data.get('dist_from_resistance', 0)
+    tolerance = v8_data.get('tolerance', 0)
+    atr14 = v8_data.get('atr14', 0)
+
+    # Phase colors
+    phase_colors = {
+        'STRONG_ACCUMULATION': 'success',
+        'ACCUMULATION': 'success',
+        'WEAK_ACCUMULATION': 'info',
+        'NEUTRAL': 'secondary',
+        'WEAK_DISTRIBUTION': 'warning',
+        'DISTRIBUTION': 'danger',
+        'STRONG_DISTRIBUTION': 'danger'
+    }
+    phase_color = phase_colors.get(phase, 'secondary')
+
+    # Action colors
+    action_colors = {'ENTRY': 'success', 'WAIT': 'warning', 'AVOID': 'danger'}
+    action_color = action_colors.get(action, 'secondary')
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.I(className="fas fa-crosshairs me-2"),
+            html.Strong("Status V8 ATR-Quality"),
+            dbc.Badge(phase, color=phase_color, className="ms-2"),
+            dbc.Badge(action, color=action_color, className="ms-2")
+        ], className=f"bg-{phase_color} text-white"),
+        dbc.CardBody([
+            # Main metrics row
+            dbc.Row([
+                # Support info
+                dbc.Col([
+                    html.Div([
+                        html.H6("Support V8", className="text-success mb-2"),
+                        html.H4(f"Rp {support:,.0f}", className="text-success fw-bold mb-1"),
+                        html.Div([
+                            dbc.Badge(f"Q: {support_quality:.0%}", color="success", className="me-1"),
+                            dbc.Badge(f"{support_touches}x touches", color="dark"),
+                        ], className="mb-2"),
+                        html.Small([
+                            "Jarak: ",
+                            html.Span(f"{dist_from_support:.1f}%", className=f"fw-bold text-{'success' if dist_from_support <= 5 else 'warning'}")
+                        ], className="d-block text-muted"),
+                        html.Small(f"Zone: {support-tolerance:,.0f} - {support+tolerance:,.0f}", className="d-block text-muted")
+                    ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(40,167,69,0.1)"})
+                ], md=4),
+
+                # Current Price & Phase
+                dbc.Col([
+                    html.Div([
+                        html.H6("Harga & Fase", className="text-info mb-2"),
+                        html.H4(f"Rp {current_price:,.0f}", className="text-info fw-bold mb-1"),
+                        html.Div([
+                            html.Span(
+                                "🟢" if 'ACCUMULATION' in phase else "🔴" if 'DISTRIBUTION' in phase else "⚪",
+                                style={"fontSize": "24px"}
+                            ),
+                            html.Strong(phase, className=f"ms-2 text-{phase_color}")
+                        ], className="mb-2"),
+                        html.Small([
+                            "VR: ",
+                            html.Span(f"{vr:.2f}x", className=f"fw-bold text-{'success' if vr >= 1.5 else 'warning' if vr >= 1.0 else 'danger'}")
+                        ], className="d-block"),
+                        html.Small(f"ATR(14): {atr14:,.0f}", className="d-block text-muted")
+                    ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)"})
+                ], md=4),
+
+                # Resistance info
+                dbc.Col([
+                    html.Div([
+                        html.H6("Resistance V8", className="text-danger mb-2"),
+                        html.H4(f"Rp {resistance:,.0f}", className="text-danger fw-bold mb-1"),
+                        html.Div([
+                            dbc.Badge(f"Q: {resistance_quality:.0%}", color="danger", className="me-1"),
+                            dbc.Badge(f"{resistance_touches}x touches", color="dark"),
+                        ], className="mb-2"),
+                        html.Small([
+                            "Jarak: ",
+                            html.Span(f"{dist_from_resistance:.1f}%", className="fw-bold")
+                        ], className="d-block text-muted"),
+                        html.Small(f"Zone: {resistance-tolerance:,.0f} - {resistance+tolerance:,.0f}", className="d-block text-muted")
+                    ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(220,53,69,0.1)"})
+                ], md=4),
+            ], className="mb-3"),
+
+            html.Hr(),
+
+            # Trading Levels
+            dbc.Row([
+                dbc.Col([
+                    html.Div([
+                        html.Small("STOP LOSS", className="text-danger d-block"),
+                        html.H5(f"Rp {stop_loss:,.0f}", className="text-danger mb-0"),
+                        html.Small("Support - 5%", className="text-muted")
+                    ], className="text-center")
+                ], md=4),
+                dbc.Col([
+                    html.Div([
+                        html.Small("ENTRY ZONE", className="text-info d-block"),
+                        html.H5(f"< Rp {support + (support * 0.05):,.0f}", className="text-info mb-0"),
+                        html.Small("Near Support (≤5%)", className="text-muted")
+                    ], className="text-center")
+                ], md=4),
+                dbc.Col([
+                    html.Div([
+                        html.Small("TARGET", className="text-success d-block"),
+                        html.H5(f"Rp {target:,.0f}", className="text-success mb-0"),
+                        html.Small("Resistance - 2%", className="text-muted")
+                    ], className="text-center")
+                ], md=4),
+            ], className="mb-3"),
+
+            html.Hr(),
+
+            # V8 Entry Criteria
+            html.Div([
+                html.H6([html.I(className="fas fa-check-circle me-2"), "Kriteria Entry V8"], className="mb-2"),
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Span("✓" if dist_from_support <= 5 else "✗",
+                                     className=f"me-2 text-{'success' if dist_from_support <= 5 else 'danger'}"),
+                            html.Strong("Near Support", className="me-2"),
+                            html.Small(f"({dist_from_support:.1f}% ≤ 5%)" if dist_from_support <= 5 else f"({dist_from_support:.1f}% > 5%)",
+                                      className="text-muted")
+                        ], className="mb-2"),
+                        html.Div([
+                            html.Span("✓" if 'ACCUMULATION' in phase else "✗",
+                                     className=f"me-2 text-{'success' if 'ACCUMULATION' in phase else 'danger'}"),
+                            html.Strong("Valid Phase", className="me-2"),
+                            html.Small(f"({phase})", className="text-muted")
+                        ], className="mb-2"),
+                    ], md=6),
+                    dbc.Col([
+                        html.Div([
+                            html.Span("✓" if support_quality >= 0.5 else "✗",
+                                     className=f"me-2 text-{'success' if support_quality >= 0.5 else 'danger'}"),
+                            html.Strong("Quality ≥ 50%", className="me-2"),
+                            html.Small(f"({support_quality:.0%})", className="text-muted")
+                        ], className="mb-2"),
+                        html.Div([
+                            html.Span("✓" if support_touches >= 3 else "✗",
+                                     className=f"me-2 text-{'success' if support_touches >= 3 else 'danger'}"),
+                            html.Strong("Touches ≥ 3", className="me-2"),
+                            html.Small(f"({support_touches}x)", className="text-muted")
+                        ], className="mb-2"),
+                    ], md=6),
+                ])
+            ], className="p-3 rounded", style={"backgroundColor": "rgba(108,117,125,0.1)"}),
+        ])
+    ], className="mb-4", style={"border": f"2px solid var(--bs-{phase_color})"})
+
+
+def create_fixed_zones_card(stock_code):
+    """Create card showing fixed S/R zones from zones_config.py (Formula V10 zones)"""
+    zones = get_zones(stock_code)
+    if not zones:
+        return None
+
+    try:
+        price_df = get_price_data(stock_code)
+        if price_df.empty:
+            return None
+        current_price = float(price_df['close'].iloc[-1])
+    except:
+        return None
+
+    support_zones = []
+    resistance_zones = []
+    current_zone = None
+
+    for zone_num, zone_data in sorted(zones.items()):
+        zone_low = zone_data['low']
+        zone_high = zone_data['high']
+        zone_mid = (zone_low + zone_high) / 2
+
+        zone_info = {
+            'num': zone_num,
+            'low': zone_low,
+            'high': zone_high,
+            'mid': zone_mid,
+            'range': f"{zone_low:,.0f} - {zone_high:,.0f}",
+            'width_pct': (zone_high - zone_low) / zone_mid * 100
+        }
+
+        if current_price >= zone_low and current_price <= zone_high:
+            current_zone = zone_info
+            zone_info['status'] = 'INSIDE'
+        elif zone_high < current_price:
+            distance_pct = (current_price - zone_high) / current_price * 100
+            zone_info['distance_pct'] = distance_pct
+            zone_info['status'] = 'SUPPORT'
+            support_zones.append(zone_info)
+        else:
+            distance_pct = (zone_low - current_price) / current_price * 100
+            zone_info['distance_pct'] = distance_pct
+            zone_info['status'] = 'RESISTANCE'
+            resistance_zones.append(zone_info)
+
+    support_zones.sort(key=lambda x: x.get('distance_pct', 999))
+    resistance_zones.sort(key=lambda x: x.get('distance_pct', 999))
+
+    nearest_support = support_zones[0] if support_zones else None
+    nearest_resistance = resistance_zones[0] if resistance_zones else None
+
+    risk_reward = None
+    if nearest_support and nearest_resistance:
+        risk = current_price - nearest_support['high']
+        reward = nearest_resistance['low'] - current_price
+        if risk > 0:
+            risk_reward = reward / risk
+
+    # Build zone list components
+    support_list = []
+    for z in support_zones:
+        support_list.append(html.Div([
+            html.Span(f"Z{z['num']}", className="badge bg-success me-2"),
+            html.Span(f"Rp {z['range']}", className="fw-bold me-2"),
+            html.Small(f"-{z.get('distance_pct', 0):.1f}%", className="text-success")
+        ], className="p-2 mb-2 rounded", style={"backgroundColor": "rgba(40,167,69,0.15)"}))
+
+    resistance_list = []
+    for z in resistance_zones:
+        resistance_list.append(html.Div([
+            html.Span(f"Z{z['num']}", className="badge bg-danger me-2"),
+            html.Span(f"Rp {z['range']}", className="fw-bold me-2"),
+            html.Small(f"+{z.get('distance_pct', 0):.1f}%", className="text-danger")
+        ], className="p-2 mb-2 rounded", style={"backgroundColor": "rgba(220,53,69,0.15)"}))
+
+    # Position text
+    if current_zone:
+        pos_text = f"Di dalam Z{current_zone['num']}"
+    elif not resistance_zones:
+        pos_text = "Di atas semua zona"
+    elif not support_zones:
+        pos_text = f"Di bawah Z{resistance_zones[0]['num']}"
+    else:
+        pos_text = f"Antara Z{support_zones[0]['num']} dan Z{resistance_zones[0]['num']}"
+
+    return dbc.Card([
+        dbc.CardHeader([
+            html.H5([
+                html.I(className="fas fa-crosshairs me-2"),
+                "Formula V10 - Support & Resistance Zones ",
+                dbc.Badge("FIX", color="warning", className="ms-2")
+            ], className="mb-0"),
+        ]),
+        dbc.CardBody([
+            dbc.Row([
+                dbc.Col([
+                    html.H6("Harga Sekarang", className="text-muted small text-center"),
+                    html.H3(f"Rp {current_price:,.0f}", className="text-info mb-0 text-center"),
+                    html.Small(pos_text, className="text-muted d-block text-center")
+                ], width=4),
+                dbc.Col([
+                    html.H6("Nearest Support", className="text-muted small text-center"),
+                    html.H3(f"Rp {nearest_support['high']:,.0f}" if nearest_support else "-", className="text-success mb-0 text-center"),
+                    html.Small(f"Z{nearest_support['num']}" if nearest_support else "", className="text-muted d-block text-center")
+                ], width=4),
+                dbc.Col([
+                    html.H6("Nearest Resistance", className="text-muted small text-center"),
+                    html.H3(f"Rp {nearest_resistance['low']:,.0f}" if nearest_resistance else "-", className="text-danger mb-0 text-center"),
+                    html.Small(f"Z{nearest_resistance['num']}" if nearest_resistance else "", className="text-muted d-block text-center")
+                ], width=4),
+            ], className="mb-4"),
+            html.Div([
+                html.Strong("Risk/Reward: "),
+                html.Span(f"{risk_reward:.2f}x" if risk_reward else "N/A",
+                         className="text-success fw-bold" if risk_reward and risk_reward >= 2 else "text-warning fw-bold")
+            ], className="p-2 mb-3 rounded", style={"backgroundColor": "rgba(108,117,125,0.1)"}),
+            dbc.Row([
+                dbc.Col([
+                    html.H6("Support Zones", className="text-success mb-2"),
+                ] + (support_list if support_list else [html.Small("Tidak ada", className="text-muted")]), md=6),
+                dbc.Col([
+                    html.H6("Resistance Zones", className="text-danger mb-2"),
+                ] + (resistance_list if resistance_list else [html.Small("Tidak ada", className="text-muted")]), md=6),
+            ])
+        ])
+    ], className="mb-4", color="dark", style={"border": "2px solid #ffc107"})
 
 
 def create_sr_levels_card(sr_analysis, stock_code):
@@ -7582,6 +8323,9 @@ def create_support_resistance_page(stock_code='CDIA'):
             html.P("Pastikan data sudah diupload dengan benar")
         ])
 
+    # Check if stock has fixed V10 zones
+    fixed_zones_card = create_fixed_zones_card(stock_code)
+
     return html.Div([
         # Page Header with submenu navigation
         html.Div([
@@ -7592,21 +8336,25 @@ def create_support_resistance_page(stock_code='CDIA'):
             create_submenu_nav('support-resistance', stock_code),
         ], className="d-flex align-items-center flex-wrap mb-4"),
 
-        # ========== S/R CHART WITH VOLUME ==========
+        # ========== FIXED V10 ZONES (primary - only show this) ==========
+        fixed_zones_card if fixed_zones_card else dbc.Alert([
+            html.I(className="fas fa-info-circle me-2"),
+            f"Emiten {stock_code} belum memiliki konfigurasi zona V10. ",
+            "Hubungi admin untuk menambahkan zona support & resistance."
+        ], color="warning", className="mb-4"),
+
+        # ========== S/R CHART WITH V10 ZONES ==========
         dbc.Card([
             dbc.CardHeader([
                 html.H5([
                     html.I(className="fas fa-chart-area me-2"),
-                    "Price Chart with S/R Levels"
+                    "Price Chart with V10 Zones" if fixed_zones_card else "Price Chart"
                 ], className="mb-0"),
             ]),
             dbc.CardBody([
                 create_sr_chart(stock_code, sr_analysis, days=60)
             ], className="p-2")
         ], className="mb-4", color="dark"),
-
-        # ========== SUPPORT/RESISTANCE LEVELS (Multi-Method) ==========
-        create_sr_levels_card(sr_analysis, stock_code),
 
         # ========== AVG BUY ANALYSIS ==========
         create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis),
@@ -11193,6 +11941,15 @@ def create_accumulation_page(stock_code='CDIA'):
         v6_phase = v6_data.get('phase', {}) if not v6_data.get('error') else {}
         v6_entry = v6_data.get('entry', {}) if not v6_data.get('error') else {}
 
+        # V8 ANALYSIS - ATR-Quality S/R (untuk PTRO, CBDK, BREN, BRPT, CDIA)
+        v8_data = None
+        if stock_code.upper() in ['PTRO', 'CBDK', 'BREN', 'BRPT', 'CDIA']:
+            try:
+                v8_data = get_strong_sr_analysis(stock_code)
+            except Exception as e:
+                print(f"V8 Analysis error for {stock_code}: {e}")
+                v8_data = None
+
         # WEEKLY ANALYSIS - 4 weeks historical
         weekly_data = get_weekly_analysis(stock_code)
         weeks = weekly_data.get('weeks', {})
@@ -11474,747 +12231,47 @@ def create_accumulation_page(stock_code='CDIA'):
             ])
         ], className="mb-4"),
 
-        # ========== 3 NARRATIVE SENTENCES ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-comment-alt me-2"),
-                html.Strong("Ringkasan Narasi (3 Kalimat)")
-            ], className="bg-warning text-dark"),
-            dbc.CardBody([
-                # Narrative 1: Closing
-                html.Div([
-                    dbc.Badge("1", color="primary", className="me-2"),
-                    html.Strong("Arah & Kualitas Penutupan:", className="me-2"),
-                    html.Span(narrative['closing'])
-                ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(0,123,255,0.1)"}),
-
-                # Narrative 2: Weight
-                html.Div([
-                    dbc.Badge("2", color="info", className="me-2"),
-                    html.Strong("Bobot Pergerakan:", className="me-2"),
-                    html.Span(narrative['weight'])
-                ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)"}),
-
-                # Narrative 3: Foreign
-                html.Div([
-                    dbc.Badge("3", color="success", className="me-2"),
-                    html.Strong("Konteks Asing:", className="me-2"),
-                    html.Span(narrative['foreign'])
-                ], className="p-2 rounded", style={"backgroundColor": "rgba(40,167,69,0.1)"}),
-            ])
-        ], className="mb-4", style={"border": "2px solid var(--bs-warning)"}),
-
-        # ========== KESIMPULAN HARI (DAY CONCLUSION) ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-gavel me-2"),
-                html.Strong("KESIMPULAN HARI")
-            ], className=f"bg-{conclusion['color']} text-white"),
-            dbc.CardBody([
-                # Main conclusion row
-                dbc.Row([
-                    # Left: Intensity level with big icon
-                    dbc.Col([
-                        html.Div([
-                            html.I(className=f"fas {conclusion['icon']} fa-3x mb-2"),
-                            html.H4(conclusion['significance_level'], className="mb-1 fw-bold"),
-                            html.P(f"Intensitas: {conclusion['significance_score']}/100", className="mb-0 small text-muted")
-                        ], className=f"text-center text-{conclusion['color']}")
-                    ], md=3, className="d-flex align-items-center justify-content-center border-end"),
-
-                    # Middle: Day type indicators
-                    dbc.Col([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div([
-                                    html.Small("TIPE HARI", className="text-muted d-block"),
-                                    html.H5(conclusion['day_type'], className="mb-1 text-info fw-bold"),
-                                    html.Small(conclusion['day_desc'], className="text-muted d-block"),
-                                    html.Small(conclusion['day_context'], className="text-warning", style={"fontSize": "10px"})
-                                ], className="text-center")
-                            ], width=6),
-                            dbc.Col([
-                                html.Div([
-                                    html.Small("STATUS", className="text-muted d-block"),
-                                    html.H5(conclusion['decision_type'], className=f"mb-1 fw-bold text-{'success' if conclusion['decision_type'] == 'HARI KEPUTUSAN' else 'warning'}"),
-                                    html.Small(conclusion['decision_desc'], className="text-muted")
-                                ], className="text-center")
-                            ], width=6),
-                        ])
-                    ], md=5, className="d-flex align-items-center"),
-
-                    # Right: Recommendation
-                    dbc.Col([
-                        html.Div([
-                            html.Small("REKOMENDASI", className="text-muted d-block mb-2"),
-                            html.Div([
-                                html.I(className=f"fas fa-{'arrow-right' if conclusion['significant'] else 'pause'} me-2"),
-                                html.Span(conclusion['recommendation'])
-                            ], className=f"p-2 rounded bg-{conclusion['color']} bg-opacity-10 text-{conclusion['color']}")
-                        ])
-                    ], md=4, className="d-flex align-items-center"),
-                ]),
-
-                html.Hr(),
-
-                # Comparison with previous day
-                html.Div([
-                    html.I(className="fas fa-exchange-alt me-2 text-secondary"),
-                    html.Span(comparison, className="small")
-                ], className="mb-3 p-2 rounded", style={"backgroundColor": "rgba(108,117,125,0.1)"}),
-
-                # Breakdown reasons
-                html.Div([
-                    html.Small("FAKTOR PENILAIAN:", className="text-muted d-block mb-2"),
-                    html.Div([
-                        dbc.Badge(reason, color="dark", className="me-2 mb-1")
-                        for reason in conclusion['reasons']
-                    ])
-                ])
-            ])
-        ], className="mb-4", style={"border": f"2px solid var(--bs-{conclusion['color']})"}),
-
-        # ========== FILTER NOISE SUMMARY ==========
-        dbc.Card([
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.I(className="fas fa-filter me-2 text-info"),
-                            html.Strong("Filter Noise", className="text-info")
-                        ]),
-                        html.P([
-                            "Berdasarkan snapshot, hari ini adalah ",
-                            html.Strong(f"hari {narrative['activity']}", className=f"text-{activity_color}"),
-                            " dengan pergerakan ",
-                            html.Strong(f"{narrative['direction']}", className=f"text-{change_color}"),
-                            ". "
-                        ] + ([
-                            html.Span("Jangan over-interpret pergerakan ini.", className="text-warning")
-                        ] if not conclusion['significant'] else [
-                            html.Span("Pergerakan ini layak dianalisis lebih lanjut.", className="text-success")
-                        ]), className="mb-0 small")
-                    ], md=8),
-                    dbc.Col([
-                        html.Div([
-                            html.Div([
-                                html.Span("LANJUT KE POINT 2-6?" if conclusion['significant'] else "CUKUP SAMPAI SINI?", className="small text-muted d-block"),
-                                html.H5("YA" if conclusion['significant'] else "TIDAK PERLU", className=f"mb-0 text-{conclusion['color']} fw-bold")
-                            ], className="text-center")
-                        ])
-                    ], md=4, className="d-flex align-items-center justify-content-center")
-                ])
-            ])
-        ], className="mb-4", style={"backgroundColor": f"rgba({'40,167,69' if conclusion['significant'] else '255,193,7'}, 0.05)", "borderLeft": f"3px solid var(--bs-{conclusion['color']})"}),
-
-        # ========== ANCHOR KALIMAT POINT 1 ==========
-        dbc.Alert([
-            html.I(className="fas fa-anchor me-2"),
-            html.Strong("INGAT: "),
-            "Snapshot ini berfungsi sebagai ",
-            html.Strong("konteks harian"),
-            " dan ",
-            html.Strong("bukan sinyal entry"),
-            ". Point 1 menjawab 'apa yang terjadi', bukan 'apa yang harus dilakukan'."
-        ], color="secondary", className="mb-4 text-center"),
-
-        # ================================================================
-        # POINT 2 — PRICE MOVEMENT ANATOMY
-        # ================================================================
-        html.Hr(className="my-4"),
-        html.Div([
-            html.H4([
-                html.I(className="fas fa-route me-2 text-info"),
-                "POINT 2 — Price Movement Anatomy"
-            ], className="mb-1"),
-            html.P("Membedah BAGAIMANA harga bergerak, bukan KENAPA", className="text-muted small mb-0")
-        ], className="mb-4"),
-
-        # Point 2 Purpose
-        dbc.Card([
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.I(className="fas fa-question-circle me-2 text-info"),
-                        html.Span("Point 2 menjawab:", className="text-muted small"),
-                    ]),
-                    dbc.Col([
-                        html.Strong("\"Harga hari ini bergerak dengan CARA seperti apa?\"", className="text-info")
-                    ], md=9),
-                ], className="align-items-center")
-            ])
-        ], className="mb-4", style={"borderLeft": "4px solid var(--bs-info)"}),
-
-        # ========== 2.1 ARAH GERAK INTRAHARI (FLOW) ==========
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className=f"fas {anatomy['flow']['icon']} me-2"),
-                        html.Strong("2.1 Arah Gerak Intrahari (Flow)")
-                    ], className="bg-dark"),
-                    dbc.CardBody([
-                        html.Div([
-                            html.H4(anatomy['flow']['type'], className=f"text-{anatomy['flow']['color']} fw-bold mb-2"),
-                            html.P(anatomy['flow']['narrative'], className="mb-3"),
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Small("Open Position", className="text-muted d-block"),
-                                    html.Span(anatomy['flow']['open_pos'], className="fw-bold")
-                                ], width=6, className="text-center"),
-                                dbc.Col([
-                                    html.Small("Close Position", className="text-muted d-block"),
-                                    html.Span(anatomy['flow']['close_pos'], className="fw-bold")
-                                ], width=6, className="text-center"),
-                            ])
-                        ])
-                    ])
-                ], className="h-100")
-            ], md=6, className="mb-3"),
-
-            # ========== 2.2 STRUKTUR RANGE ==========
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className=f"fas {anatomy['range_structure']['icon']} me-2"),
-                        html.Strong("2.2 Struktur Range")
-                    ], className="bg-dark"),
-                    dbc.CardBody([
-                        html.Div([
-                            html.H4(anatomy['range_structure']['type'], className=f"text-{anatomy['range_structure']['color']} fw-bold mb-2"),
-                            html.P(anatomy['range_structure']['narrative'], className="mb-3"),
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Small("Range", className="text-muted d-block"),
-                                    html.Span(anatomy['range_structure']['range_percent'], className="fw-bold")
-                                ], width=4, className="text-center"),
-                                dbc.Col([
-                                    html.Small("Nilai Range", className="text-muted d-block"),
-                                    html.Span(anatomy['range_structure']['range_value'], className="fw-bold")
-                                ], width=4, className="text-center"),
-                                dbc.Col([
-                                    html.Small("Kontrol", className="text-muted d-block"),
-                                    html.Span(anatomy['range_structure']['control'], className=f"fw-bold text-{anatomy['range_structure']['color']}")
-                                ], width=4, className="text-center"),
-                            ])
-                        ])
-                    ])
-                ], className="h-100")
-            ], md=6, className="mb-3"),
-        ]),
-
-        # ========== 2.3 LOKASI PENUTUPAN & 2.4 RITME ==========
-        dbc.Row([
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className=f"fas {anatomy['close_location']['icon']} me-2"),
-                        html.Strong("2.3 Lokasi Penutupan"),
-                        dbc.Badge("JANTUNG POINT 2", color="warning", className="ms-2")
-                    ], className="bg-dark"),
-                    dbc.CardBody([
-                        html.Div([
-                            html.H4(anatomy['close_location']['type'], className=f"text-{anatomy['close_location']['color']} fw-bold mb-2"),
-                            html.P(anatomy['close_location']['narrative'], className="mb-3"),
-                            html.Div([
-                                html.Span("PEMENANG HARI INI: ", className="text-muted"),
-                                html.Span(anatomy['close_location']['winner'], className=f"fw-bold text-{anatomy['close_location']['color']}")
-                            ], className="text-center p-2 rounded", style={"backgroundColor": f"rgba({'40,167,69' if anatomy['close_location']['color'] == 'success' else ('220,53,69' if anatomy['close_location']['color'] == 'danger' else '255,193,7')}, 0.1)"})
-                        ])
-                    ])
-                ], className="h-100")
-            ], md=6, className="mb-3"),
-
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className=f"fas {anatomy['rhythm']['icon']} me-2"),
-                        html.Strong("2.4 Ritme Pergerakan")
-                    ], className="bg-dark"),
-                    dbc.CardBody([
-                        html.Div([
-                            html.H4(anatomy['rhythm']['type'], className=f"text-{anatomy['rhythm']['color']} fw-bold mb-2"),
-                            html.P(anatomy['rhythm']['narrative'], className="mb-3"),
-                            # Data metrics row
-                            dbc.Row([
-                                dbc.Col([
-                                    html.Small("Volume", className="text-muted d-block"),
-                                    html.Span(anatomy['rhythm'].get('volume_ratio', 'N/A'), className="fw-bold")
-                                ], width=4, className="text-center"),
-                                dbc.Col([
-                                    html.Small("Frekuensi", className="text-muted d-block"),
-                                    html.Span(anatomy['rhythm'].get('freq_ratio', 'N/A'), className="fw-bold")
-                                ], width=4, className="text-center"),
-                                dbc.Col([
-                                    html.Small("Change", className="text-muted d-block"),
-                                    html.Span(anatomy['rhythm'].get('change_magnitude', 'N/A'), className="fw-bold")
-                                ], width=4, className="text-center"),
-                            ], className="mb-3"),
-                            html.Div([
-                                html.Span("FEEL: ", className="text-muted"),
-                                html.Span(anatomy['rhythm']['feel'], className=f"fw-bold text-{anatomy['rhythm']['color']}")
-                            ], className="text-center p-2 rounded", style={"backgroundColor": f"rgba({'40,167,69' if anatomy['rhythm']['color'] == 'success' else ('220,53,69' if anatomy['rhythm']['color'] == 'danger' else ('23,162,184' if anatomy['rhythm']['color'] == 'info' else '108,117,125'))}, 0.1)"})
-                        ])
-                    ])
-                ], className="h-100")
-            ], md=6, className="mb-3"),
-        ]),
-
-        # ========== 2.5 HUBUNGAN DENGAN AVG ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className=f"fas {anatomy['avg_relation']['icon']} me-2"),
-                html.Strong("2.5 Hubungan dengan Avg (Kualitas Jalur Harga)")
-            ], className="bg-dark"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.H4(anatomy['avg_relation']['type'], className=f"text-{anatomy['avg_relation']['color']} fw-bold mb-2"),
-                        html.P(anatomy['avg_relation']['narrative'], className="mb-0"),
-                    ], md=8),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("Dominasi Jalur", className="text-muted d-block"),
-                            html.H5(anatomy['avg_relation']['dominance'], className=f"text-{anatomy['avg_relation']['color']} fw-bold mb-1"),
-                            html.Small(f"Close vs Avg: {anatomy['avg_relation']['close_vs_avg']}", className="text-muted")
-                        ], className="text-center")
-                    ], md=4, className="d-flex align-items-center justify-content-center"),
-                ])
-            ])
-        ], className="mb-4"),
-
-        # ========== FULL NARRATIVE PARAGRAPH ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-paragraph me-2"),
-                html.Strong("Narasi Lengkap Point 2")
-            ], className="bg-info text-white"),
-            dbc.CardBody([
-                html.P(anatomy['full_narrative'], className="mb-0 lead", style={"fontStyle": "italic", "lineHeight": "1.8"})
-            ])
-        ], className="mb-4", style={"border": "2px solid var(--bs-info)"}),
-
-        # ========== 4 PERTANYAAN KUNCI ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-check-double me-2"),
-                html.Strong("4 Pertanyaan Kunci Point 2")
-            ], className="bg-dark"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.Small("1. Didorong, Ditekan, atau Dikurung?", className="text-muted d-block"),
-                            html.H5(anatomy['summary_questions'].get('didorong_ditekan_dikurung', 'N/A'), className="text-info fw-bold mb-0")
-                        ], className="text-center p-2")
-                    ], md=3),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("2. Gaya Pergerakan?", className="text-muted d-block"),
-                            html.H5(anatomy['summary_questions'].get('kasar_atau_terkontrol', 'N/A'), className=f"fw-bold mb-0 text-{'success' if anatomy['summary_questions'].get('kasar_atau_terkontrol') == 'TERKONTROL' else ('info' if anatomy['summary_questions'].get('kasar_atau_terkontrol') == 'TERARAH' else ('danger' if anatomy['summary_questions'].get('kasar_atau_terkontrol') == 'LIAR' else 'secondary'))}")
-                        ], className="text-center p-2")
-                    ], md=3),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("3. Siapa yang Menang?", className="text-muted d-block"),
-                            html.H5(anatomy['summary_questions'].get('siapa_menang', 'N/A'), className=f"fw-bold mb-0 text-{'success' if anatomy['summary_questions'].get('siapa_menang') == 'PEMBELI' else ('danger' if anatomy['summary_questions'].get('siapa_menang') == 'PENJUAL' else 'warning')}")
-                        ], className="text-center p-2")
-                    ], md=3),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("4. Selesai atau Masih Proses?", className="text-muted d-block"),
-                            html.H5(anatomy['summary_questions'].get('selesai_atau_proses', 'N/A'), className=f"fw-bold mb-1 text-{'success' if anatomy['summary_questions'].get('selesai_atau_proses') == 'SELESAI' else 'warning'}"),
-                            html.Small(anatomy['summary_questions'].get('selesai_note', ''), className="text-muted", style={"fontSize": "9px"})
-                        ], className="text-center p-2")
-                    ], md=3),
-                ])
-            ])
-        ], className="mb-4"),
-
-        # ========== ANCHOR KALIMAT POINT 2 ==========
-        dbc.Alert([
-            html.I(className="fas fa-anchor me-2"),
-            html.Strong("INGAT: "),
-            "Point 2 hanya membaca ",
-            html.Strong("perilaku mekanis harga"),
-            ", bukan niat. Tidak ada bandar, tidak ada entry, tidak ada prediksi. ",
-            html.Strong("Perilaku dulu, interpretasi belakangan.")
-        ], color="info", className="mb-4 text-center"),
-
         # ========================================================================
-        # POINT 3 — COMPRESSION & ABSORPTION
-        # Membaca APA yang terjadi SETELAH harga bergerak (multi-hari)
+        # CONDITIONAL: V8 for 5 emiten, V6 for others
         # ========================================================================
         html.Hr(className="my-4"),
 
+        # V8 ATR-QUALITY S/R ANALYSIS (only for PTRO, CBDK, BREN, BRPT, CDIA)
         html.Div([
-            html.H4([
-                html.I(className="fas fa-compress-alt me-2"),
-                "POINT 3 — COMPRESSION & ABSORPTION"
-            ], className="text-warning mb-1"),
-            html.P("Membaca APA yang terjadi SETELAH harga bergerak (analisis multi-hari)", className="text-muted mb-0 small")
-        ], className="mb-4"),
+            html.Div([
+                html.H4([
+                    html.I(className="fas fa-crosshairs me-2"),
+                    "ANALISIS V8 — ATR-QUALITY SUPPORT & RESISTANCE"
+                ], className="text-info mb-1"),
+                html.P("Metode V8: ATR(14) tolerance + Pivot fractal 3L/3R + Filter Touches≥3, Quality≥50%", className="text-muted mb-0 small")
+            ], className="mb-4"),
 
-        # ========== PHASE SUMMARY ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-chart-area me-2"),
-                html.Strong("Fase Pasar Saat Ini"),
-                dbc.Badge(f"Analisis {point3.get('days_analyzed', 0)} Hari", color="secondary", className="ms-2")
-            ], className=f"bg-{point3.get('phase_color', 'secondary')} text-white"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.H3(point3.get('phase', 'N/A'), className=f"text-{point3.get('phase_color', 'secondary')} fw-bold mb-2"),
-                        html.P(point3.get('phase_narrative', ''), className="mb-2"),
-                        # Education note - helps users understand context
-                        html.P([
-                            html.I(className="fas fa-graduation-cap me-2 text-warning"),
-                            point3.get('education_note', '')
-                        ], className="small text-muted fst-italic mb-2", style={"backgroundColor": "rgba(255,193,7,0.1)", "padding": "8px", "borderRadius": "4px"}),
-                        dbc.Alert([
-                            html.I(className="fas fa-info-circle me-2"),
-                            html.Strong("Implikasi: "),
-                            point3.get('phase_implication', '')
-                        ], color="light", className="mb-0 py-2")
-                    ], md=8),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("Prior Trend", className="text-muted d-block"),
-                            html.H5(point3.get('prior_trend', 'N/A').upper(), className="text-info fw-bold")
-                        ], className="text-center mb-3"),
-                    ], md=4, className="d-flex align-items-center justify-content-center")
-                ])
-            ])
-        ], className="mb-4", style={"border": f"2px solid var(--bs-{point3.get('phase_color', 'secondary')})"}),
+            # V8 Chart
+            create_v8_sr_chart(stock_code, v8_data, days=60) if v8_data and not v8_data.get('error') else html.Div(),
 
-        # ========== COMPRESSION & ABSORPTION DETAILS ==========
-        dbc.Row([
-            # 3.1 COMPRESSION
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className=f"fas {point3['compression'].get('icon', 'fa-compress')} me-2"),
-                        html.Strong("3.1 Compression")
-                    ], className="bg-dark"),
-                    dbc.CardBody([
-                        html.H4(point3['compression'].get('type', 'N/A'), className=f"text-{point3['compression'].get('color', 'secondary')} fw-bold mb-2"),
-                        html.P(point3['compression'].get('narrative', ''), className="mb-3"),
-                        dbc.Row([
-                            dbc.Col([
-                                html.Small("Range Ratio", className="text-muted d-block"),
-                                html.Span(point3['compression'].get('range_ratio', 'N/A'), className="fw-bold")
-                            ], width=6, className="text-center"),
-                            dbc.Col([
-                                html.Small("Close Clustering", className="text-muted d-block"),
-                                html.Span(point3['compression'].get('close_clustering', 'N/A'), className="fw-bold")
-                            ], width=6, className="text-center"),
-                        ]),
-                        html.Hr(),
-                        html.Small([
-                            html.I(className="fas fa-database me-1"),
-                            "Data: High, Low (multi-hari) + Volume/Freq"
-                        ], className="text-muted")
-                    ])
-                ], className="h-100")
-            ], md=6, className="mb-3"),
+            # V8 Status Card
+            create_v8_sr_card(stock_code, v8_data) if v8_data and not v8_data.get('error') else html.Div(),
 
-            # 3.2 ABSORPTION
-            dbc.Col([
-                dbc.Card([
-                    dbc.CardHeader([
-                        html.I(className=f"fas {point3['absorption'].get('icon', 'fa-hand-paper')} me-2"),
-                        html.Strong("3.2 Absorption")
-                    ], className="bg-dark"),
-                    dbc.CardBody([
-                        html.H4(point3['absorption'].get('type', 'N/A'), className=f"text-{point3['absorption'].get('color', 'secondary')} fw-bold mb-2"),
-                        html.P(point3['absorption'].get('narrative', ''), className="mb-3"),
-                        dbc.Row([
-                            dbc.Col([
-                                html.Small("Hari Turun", className="text-muted d-block"),
-                                html.Span(str(point3['absorption'].get('down_days', 0)), className="fw-bold text-danger")
-                            ], width=3, className="text-center"),
-                            dbc.Col([
-                                html.Small("Hari Naik", className="text-muted d-block"),
-                                html.Span(str(point3['absorption'].get('up_days', 0)), className="fw-bold text-success")
-                            ], width=3, className="text-center"),
-                            dbc.Col([
-                                html.Small("Low Bertahan", className="text-muted d-block"),
-                                html.Span("YA" if point3['absorption'].get('lows_holding') else "TIDAK", className=f"fw-bold text-{'success' if point3['absorption'].get('lows_holding') else 'danger'}")
-                            ], width=3, className="text-center"),
-                            dbc.Col([
-                                html.Small("High Tertahan", className="text-muted d-block"),
-                                html.Span("YA" if point3['absorption'].get('highs_capped') else "TIDAK", className=f"fw-bold text-{'warning' if point3['absorption'].get('highs_capped') else 'info'}")
-                            ], width=3, className="text-center"),
-                        ]),
-                        html.Hr(),
-                        html.Small([
-                            html.I(className="fas fa-database me-1"),
-                            "Data: Close, High, Low, Change (multi-hari) + Volume/Value"
-                        ], className="text-muted")
-                    ])
-                ], className="h-100")
-            ], md=6, className="mb-3"),
-        ]),
+            # V8 Action Reason
+            dbc.Alert([
+                html.I(className="fas fa-bullhorn me-2"),
+                html.Strong("Kesimpulan V8: "),
+                html.Span(v8_data.get('action_reason', 'Data tidak tersedia') if v8_data else '')
+            ], color="success" if v8_data and v8_data.get('action') == 'ENTRY' else
+                   "warning" if v8_data and v8_data.get('action') == 'WAIT' else
+                   "danger" if v8_data and v8_data.get('action') == 'AVOID' else "secondary",
+               className="mb-4") if v8_data and not v8_data.get('error') else html.Div(),
 
-        # ========== DATA SUMMARY TABLE ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-table me-2"),
-                html.Strong("Data 5 Hari Terakhir")
-            ], className="bg-dark"),
-            dbc.CardBody([
-                html.Table([
-                    html.Thead([
-                        html.Tr([
-                            html.Th("Tanggal", className="text-center"),
-                            html.Th("Range", className="text-center"),
-                            html.Th("Close Pos", className="text-center"),
-                            html.Th("Change", className="text-center"),
-                        ])
-                    ]),
-                    html.Tbody([
-                        html.Tr([
-                            html.Td(d['date'], className="text-center"),
-                            html.Td(d['range'], className="text-center"),
-                            html.Td(d['close_pos'], className="text-center"),
-                            html.Td(d['change'], className=f"text-center text-{'success' if '+' in d['change'] else 'danger'}"),
-                        ]) for d in point3.get('data_summary', [])
-                    ])
-                ], className="table table-sm table-dark mb-0")
-            ])
-        ], className="mb-4"),
-
-        # ========== FULL NARRATIVE POINT 3 ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-paragraph me-2"),
-                html.Strong("Narasi Lengkap Point 3")
-            ], className="bg-warning text-dark"),
-            dbc.CardBody([
-                html.P(point3.get('full_narrative', ''), className="mb-0 lead", style={"fontStyle": "italic", "lineHeight": "1.8"})
-            ])
-        ], className="mb-4", style={"border": "2px solid var(--bs-warning)"}),
-
-        # ========== 4 PERTANYAAN KUNCI POINT 3 ==========
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-question-circle me-2"),
-                html.Strong("4 Pertanyaan Kunci Point 3 (Edukatif)")
-            ], className="bg-dark"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.Small("1. Apakah tekanan masih efektif?", className="text-muted d-block"),
-                            html.H5(point3.get('key_questions', {}).get('tekanan_efektif', 'N/A'), className=f"fw-bold mb-0 text-{'danger' if point3.get('key_questions', {}).get('tekanan_efektif') == 'YA' else 'success'}")
-                        ], className="text-center p-2")
-                    ], md=3),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("2. Apakah harga masih bebas bergerak?", className="text-muted d-block"),
-                            html.H5(point3.get('key_questions', {}).get('harga_bebas', 'N/A'), className=f"fw-bold mb-0 text-{'danger' if point3.get('key_questions', {}).get('harga_bebas') == 'YA' else 'success'}")
-                        ], className="text-center p-2")
-                    ], md=3),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("3. Apakah kegagalan tekanan berulang?", className="text-muted d-block"),
-                            html.H5(point3.get('key_questions', {}).get('kegagalan_berulang', 'N/A'), className=f"fw-bold mb-0 text-{'success' if point3.get('key_questions', {}).get('kegagalan_berulang') == 'YA' else 'secondary'}")
-                        ], className="text-center p-2")
-                    ], md=3),
-                    dbc.Col([
-                        html.Div([
-                            html.Small("4. Apakah range makin menyempit?", className="text-muted d-block"),
-                            html.H5(point3.get('key_questions', {}).get('range_menyempit', 'N/A'), className=f"fw-bold mb-0 text-{'success' if point3.get('key_questions', {}).get('range_menyempit') == 'YA' else 'secondary'}")
-                        ], className="text-center p-2")
-                    ], md=3),
-                ])
-            ])
-        ], className="mb-4"),
-
-        # ========== ANCHOR KALIMAT POINT 3 ==========
-        dbc.Alert([
-            html.I(className="fas fa-anchor me-2"),
-            html.Strong("INGAT: "),
-            "Point 3 bukan jawaban, tapi ",
-            html.Strong("tanda bahwa pertanyaan sudah tepat"),
-            ". Kalau Point 3 belum jelas, Point 4 (Akumulasi/Distribusi) tidak boleh dipaksakan."
-        ], color="warning", className="mb-4 text-center"),
-
-        # ========== EOD DISCLAIMER ==========
-        dbc.Alert([
-            html.I(className="fas fa-exclamation-triangle me-2"),
-            html.Strong("Batasan Data EOD: "),
-            "Interpretasi compression & absorption berbasis data End-of-Day, sehingga menilai ",
-            html.Strong("perilaku hasil"),
-            ", bukan detail transaksi per detik (order flow)."
-        ], color="secondary", className="mb-4 text-center small"),
-
-        # ========================================================================
-        # V6 ANALYSIS — SIDEWAYS & PHASE DETECTION (ADAPTIVE)
-        # Formula V6: Percentile-based threshold, Volume Ratio phase detection
-        # ========================================================================
-        html.Hr(className="my-4"),
-
-        html.Div([
-            html.H4([
-                html.I(className="fas fa-chart-area me-2"),
-                "ANALISIS V6 — SIDEWAYS & FASE PASAR"
-            ], className="text-info mb-1"),
-            html.P("Formula adaptif: Percentile 40 threshold + Volume Ratio untuk deteksi fase", className="text-muted mb-0 small")
-        ], className="mb-4"),
-
-        # V6 Main Status Card
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-chart-line me-2"),
-                html.Strong("Status V6"),
-                dbc.Badge(
-                    v6_phase.get('phase', 'N/A') if v6_phase else 'N/A',
-                    color="success" if v6_phase.get('phase') == 'ACCUMULATION' else
-                          "danger" if v6_phase.get('phase') == 'DISTRIBUTION' else "secondary",
-                    className="ms-2"
-                )
-            ], className=f"bg-{'success' if v6_phase.get('phase') == 'ACCUMULATION' else 'danger' if v6_phase.get('phase') == 'DISTRIBUTION' else 'secondary'} text-white"),
-            dbc.CardBody([
-                dbc.Row([
-                    # Sideways Status
-                    dbc.Col([
-                        html.Div([
-                            html.H6("Status Sideways", className="text-muted mb-2"),
-                            dbc.Badge(
-                                "SIDEWAYS" if v6_sideways.get('is_sideways') else "TRENDING",
-                                color="info" if v6_sideways.get('is_sideways') else "warning",
-                                className="fs-5 mb-2"
-                            ),
-                            html.Div([
-                                html.Small(f"Periode: {v6_sideways.get('days', 0)} hari", className="d-block"),
-                                html.Small(f"Range: Rp {v6_sideways.get('low', 0):,.0f} - Rp {v6_sideways.get('high', 0):,.0f}", className="d-block"),
-                                html.Small([
-                                    "Range%: ",
-                                    html.Span(f"{v6_sideways.get('range_pct', 0):.1f}%", className="text-info fw-bold")
-                                ], className="d-block"),
-                                html.Small([
-                                    "Threshold: < ",
-                                    html.Span(f"{v6_sideways.get('threshold_pct', 0):.1f}%", className="text-warning")
-                                ], className="d-block"),
-                            ])
-                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)" if v6_sideways.get('is_sideways') else "rgba(255,193,7,0.1)"})
-                    ], md=4),
-
-                    # Phase Analysis
-                    dbc.Col([
-                        html.Div([
-                            html.H6("Fase Pasar (V6)", className="text-muted mb-2"),
-                            html.Div([
-                                html.Span("🟢 " if v6_phase.get('phase') == 'ACCUMULATION' else "🔴 " if v6_phase.get('phase') == 'DISTRIBUTION' else "⚪ ", style={"fontSize": "32px"}),
-                                html.H4(v6_phase.get('phase', 'N/A') if v6_phase else 'N/A', className=f"text-{'success' if v6_phase.get('phase') == 'ACCUMULATION' else 'danger' if v6_phase.get('phase') == 'DISTRIBUTION' else 'secondary'} fw-bold mb-0")
-                            ], className="mb-2"),
-                            html.Div([
-                                html.Small([
-                                    "Volume Ratio: ",
-                                    html.Span(f"{v6_phase.get('vol_ratio', 0):.2f}" if v6_phase else "N/A",
-                                             className=f"fw-bold text-{'success' if v6_phase and v6_phase.get('vol_ratio', 1) > 1.2 else 'danger' if v6_phase and v6_phase.get('vol_ratio', 1) < 0.8 else 'secondary'}")
-                                ], className="d-block"),
-                                html.Small([
-                                    "Vol Lower: ", html.Span(f"{v6_phase.get('vol_lower', 0):,.0f}" if v6_phase else "0", className="text-success")
-                                ], className="d-block"),
-                                html.Small([
-                                    "Vol Upper: ", html.Span(f"{v6_phase.get('vol_upper', 0):,.0f}" if v6_phase else "0", className="text-danger")
-                                ], className="d-block"),
-                            ])
-                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if v6_phase.get('phase') == 'ACCUMULATION' else '220,53,69' if v6_phase.get('phase') == 'DISTRIBUTION' else '108,117,125'},0.15)"})
-                    ], md=4),
-
-                    # Entry Signal
-                    dbc.Col([
-                        html.Div([
-                            html.H6("Sinyal Aksi (V6)", className="text-muted mb-2"),
-                            html.Div([
-                                html.Span(
-                                    "🟢" if v6_entry.get('action') == 'ENTRY' else
-                                    "👁️" if v6_entry.get('action') == 'WATCH' else
-                                    "🔴" if v6_entry.get('action') == 'EXIT' else "⏸️",
-                                    style={"fontSize": "32px"}
-                                ),
-                                html.H4(v6_entry.get('action', 'WAIT') if v6_entry else 'WAIT',
-                                       className=f"text-{'success' if v6_entry.get('action') == 'ENTRY' else 'info' if v6_entry.get('action') == 'WATCH' else 'danger' if v6_entry.get('action') == 'EXIT' else 'secondary'} fw-bold mb-0")
-                            ], className="mb-2"),
-                            html.Div([
-                                html.Small([
-                                    "Konfirmasi: ",
-                                    html.Span(f"{v6_entry.get('score', 0)}/4" if v6_entry else "0/4", className="text-info fw-bold")
-                                ], className="d-block"),
-                                html.Small([
-                                    "R:R Ratio: ",
-                                    html.Span(f"{v6_entry.get('rr_ratio', 0):.1f}x" if v6_entry else "N/A",
-                                             className=f"fw-bold text-{'success' if v6_entry and v6_entry.get('rr_ratio', 0) >= 2 else 'warning' if v6_entry and v6_entry.get('rr_ratio', 0) >= 1.5 else 'danger'}")
-                                ], className="d-block"),
-                                html.Small([
-                                    "Near Support: ",
-                                    html.Span("✓" if v6_entry.get('near_support') else "✗", className=f"text-{'success' if v6_entry.get('near_support') else 'danger'}")
-                                ], className="d-block") if v6_entry else None,
-                            ])
-                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if v6_entry.get('action') == 'ENTRY' else '23,162,184' if v6_entry.get('action') == 'WATCH' else '220,53,69' if v6_entry.get('action') == 'EXIT' else '108,117,125'},0.15)"})
-                    ], md=4),
-                ])
-            ])
-        ], className="mb-4", style={"border": f"2px solid var(--bs-{'success' if v6_phase.get('phase') == 'ACCUMULATION' else 'danger' if v6_phase.get('phase') == 'DISTRIBUTION' else 'info'})"}),
-
-        # V6 Confirmations Detail
-        dbc.Card([
-            dbc.CardHeader([
-                html.I(className="fas fa-list-check me-2"),
-                html.Strong("Detail Konfirmasi V6")
-            ], className="bg-dark"),
-            dbc.CardBody([
-                dbc.Row([
-                    dbc.Col([
-                        html.Div([
-                            html.Span("✓" if v6_entry.get('near_support') else "✗", className=f"me-2 text-{'success' if v6_entry.get('near_support') else 'danger'}"),
-                            html.Strong("Near Support", className="me-2"),
-                            html.Small(f"(Harga dekat {v6_sideways.get('low', 0):,.0f})" if v6_entry.get('near_support') else "(Tidak dekat support)", className="text-muted")
-                        ], className="mb-2"),
-                        html.Div([
-                            html.Span("✓" if v6_entry.get('bullish_candle') else "✗", className=f"me-2 text-{'success' if v6_entry.get('bullish_candle') else 'danger'}"),
-                            html.Strong("Bullish Candle", className="me-2"),
-                            html.Small("(Close > Open)" if v6_entry.get('bullish_candle') else "(Bearish)", className="text-muted")
-                        ], className="mb-2"),
-                    ], md=6),
-                    dbc.Col([
-                        html.Div([
-                            html.Span("✓" if v6_entry.get('range_expansion') else "✗", className=f"me-2 text-{'success' if v6_entry.get('range_expansion') else 'danger'}"),
-                            html.Strong("Range Expansion", className="me-2"),
-                            html.Small("(Range > Rata-rata)" if v6_entry.get('range_expansion') else "(Range normal)", className="text-muted")
-                        ], className="mb-2"),
-                        html.Div([
-                            html.Span("✓" if v6_entry.get('volume_surge') else "✗", className=f"me-2 text-{'success' if v6_entry.get('volume_surge') else 'danger'}"),
-                            html.Strong("Volume Surge", className="me-2"),
-                            html.Small("(Volume > 1.2x avg)" if v6_entry.get('volume_surge') else "(Volume normal)", className="text-muted")
-                        ], className="mb-2"),
-                    ], md=6),
-                ])
-            ])
-        ], className="mb-4") if v6_entry else html.Div(),
-
-        # V6 Action Reason
-        dbc.Alert([
-            html.I(className="fas fa-bullhorn me-2"),
-            html.Strong("Kesimpulan V6: "),
-            html.Span(v6_entry.get('action_reason', 'Data tidak tersedia') if v6_entry else 'Data tidak tersedia')
-        ], color="success" if v6_entry.get('action') == 'ENTRY' else
-               "info" if v6_entry.get('action') == 'WATCH' else
-               "danger" if v6_entry.get('action') == 'EXIT' else "secondary",
-           className="mb-4"),
-
-        # V6 Formula Explanation
-        dbc.Alert([
-            html.I(className="fas fa-info-circle me-2"),
-            html.Strong("Formula V6: "),
-            "Sideways = Range% < Percentile_40 | ",
-            "Accumulation = Vol_Lower/Vol_Upper > 1.2 | ",
-            "Entry = Sideways + Accumulation + Near_Support + 2/4 konfirmasi"
-        ], color="secondary", className="mb-4 text-center small"),
+            # V8 Formula Explanation
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                html.Strong("Formula V8: "),
+                "Tolerance = 0.5 × ATR(14) | ",
+                "Pivot = Fractal 3L/3R | ",
+                "Filter: Touches ≥ 3, Quality ≥ 50% | ",
+                "Entry = Near Support (≤5%) + Valid Phase + Quality OK"
+            ], color="secondary", className="mb-4 text-center small"),
+        ]) if stock_code.upper() in ['PTRO', 'CBDK', 'BREN', 'BRPT', 'CDIA'] else html.Div(),
 
         # ========================================================================
         # ANALISIS AKUMULASI 4 MINGGU (V6 FORMULA)
@@ -12418,6 +12475,223 @@ def create_accumulation_page(stock_code='CDIA'):
             ])
         ], className="mb-4"),
 
+        # ========================================================================
+        # ANALISIS HUBUNGAN AKUMULASI & ZONA V10
+        # ========================================================================
+        html.Hr(className="my-4"),
+
+        html.Div([
+            html.H4([
+                html.I(className="fas fa-crosshairs me-2"),
+                "ANALISIS ZONA V10 & AKUMULASI"
+            ], className="text-success mb-1"),
+            html.P("Hubungan antara fase akumulasi dengan Support & Resistance zona V10", className="text-muted mb-0 small")
+        ], className="mb-4") if stock_code.upper() in STOCK_ZONES else html.Div(),
+
+        # V10 Zone Analysis Card
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-layer-group me-2"),
+                html.Strong("Posisi Harga vs Zona V10"),
+                dbc.Badge(f"{len(get_zones(stock_code))} Zona", color="info", className="ms-2")
+            ], className="bg-success text-white"),
+            dbc.CardBody([
+                # Current Price Position
+                dbc.Row([
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Harga Terakhir", className="text-muted d-block"),
+                            html.H3(f"Rp {snapshot['close']:,.0f}", className="text-info mb-1"),
+                            html.Small([
+                                "Posisi: ",
+                                html.Span(
+                                    "DI DALAM ZONA" if any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) else
+                                    "DI ATAS SEMUA ZONA" if snapshot['close'] > max(z['high'] for z in get_zones(stock_code).values()) else
+                                    "DI BAWAH SEMUA ZONA" if snapshot['close'] < min(z['low'] for z in get_zones(stock_code).values()) else
+                                    "DI ANTARA ZONA",
+                                    className=f"fw-bold text-{'warning' if any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) else 'danger' if snapshot['close'] > max(z['high'] for z in get_zones(stock_code).values()) else 'success' if snapshot['close'] < min(z['low'] for z in get_zones(stock_code).values()) else 'info'}"
+                                )
+                            ])
+                        ], className="text-center")
+                    ], md=4),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Support Aktif (V10)", className="text-muted d-block"),
+                            html.H4([
+                                html.Span(f"Z{min((znum for znum, z in get_zones(stock_code).items() if z['high'] <= snapshot['close']), default='-')}", className="text-success"),
+                            ] if any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) else [
+                                html.Span("Tidak ada", className="text-secondary")
+                            ], className="mb-1"),
+                            html.Small([
+                                f"Rp {[z for znum, z in sorted(get_zones(stock_code).items(), reverse=True) if z['high'] <= snapshot['close']][0]['low']:,.0f} - {[z for znum, z in sorted(get_zones(stock_code).items(), reverse=True) if z['high'] <= snapshot['close']][0]['high']:,.0f}"
+                            ] if any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) else ["-"], className="text-success")
+                        ], className="text-center")
+                    ], md=4),
+                    dbc.Col([
+                        html.Div([
+                            html.Small("Resistance Aktif (V10)", className="text-muted d-block"),
+                            html.H4([
+                                html.Span(f"Z{min((znum for znum, z in get_zones(stock_code).items() if z['low'] >= snapshot['close']), default='-')}", className="text-danger"),
+                            ] if any(z['low'] >= snapshot['close'] for z in get_zones(stock_code).values()) else [
+                                html.Span("Tidak ada", className="text-secondary")
+                            ], className="mb-1"),
+                            html.Small([
+                                f"Rp {[z for znum, z in sorted(get_zones(stock_code).items()) if z['low'] >= snapshot['close']][0]['low']:,.0f} - {[z for znum, z in sorted(get_zones(stock_code).items()) if z['low'] >= snapshot['close']][0]['high']:,.0f}"
+                            ] if any(z['low'] >= snapshot['close'] for z in get_zones(stock_code).values()) else ["-"], className="text-danger")
+                        ], className="text-center")
+                    ], md=4),
+                ]),
+                html.Hr(),
+                # Zones Table
+                html.Div([
+                    html.Table([
+                        html.Thead([
+                            html.Tr([
+                                html.Th("Zona", className="text-center", style={"width": "15%"}),
+                                html.Th("Range", className="text-center", style={"width": "35%"}),
+                                html.Th("Status", className="text-center", style={"width": "25%"}),
+                                html.Th("Jarak", className="text-center", style={"width": "25%"}),
+                            ])
+                        ]),
+                        html.Tbody([
+                            html.Tr([
+                                html.Td(f"Z{znum}", className="text-center fw-bold"),
+                                html.Td(f"Rp {z['low']:,.0f} - {z['high']:,.0f}", className="text-center"),
+                                html.Td(
+                                    dbc.Badge("INSIDE", color="warning") if z['low'] <= snapshot['close'] <= z['high'] else
+                                    dbc.Badge("SUPPORT", color="success") if z['high'] < snapshot['close'] else
+                                    dbc.Badge("RESISTANCE", color="danger"),
+                                    className="text-center"
+                                ),
+                                html.Td(
+                                    "0%" if z['low'] <= snapshot['close'] <= z['high'] else
+                                    f"+{((snapshot['close'] - z['high']) / z['high'] * 100):.1f}%" if z['high'] < snapshot['close'] else
+                                    f"-{((z['low'] - snapshot['close']) / snapshot['close'] * 100):.1f}%",
+                                    className=f"text-center text-{'warning' if z['low'] <= snapshot['close'] <= z['high'] else 'success' if z['high'] < snapshot['close'] else 'danger'}"
+                                ),
+                            ]) for znum, z in sorted(get_zones(stock_code).items())
+                        ])
+                    ], className="table table-sm table-dark mb-0")
+                ])
+            ])
+        ], className="mb-4", style={"border": "2px solid var(--bs-success)"}) if stock_code.upper() in STOCK_ZONES else html.Div(),
+
+        # Combined Analysis Card
+        dbc.Card([
+            dbc.CardHeader([
+                html.I(className="fas fa-brain me-2"),
+                html.Strong("Kesimpulan: Akumulasi + Zona V10")
+            ], className="bg-warning text-dark"),
+            dbc.CardBody([
+                dbc.Row([
+                    # Left: Accumulation Summary
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Fase Akumulasi (4 Minggu)", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span(
+                                    "🟢 AKUMULASI" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 3.0 else
+                                    "🟡 WEAK ACC" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5 else
+                                    "🔴 DISTRIBUSI" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 < 0.8 else
+                                    "⚪ NETRAL",
+                                    className=f"fw-bold text-{'success' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 3.0 else 'warning' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5 else 'danger' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 < 0.8 else 'secondary'}",
+                                    style={"fontSize": "18px"}
+                                )
+                            ], className="mb-2"),
+                            html.Small(f"Vol Ratio: {sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4:.2f}x", className="text-muted d-block"),
+                            html.Small(f"Net Foreign: {'BUY' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'SELL'} {abs(sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5))):,.0f} Lot", className=f"text-{'success' if sum(weeks.get(w, {}).get('net_foreign_lot', 0) for w in range(1, 5)) > 0 else 'danger'} d-block"),
+                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(255,193,7,0.1)"})
+                    ], md=4),
+                    # Middle: Zone Position
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Posisi di Zona V10", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span(
+                                    "📍 DI SUPPORT" if any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or (
+                                        any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and
+                                        min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5
+                                    ) else
+                                    "📈 JAUH DARI ZONA" if snapshot['close'] > max(z['high'] for z in get_zones(stock_code).values()) else
+                                    "📉 DI BAWAH ZONA" if snapshot['close'] < min(z['low'] for z in get_zones(stock_code).values()) else
+                                    "📊 ANTARA ZONA",
+                                    className="fw-bold",
+                                    style={"fontSize": "18px"}
+                                )
+                            ], className="mb-2"),
+                            html.Small([
+                                "Jarak ke Support: ",
+                                html.Span(
+                                    f"{min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']):.1f}%"
+                                    if any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) else "N/A",
+                                    className="text-success fw-bold"
+                                )
+                            ], className="d-block"),
+                            html.Small([
+                                "Jarak ke Resistance: ",
+                                html.Span(
+                                    f"{min((z['low'] - snapshot['close']) / snapshot['close'] * 100 for z in get_zones(stock_code).values() if z['low'] >= snapshot['close']):.1f}%"
+                                    if any(z['low'] >= snapshot['close'] for z in get_zones(stock_code).values()) else "N/A",
+                                    className="text-danger fw-bold"
+                                )
+                            ], className="d-block"),
+                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(40,167,69,0.1)"})
+                    ], md=4),
+                    # Right: Combined Signal
+                    dbc.Col([
+                        html.Div([
+                            html.H6("Sinyal Gabungan", className="text-muted mb-2"),
+                            html.Div([
+                                html.Span(
+                                    "✅ ENTRY ZONE" if (
+                                        (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5) and
+                                        (any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or
+                                         (any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and
+                                          min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5))
+                                    ) else
+                                    "👀 WATCH" if (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2) else
+                                    "⏸️ WAIT" if (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 >= 0.8) else
+                                    "🚫 AVOID",
+                                    className=f"fw-bold text-{'success' if (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5) and (any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or (any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5)) else 'info' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2 else 'warning' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 >= 0.8 else 'danger'}",
+                                    style={"fontSize": "20px"}
+                                )
+                            ], className="mb-2"),
+                            html.Small(
+                                "Akumulasi + Near Support = Entry Signal" if (
+                                    (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5) and
+                                    (any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or
+                                     (any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and
+                                      min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5))
+                                ) else
+                                "Weak Acc, perlu konfirmasi zona" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2 else
+                                "Netral, tunggu sinyal lebih jelas" if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 >= 0.8 else
+                                "Distribusi, hindari entry",
+                                className="text-muted d-block"
+                            ),
+                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5) and (any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or (any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5)) else '23,162,184' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2 else '255,193,7' if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 >= 0.8 else '220,53,69'}, 0.15)"})
+                    ], md=4),
+                ]),
+                html.Hr(),
+                # Interpretation
+                html.Div([
+                    html.I(className="fas fa-info-circle me-2 text-info"),
+                    html.Strong("Interpretasi: ", className="text-info"),
+                    html.Span(
+                        "Fase akumulasi terdeteksi DAN harga berada dekat zona support V10. Kondisi ideal untuk entry dengan SL di bawah zona." if (
+                            (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5) and
+                            (any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or
+                             (any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and
+                              min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5))
+                        ) else
+                        "Sinyal akumulasi lemah. Harga perlu mendekati zona V10 untuk entry yang lebih aman." if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2 else
+                        "Fase netral/sideways. Tunggu konfirmasi akumulasi dan posisi harga di zona support." if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 >= 0.8 else
+                        "Fase distribusi terdeteksi. Hindari entry, lebih baik wait atau reduce position.",
+                        className="small"
+                    )
+                ], className="p-2 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)"})
+            ])
+        ], className="mb-4", style={"border": "2px solid var(--bs-warning)"}) if stock_code.upper() in STOCK_ZONES else html.Div(),
+
         # Interpretation
         dbc.Alert([
             html.I(className="fas fa-lightbulb me-2"),
@@ -12425,29 +12699,6 @@ def create_accumulation_page(stock_code='CDIA'):
             "Vol Ratio > 4.0 = AKUMULASI KUAT (entry signal), Vol Ratio 1.5-4.0 = Weak Acc (observasi), Vol Ratio < 0.8 = Distribusi.",
             "Jika 3-4 minggu konsisten akumulasi, kemungkinan breakout ke atas lebih tinggi."
         ], color="info", className="mb-4"),
-
-        # ========== METHODOLOGY NOTE ==========
-        dbc.Card([
-            dbc.CardBody([
-                html.Div([
-                    html.I(className="fas fa-lightbulb me-2 text-warning"),
-                    html.Strong("Filosofi Analisis V6", className="text-warning")
-                ]),
-                html.P([
-                    "Point 1 & 2 membangun fondasi: ",
-                    html.Strong("apa yang terjadi dan bagaimana terjadinya"),
-                    ". Point 3: ",
-                    html.Strong("apakah ada fase penahanan (sideways)"),
-                    ". V6 Sideways: ",
-                    html.Strong("deteksi adaptif dengan Percentile 40"),
-                    ". V6 Phase: ",
-                    html.Strong("akumulasi/distribusi via Volume Ratio"),
-                    ". Weekly Analysis: ",
-                    html.Strong("pola pergerakan 4 minggu terakhir"),
-                    "."
-                ], className="mb-0 small text-muted")
-            ])
-        ], className="mb-4", style={"backgroundColor": "rgba(255,193,7,0.05)", "borderLeft": "3px solid var(--bs-warning)"}),
 
     ])
 
@@ -13616,6 +13867,39 @@ def create_analysis_page(stock_code='CDIA'):
         v6_sideways = v6_data.get('sideways', {}) if not v6_data.get('error') else {}
         v6_entry = v6_data.get('entry', {}) if not v6_data.get('error') else {}
 
+        # For PANI/BREN/MBMA: Use Strong S/R Analyzer (separate module)
+        strong_sr_data = None
+        if has_custom_formula(stock_code):
+            strong_sr_data = get_strong_sr_analysis(stock_code)
+            if strong_sr_data and not strong_sr_data.get('error'):
+                # Override sr values with Strong S/R
+                sr['support_20d'] = strong_sr_data.get('support', sr.get('support_20d', 0))
+                sr['resistance_20d'] = strong_sr_data.get('resistance', sr.get('resistance_20d', 0))
+                sr['strong_sr'] = True
+                sr['support_touches'] = strong_sr_data.get('support_touches', 0)
+                sr['resistance_touches'] = strong_sr_data.get('resistance_touches', 0)
+                # Recalculate distances
+                if current_price and sr['support_20d']:
+                    sr['dist_from_support'] = (current_price - sr['support_20d']) / current_price * 100
+                if current_price and sr['resistance_20d']:
+                    sr['dist_from_resistance'] = (sr['resistance_20d'] - current_price) / current_price * 100
+                # Override v6_entry with Strong S/R values
+                v6_entry['stop_loss'] = strong_sr_data.get('stop_loss')
+                v6_entry['target'] = strong_sr_data.get('target')
+                v6_entry['formula_info'] = strong_sr_data.get('formula_info', {})
+                v6_entry['action'] = strong_sr_data.get('action', 'WAIT')
+                v6_entry['action_reason'] = strong_sr_data.get('action_reason', '')
+                v6_entry['phase'] = strong_sr_data.get('phase', 'NEUTRAL')
+                v6_entry['vr'] = strong_sr_data.get('vr', 0)
+                # V10 Performance & Trade History
+                v6_entry['v10_performance'] = strong_sr_data.get('v10_performance', {})
+                v6_entry['v10_trades'] = strong_sr_data.get('v10_trades', [])
+                v6_entry['v10_criteria'] = strong_sr_data.get('v10_criteria')
+                v6_entry['v10_position'] = strong_sr_data.get('v10_position')
+                # Update v6_sideways for consistency
+                v6_sideways['low'] = strong_sr_data.get('support', v6_sideways.get('low', 0))
+                v6_sideways['high'] = strong_sr_data.get('resistance', v6_sideways.get('high', 0))
+
         # Weekly Analysis for 4-week accumulation data
         weekly_data = get_weekly_analysis(stock_code)
         weeks = weekly_data.get('weeks', {})
@@ -13661,14 +13945,39 @@ def create_analysis_page(stock_code='CDIA'):
     # === V6 SYSTEM VARIABLES (BEFORE RETURN) ===
     v6_action = v6_entry.get('action', 'WAIT') if v6_entry else 'WAIT'
     v6_action_reason = v6_entry.get('action_reason', '') if v6_entry else ''
-    v6_phase = v6_data.get('phase', {}).get('phase', 'NEUTRAL') if v6_data and not v6_data.get('error') else 'NEUTRAL'
+
+    # Check for V10 open position
+    v10_position = get_v10_open_position(stock_code)
+    if v10_position:
+        v6_action = 'RUNNING'
+        v6_action_reason = f"Posisi {v10_position['type']} Z{v10_position['zone_num']} sejak {v10_position['entry_date']}"
+
+    # Use Strong S/R phase for PANI/BREN/MBMA, otherwise use v6_data phase
+    if v6_entry.get('formula_info', {}).get('type') == 'STRONG_SR':
+        v6_phase = v6_entry.get('phase', 'NEUTRAL')
+    else:
+        v6_phase = v6_data.get('phase', {}).get('phase', 'NEUTRAL') if v6_data and not v6_data.get('error') else 'NEUTRAL'
     v6_action_map = {
         'ENTRY': {'icon': '🟢', 'color': 'success', 'desc': 'Sinyal masuk - Akumulasi terdeteksi'},
+        'ALREADY_ENTRY': {'icon': '📈', 'color': 'primary', 'desc': 'Sudah entry - Posisi terbuka V10'},
+        'RUNNING': {'icon': '🚀', 'color': 'primary', 'desc': 'Posisi V10 sedang berjalan'},
         'WATCH': {'icon': '👁️', 'color': 'info', 'desc': 'Observasi - Tunggu konfirmasi'},
         'EXIT': {'icon': '🔴', 'color': 'danger', 'desc': 'Sinyal keluar - Distribusi terdeteksi'},
+        'AVOID': {'icon': '⛔', 'color': 'danger', 'desc': 'Hindari - Distribusi kuat'},
         'WAIT': {'icon': '⏸️', 'color': 'secondary', 'desc': 'Tunggu - Belum ada sinyal jelas'}
     }
     v6_style = v6_action_map.get(v6_action, v6_action_map['WAIT'])
+
+    # === SIGNAL HISTORY FOR CUSTOM FORMULA STOCKS (PANI, BREN, MBMA) ===
+    use_custom_formula = has_custom_formula(stock_code)
+    signal_history = None
+    if use_custom_formula:
+        try:
+            # Auto-select V8 or V9 based on custom S/R zones
+            signal_history = get_signal_history_auto(stock_code, '2025-01-02')
+        except Exception as e:
+            print(f"Error loading signal history: {e}")
+            signal_history = {'error': str(e), 'signals': []}
 
     # ========== BUILD THE PAGE ==========
     return html.Div([
@@ -13707,7 +14016,96 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Div([
                             html.Span(v6_style['icon'], style={"fontSize": "80px"}),
                             html.H1(v6_action, className=f"text-{v6_style['color']} fw-bold mb-0"),
-                            html.P(v6_style['desc'], className="text-muted")
+                            html.P(v6_style['desc'], className="text-muted"),
+                            # V10 Position Details (for RUNNING)
+                            (lambda entry2, entry3, avg_price_2, avg_price_3, pl_e1, pl_avg2, pl_avg3, show_avg2, show_avg3: html.Div([
+                                html.Hr(className="my-2"),
+                                html.Div([
+                                    html.Div([
+                                        html.Small("Tanggal: ", className="text-muted"),
+                                        html.Span(f"{v10_position['entry_date']}", className="text-warning fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Entry 1: ", className="text-muted"),
+                                        html.Span(f"Rp {v10_position['entry_price']:,.0f}", className="text-info fw-bold"),
+                                        html.Span(" (30%)", className="text-warning fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Entry 2: ", className="text-muted"),
+                                        html.Span(f"Rp {entry2:,.0f}", className="text-info"),
+                                        html.Span(" (30%)", className="text-warning"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Entry 3: ", className="text-muted"),
+                                        html.Span(f"Rp {entry3:,.0f}", className="text-info"),
+                                        html.Span(" (40%)", className="text-warning"),
+                                    ], className="mb-1"),
+                                    html.Hr(className="my-1"),
+                                    html.Div([
+                                        html.Small("Target: ", className="text-muted"),
+                                        html.Span(f"Rp {v10_position['tp']:,.0f}", className="text-success fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Stop Loss: ", className="text-muted"),
+                                        html.Span(f"Rp {v10_position['sl']:,.0f}", className="text-danger fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Hr(className="my-1"),
+                                    # E1 Only
+                                    html.Div([
+                                        html.Small("E1 Only: ", className="text-muted fw-bold"),
+                                        html.Span(f"P/L {pl_e1:+.1f}%", className=f"text-{'success' if pl_e1 > 0 else 'danger'} me-2"),
+                                        html.Span(f"TP +{(v10_position['tp']-v10_position['entry_price'])/v10_position['entry_price']*100:.1f}%", className="text-success me-2"),
+                                        html.Span(f"SL {(v10_position['sl']-v10_position['entry_price'])/v10_position['entry_price']*100:.1f}%", className="text-danger"),
+                                    ], className="mb-1"),
+                                    # Avg 1+2 - only show if price reached Entry 2
+                                    html.Div([
+                                        html.Small("Avg(1+2): ", className="text-muted fw-bold"),
+                                        html.Span(f"P/L {pl_avg2:+.1f}%", className=f"text-{'success' if pl_avg2 > 0 else 'danger'} me-2"),
+                                        html.Span(f"TP +{(v10_position['tp']-avg_price_2)/avg_price_2*100:.1f}%", className="text-success me-2"),
+                                        html.Span(f"SL {(v10_position['sl']-avg_price_2)/avg_price_2*100:.1f}%", className="text-danger"),
+                                        html.Small(f" @{avg_price_2:,.0f}", className="text-muted"),
+                                    ], className="mb-1") if show_avg2 else None,
+                                    # Avg 1+2+3 - only show if price reached Entry 3
+                                    html.Div([
+                                        html.Small("Avg(1+2+3): ", className="text-warning fw-bold"),
+                                        html.Span(f"P/L {pl_avg3:+.1f}%", className=f"fw-bold text-{'success' if pl_avg3 > 0 else 'danger'} me-2"),
+                                        html.Span(f"TP +{(v10_position['tp']-avg_price_3)/avg_price_3*100:.1f}%", className="text-success fw-bold me-2"),
+                                        html.Span(f"SL {(v10_position['sl']-avg_price_3)/avg_price_3*100:.1f}%", className="text-danger fw-bold"),
+                                        html.Small(f" @{avg_price_3:,.0f}", className="text-muted"),
+                                    ]) if show_avg3 else None,
+                                ], className="text-start small")
+                            ], className="mt-2"))(
+                                # Entry 2 = Entry1 - (Entry1 - SL) / 3
+                                (e2 := v10_position['entry_price'] - (v10_position['entry_price'] - v10_position['sl']) / 3),
+                                # Entry 3 = Entry1 - 2 * (Entry1 - SL) / 3
+                                (e3 := v10_position['entry_price'] - 2 * (v10_position['entry_price'] - v10_position['sl']) / 3),
+                                # Avg price for 1+2 (50% each)
+                                (avg2 := 0.5 * v10_position['entry_price'] + 0.5 * e2),
+                                # Avg price for 1+2+3 (30%, 30%, 40%)
+                                (avg3 := 0.3 * v10_position['entry_price'] + 0.3 * e2 + 0.4 * e3),
+                                # P/L for E1 only
+                                (current_price - v10_position['entry_price']) / v10_position['entry_price'] * 100,
+                                # P/L for Avg 1+2
+                                (current_price - avg2) / avg2 * 100,
+                                # P/L for Avg 1+2+3
+                                (current_price - avg3) / avg3 * 100,
+                                # Show Avg 1+2 only if current price <= Entry 2
+                                current_price <= e2,
+                                # Show Avg 1+2+3 only if current price <= Entry 3
+                                current_price <= e3,
+                            ) if v10_position else (
+                            # V10 Criteria (only for ALREADY_ENTRY)
+                            html.Div([
+                                html.Hr(className="my-2"),
+                                html.P([html.I(className="fas fa-check-double me-1"), "Kriteria Terpenuhi:"], className="text-success fw-bold small mb-2"),
+                                html.Div([
+                                    html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('high_touch_resistance_desc', ''))], className="mb-1"),
+                                    html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('low_touch_support_desc', ''))], className="mb-1"),
+                                    html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('in_range_35pct_desc', ''))], className="mb-1"),
+                                    html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('hold_above_support_desc', ''))], className="mb-1"),
+                                    html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('confirmation_desc', ''))], className="mb-1"),
+                                ], className="text-start small")
+                            ], className="mt-2") if v6_action == 'ALREADY_ENTRY' and v6_entry and v6_entry.get('v10_criteria') else html.Div())
                         ], className="text-center")
                     ], md=3, className="border-end d-flex align-items-center justify-content-center"),
 
@@ -13740,58 +14138,95 @@ def create_analysis_page(stock_code='CDIA'):
                             html.P(v6_action_reason if v6_action_reason else decision.get('reason', ''), className="mb-2"),
                         ]),
 
-                        # Confidence Metrics Row
+                        # V10 Metrics Row
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Confidence", className="text-muted"),
+                                    html.Small("Konfirmasi V10", className="text-muted"),
                                     html.Div([
                                         html.Strong(
-                                            {'VERY_HIGH': 'SANGAT TINGGI', 'HIGH': 'TINGGI', 'MEDIUM': 'SEDANG', 'LOW': 'RENDAH', 'VERY_LOW': 'SANGAT RENDAH'}.get(conf_level, 'N/A'),
-                                            className='text-' + {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}.get(conf_level, 'secondary')
+                                            "RETEST OK" if (zones_v10 := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.02 for z in zones_v10.values()) else
+                                            "BREAKOUT" if zones_v10 and any(current_price > z['high'] * 1.02 for z in zones_v10.values()) else
+                                            "WAIT",
+                                            className='text-' + ('success' if (zones_v10 := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.02 for z in zones_v10.values()) else 'info' if zones_v10 and any(current_price > z['high'] * 1.02 for z in zones_v10.values()) else 'secondary')
                                         )
                                     ])
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Pass Rate", className="text-muted"),
+                                    html.Small("Support Fix", className="text-muted"),
                                     html.Div([
-                                        html.Strong(f"{pass_rate:.0f}%", className='text-' + {'VERY_HIGH': 'success', 'HIGH': 'success', 'MEDIUM': 'warning', 'LOW': 'danger', 'VERY_LOW': 'danger'}.get(conf_level, 'secondary'))
+                                        html.Strong(
+                                            (lambda zones: next((f"{z['low']:,}-{z['high']:,}" for zn, z in sorted(zones.items(), reverse=True) if z['high'] < current_price), "N/A") if zones else "N/A")(get_zones(stock_code)),
+                                            className='text-success'
+                                        )
                                     ])
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Fase (V6)", className="text-muted"),
+                                    html.Small("Foreign 1 Minggu", className="text-muted"),
                                     html.Div([
-                                        html.Strong(v6_phase, className='text-' + {'ACCUMULATION': 'success', 'DISTRIBUTION': 'danger', 'NEUTRAL': 'secondary'}.get(v6_phase, 'secondary'))
+                                        html.Strong(
+                                            f"{'BUY' if weeks.get(1, {}).get('net_foreign_lot', 0) > 0 else 'SELL'} {abs(weeks.get(1, {}).get('net_foreign_lot', 0))/1000:.0f}K",
+                                            className='text-' + ('success' if weeks.get(1, {}).get('net_foreign_lot', 0) > 0 else 'danger')
+                                        )
                                     ])
                                 ], className="text-center")
                             ], width=4),
                         ], className="mb-3 py-2", style={"backgroundColor": "rgba(255,255,255,0.05)", "borderRadius": "8px"}),
 
-                        # Poin Utama & Peringatan (Indonesian)
-                        dbc.Row([
+                        # Formula V10 Zones Info
+                        (lambda v10_zones, v10_support, v10_resistance, v10_s_dist, v10_r_dist, v10_in_zone, v10_has_position: dbc.Row([
                             dbc.Col([
-                                html.H6([html.I(className="fas fa-check-circle text-success me-2"), "Poin Utama"], className="mb-2"),
+                                html.H6([html.I(className="fas fa-layer-group text-info me-2"), "Formula V10"], className="mb-2"),
                                 html.Div([
                                     html.Div([
-                                        html.Span(kp.get('icon', ''), className="me-2"),
-                                        html.Span(kp.get('text', ''), className=f"text-{kp.get('color', 'muted')} small")
-                                    ], className="mb-1") for kp in key_points[:4]
-                                ]) if key_points else html.Small("Tidak ada poin utama", className="text-muted")
+                                        html.Span("S ", className="text-success fw-bold"),
+                                        html.Span(v10_support, className="text-success small"),
+                                        html.Span(f" ({v10_s_dist})", className="text-muted small"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Span("R ", className="text-danger fw-bold"),
+                                        html.Span(v10_resistance, className="text-danger small"),
+                                        html.Span(f" ({v10_r_dist})", className="text-muted small"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Span("Harga: ", className="text-muted small"),
+                                        html.Span(f"Rp {current_price:,.0f}", className="text-warning fw-bold small"),
+                                    ], className="mb-1"),
+                                ]) if v10_zones else html.Small(f"Zona V10 belum dikonfigurasi untuk {stock_code}", className="text-muted")
                             ], md=6),
                             dbc.Col([
-                                html.H6([html.I(className="fas fa-exclamation-triangle text-warning me-2"), "Peringatan"], className="mb-2"),
+                                html.H6([html.I(className="fas fa-crosshairs text-warning me-2"), "Status V10"], className="mb-2"),
                                 html.Div([
+                                    dbc.Badge(
+                                        "RETEST ZONE" if v10_in_zone else "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
+                                        color="success" if v10_in_zone else "info" if v10_resistance == "-" else "secondary",
+                                        className="mb-2"
+                                    ),
                                     html.Div([
-                                        html.Span(w.get('icon', ''), className="me-2"),
-                                        html.Span(w.get('text', ''), className=f"text-{w.get('color', 'muted')} small")
-                                    ], className="mb-1") for w in warnings[:4]
-                                ]) if warnings else html.Small("Tidak ada peringatan", className="text-muted")
+                                        html.Small("Entry: ", className="text-muted"),
+                                        html.Small(
+                                            "TAMBAH POSISI 30% (avg)" if v10_has_position and v10_in_zone else
+                                            "Tunggu retest untuk avg" if v10_has_position and not v10_in_zone else
+                                            "Siap entry 30%" if v10_in_zone else
+                                            "Tunggu retest" if v10_support != "-" else "Pantau breakout",
+                                            className="text-success fw-bold" if (v10_has_position and v10_in_zone) or (not v10_has_position and v10_in_zone) else "text-info"
+                                        ),
+                                    ]),
+                                ]) if v10_zones else html.Small("-", className="text-muted")
                             ], md=6),
-                        ])
+                        ]))(
+                            get_zones(stock_code),
+                            (lambda zs: next((f"{z['low']:,}-{z['high']:,}" for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), "-") if zs else "-")(get_zones(stock_code)),
+                            (lambda zs: next((f"{z['low']:,}-{z['high']:,}" for zn, z in sorted(zs.items()) if z['low'] > current_price), "-") if zs else "-")(get_zones(stock_code)),
+                            (lambda zs: next((f"{abs(current_price - z['high'])/current_price*100:.1f}%" for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), "-") if zs else "-")(get_zones(stock_code)),
+                            (lambda zs: next((f"{abs(z['low'] - current_price)/current_price*100:.1f}%" for zn, z in sorted(zs.items()) if z['low'] > current_price), "-") if zs else "-")(get_zones(stock_code)),
+                            (lambda zs: any(z['low'] <= current_price <= z['high'] * 1.02 for z in zs.values()) if zs else False)(get_zones(stock_code)),
+                            v10_position is not None,
+                        )
                     ], md=9)
                 ])
             ])
@@ -13915,306 +14350,245 @@ def create_analysis_page(stock_code='CDIA'):
                 ], color="dark", outline=True, className="h-100")
             ], md=4),
 
-            # SUPPORT & RESISTANCE CARD
+            # SUPPORT & RESISTANCE FIX CARD
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.H6([html.I(className="fas fa-layer-group me-2 text-info"), "Support & Resistance"], className="mb-0 d-inline"),
-                        dcc.Link(html.Small("Detail ^", className="float-end text-info"), href="/support-resistance")
+                        html.H6([html.I(className="fas fa-layer-group me-2 text-info"), "S/R Fix (V10)"], className="mb-0 d-inline"),
                     ]),
                     dbc.CardBody([
-                        # Price Level Gauge
+                        # Get fixed zones for stock
                         html.Div([
-                            # Visual gauge
-                            html.Div([
+                            # Find nearest support and resistance from fixed zones
+                            *([
                                 html.Div([
-                                    html.Span(f"Rp {sr.get('support_20d', 0):,.0f}", className="small text-success"),
-                                    html.Span(" Support", className="small text-muted", style={'cursor': 'help'}, title=TERM_DEFINITIONS['support'])
-                                ], className="text-start", style={"width": "33%"}),
+                                    html.Div([
+                                        html.Span(f"S: {support_zone['low']:,}-{support_zone['high']:,}", className="small text-success"),
+                                    ], className="text-start", style={"width": "40%"}),
+                                    html.Div([
+                                        html.Span(f"Rp {current_price:,.0f}", className="small text-warning fw-bold"),
+                                    ], className="text-center", style={"width": "20%"}),
+                                    html.Div([
+                                        html.Span(f"R: {resistance_zone['low']:,}-{resistance_zone['high']:,}", className="small text-danger"),
+                                    ], className="text-end", style={"width": "40%"}),
+                                ], className="d-flex justify-content-between mb-2"),
                                 html.Div([
-                                    html.Span(f"Rp {current_price:,.0f}", className="small text-warning fw-bold"),
-                                ], className="text-center", style={"width": "34%"}),
+                                    dbc.Progress([
+                                        dbc.Progress(value=min(100, max(0, int((current_price - support_zone['high']) / (resistance_zone['low'] - support_zone['high']) * 100) if resistance_zone['low'] > support_zone['high'] else 50)), color="info", bar=True),
+                                    ], style={"height": "8px"})
+                                ], className="mb-2"),
                                 html.Div([
-                                    html.Span("Resistance ", className="small text-muted", style={'cursor': 'help'}, title=TERM_DEFINITIONS['resistance']),
-                                    html.Span(f"Rp {sr.get('resistance_20d', 0):,.0f}", className="small text-danger")
-                                ], className="text-end", style={"width": "33%"}),
-                            ], className="d-flex justify-content-between mb-1") if sr.get('has_data') else None,
-
-                            # Progress bar showing position
-                            html.Div([
-                                dbc.Progress([
-                                    dbc.Progress(value=min(100, max(0, sr.get('dist_from_support', 50))), color="success", bar=True),
-                                ], style={"height": "8px"})
-                            ], className="mb-2") if sr.get('has_data') else None,
-
-                            html.Div([
-                                html.Small(f"Jarak ke Support: {sr.get('dist_from_support', 0):.1f}%", className="text-muted me-3"),
-                                html.Small(f"Jarak ke Resistance: {sr.get('dist_from_resistance', 0):.1f}%", className="text-muted"),
-                            ], className="text-center") if sr.get('has_data') else html.Small("Data tidak tersedia", className="text-muted"),
+                                    html.Small(f"Jarak S: {abs(current_price - support_zone['high'])/current_price*100:.1f}%", className="text-success me-2"),
+                                    html.Small(f"Jarak R: {abs(resistance_zone['low'] - current_price)/current_price*100:.1f}%", className="text-danger"),
+                                ], className="text-center small"),
+                            ] if (zones := get_zones(stock_code)) and
+                                 (support_zone := next((z for zn, z in sorted(zones.items(), reverse=True) if z['high'] < current_price), None)) and
+                                 (resistance_zone := next((z for zn, z in sorted(zones.items()) if z['low'] > current_price), None))
+                              else [html.Small(f"Zona belum dikonfigurasi untuk {stock_code}", className="text-muted text-center d-block")]),
                         ]),
                         html.Hr(className="my-2"),
                         html.Div([
                             html.Small("Posisi: ", className="text-muted"),
                             dbc.Badge(
-                                "Dekat Support" if sr.get('position') == 'NEAR_SUPPORT' else "Dekat Resistance" if sr.get('position') == 'NEAR_RESISTANCE' else "Di Tengah",
-                                color="success" if sr.get('position') == 'NEAR_SUPPORT' else "danger" if sr.get('position') == 'NEAR_RESISTANCE' else "secondary"
+                                "Dekat Support" if (zones := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.03 for z in zones.values()) else
+                                "Dekat Resistance" if zones and any(z['low'] * 0.97 <= current_price <= z['high'] for z in zones.values()) else
+                                "Di Antara Zona",
+                                color="success" if (zones := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.03 for z in zones.values()) else
+                                      "danger" if zones and any(z['low'] * 0.97 <= current_price <= z['high'] for z in zones.values()) else "secondary"
                             )
-                        ], className="text-center")
+                        ], className="text-center") if get_zones(stock_code) else None
                     ])
                 ], color="dark", outline=True, className="h-100")
             ], md=4),
 
-            # ACCUMULATION CARD
+            # KONFIRMASI V10 CARD
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
                         html.H6([
-                            html.I(className="fas fa-cubes me-2 text-warning"),
-                            html.Span("Accumulation", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['accumulation'])
+                            html.I(className="fas fa-clipboard-check me-2 text-warning"),
+                            html.Span("Konfirmasi V10")
                         ], className="mb-0 d-inline"),
-                        dcc.Link(html.Small("Detail ^", className="float-end text-info"), href="/accumulation")
                     ]),
                     dbc.CardBody([
-                        dbc.Row([
-                            dbc.Col([
-                                html.Div([
-                                    html.Small("Sinyal", className="text-muted d-block"),
-                                    dbc.Badge(
-                                        summary.get('overall_signal', 'NETRAL'),
-                                        color="success" if summary.get('overall_signal') == 'AKUMULASI' else "danger" if summary.get('overall_signal') == 'DISTRIBUSI' else "secondary",
-                                        title=TERM_DEFINITIONS['accumulation'] if summary.get('overall_signal') == 'AKUMULASI' else TERM_DEFINITIONS['distribution'] if summary.get('overall_signal') == 'DISTRIBUSI' else '',
-                                        style={'cursor': 'help'}
-                                    ),
-                                ], className="text-center")
-                            ], width=4),
-                            dbc.Col([
-                                html.Div([
-                                    html.Small([
-                                        html.Span("Validasi", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['confidence']),
-                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
-                                    ], className="text-muted d-block"),
-                                    html.H4(f"{confidence.get('passed', 0)}/6", className=f"mb-0 text-{'success' if confidence.get('pass_rate', 0) >= 60 else 'warning' if confidence.get('pass_rate', 0) >= 40 else 'danger'}"),
-                                ], className="text-center")
-                            ], width=4),
-                            dbc.Col([
-                                html.Div([
-                                    html.Small([
-                                        html.Span("CPR", style={'borderBottom': '1px dotted #6c757d', 'cursor': 'help'}, title=TERM_DEFINITIONS['cpr']),
-                                        html.I(className="fas fa-info-circle ms-1", style={'fontSize': '8px', 'opacity': '0.6'})
-                                    ], className="text-muted d-block"),
-                                    html.H4(f"{validations.get('cpr', {}).get('avg_cpr', 0)*100:.0f}%", className="mb-0 text-info"),
-                                ], className="text-center")
-                            ], width=4),
-                        ], className="mb-2"),
-                        html.Hr(className="my-2"),
+                        # Fase
                         html.Div([
-                            html.Small([
-                                html.Span("Confidence: ", style={'cursor': 'help'}, title=TERM_DEFINITIONS['confidence'])
-                            ], className="text-muted"),
-                            dbc.Badge(confidence.get('level', 'N/A'), color="success" if confidence.get('level') in ['HIGH', 'VERY_HIGH'] else "warning" if confidence.get('level') == 'MEDIUM' else "secondary")
-                        ], className="text-center")
+                            html.Small("Fase", className="text-muted d-block"),
+                            dbc.Badge(
+                                "RUNNING" if v10_position else ("SIAP ENTRY" if (lambda zs: any(z['low'] <= current_price <= z['high'] * 1.02 for z in zs.values()) if zs else False)(get_zones(stock_code)) else "WAIT"),
+                                color="warning" if v10_position else ("success" if (lambda zs: any(z['low'] <= current_price <= z['high'] * 1.02 for z in zs.values()) if zs else False)(get_zones(stock_code)) else "secondary"),
+                                className="text-dark" if v10_position else "",
+                            ),
+                        ], className="text-center mb-2"),
+                        html.Hr(className="my-2"),
+                        # V10 Checklist - use stored entry conditions if position exists
+                        html.Small(f"Checklist V10{' (' + v10_position['entry_date'] + ')' if v10_position and v10_position.get('entry_conditions') else ''}:", className="text-muted d-block mb-1"),
+                        (lambda ec: html.Div([
+                            # Use stored entry conditions from position
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('touch_support') else 'times'} text-{'success' if ec.get('touch_support') else 'danger'} me-1"),
+                                html.Small("Touch Support", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('hold_above_slow') else 'times'} text-{'success' if ec.get('hold_above_slow') else 'danger'} me-1"),
+                                html.Small("Hold di Atas S_low", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('within_35pct') else 'times'} text-{'success' if ec.get('within_35pct') else 'danger'} me-1"),
+                                html.Small("Dalam 35% ke TP", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('prior_r_touch') else 'times'} text-{'success' if ec.get('prior_r_touch') else 'danger'} me-1"),
+                                html.Small("Prior R Touch", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('reclaim') else 'times'} text-{'success' if ec.get('reclaim') else 'danger'} me-1"),
+                                html.Small("Konfirmasi Reclaim", className="text-muted"),
+                            ], className="mb-1"),
+                        ]))(v10_position.get('entry_conditions', {})) if v10_position and v10_position.get('entry_conditions') else (
+                        # Calculate current conditions if no position
+                        (lambda zones, support_zone: html.Div([
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if support_zone and current_price <= support_zone['high'] * 1.02 else 'times'} text-{'success' if support_zone and current_price <= support_zone['high'] * 1.02 else 'danger'} me-1"),
+                                html.Small("Touch Support", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if support_zone and current_price >= support_zone['low'] else 'times'} text-{'success' if support_zone and current_price >= support_zone['low'] else 'danger'} me-1"),
+                                html.Small("Hold di Atas S_low", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if support_zone and (lambda tp: current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high']))(next((z['low'] * 0.98 for zn, z in sorted(zones.items()) if z['low'] > current_price), current_price * 1.2)) else 'times'} text-{'success' if support_zone and (lambda tp: current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high']))(next((z['low'] * 0.98 for zn, z in sorted(zones.items()) if z['low'] > current_price), current_price * 1.2)) else 'danger'} me-1"),
+                                html.Small("Dalam 35% ke TP", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className="fas fa-minus text-secondary me-1"),
+                                html.Small("Prior R Touch", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className="fas fa-minus text-secondary me-1"),
+                                html.Small("Konfirmasi Reclaim", className="text-muted"),
+                            ], className="mb-1"),
+                        ]) if zones else html.Small("Zona belum dikonfigurasi", className="text-muted"))(
+                            get_zones(stock_code),
+                            (lambda zs: next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price * 1.02), None) if zs else None)(get_zones(stock_code))
+                        ))
                     ])
                 ], color="dark", outline=True, className="h-100")
             ], md=4),
         ], className="mb-4"),
 
-        # === 3. KEY PRICE LEVELS (From V6 Sideways Analysis) ===
-        dbc.Card([
+        # === 5.5 BACKTEST HISTORY V10 ===
+        (lambda bt_result: dbc.Card([
             dbc.CardHeader([
-                html.H5([html.I(className="fas fa-map-marker-alt me-2"), "Level Harga Kunci (V6)"], className="mb-0"),
-            ]),
-            dbc.CardBody([
-                dbc.Row([
-                    # Support Level (V6 Low)
-                    dbc.Col([
-                        html.Div([
-                            html.Div([
-                                html.I(className="fas fa-shield-alt text-success me-2", style={"fontSize": "24px"}),
-                                html.H6("SUPPORT", className="text-success mb-0 d-inline"),
-                            ], className="mb-2"),
-                            html.H4(f"Rp {v6_sideways.get('low', 0):,.0f}" if v6_sideways.get('low') else "N/A", className="text-success"),
-                            html.Small(f"Low sideways ({v6_sideways.get('days', 0)} hari)", className="text-muted")
-                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(40,167,69,0.1)"})
-                    ], md=4),
-
-                    # Resistance Level (V6 High)
-                    dbc.Col([
-                        html.Div([
-                            html.Div([
-                                html.I(className="fas fa-arrow-alt-circle-up text-info me-2", style={"fontSize": "24px"}),
-                                html.H6("RESISTANCE / TARGET", className="text-info mb-0 d-inline"),
-                            ], className="mb-2"),
-                            html.H4(f"Rp {v6_sideways.get('high', 0):,.0f}" if v6_sideways.get('high') else "N/A", className="text-info"),
-                            html.Small(f"High sideways ({v6_sideways.get('days', 0)} hari)", className="text-muted")
-                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)"})
-                    ], md=4),
-
-                    # Stop Loss (V6 Invalidation)
-                    dbc.Col([
-                        html.Div([
-                            html.Div([
-                                html.I(className="fas fa-exclamation-triangle text-danger me-2", style={"fontSize": "24px"}),
-                                html.H6("STOP LOSS", className="text-danger mb-0 d-inline"),
-                            ], className="mb-2"),
-                            html.H4(f"Rp {v6_entry.get('stop_loss', 0):,.0f}" if v6_entry.get('stop_loss') else "N/A", className="text-danger"),
-                            html.Small("Low - (Range × 2%)", className="text-muted")
-                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(220,53,69,0.1)"})
-                    ], md=4),
-                ]),
-                # Additional info row
-                html.Div([
-                    html.Hr(className="my-3"),
-                    html.Div([
-                        html.Small([
-                            html.I(className="fas fa-info-circle me-2"),
-                            f"Range: {v6_sideways.get('range_pct', 0):.1f}% ",
-                            f"({'<' if v6_sideways.get('is_sideways') else '>'} threshold {v6_sideways.get('threshold', 0):.1f}%) | ",
-                            html.Span(
-                                "SIDEWAYS" if v6_sideways.get('is_sideways') else "TRENDING",
-                                className="text-info fw-bold" if v6_sideways.get('is_sideways') else "text-warning fw-bold"
-                            )
-                        ], className="text-muted")
-                    ], className="text-center")
-                ]) if v6_sideways else html.Div()
-            ])
-        ], className="mb-4", color="dark", outline=True),
-
-        # === 4. SIGNAL TIMELINE (dari Accumulation) ===
-        dbc.Card([
-            dbc.CardHeader([
-                html.H5([html.I(className="fas fa-history me-2"), "Riwayat Sinyal (30 Hari Terakhir)"], className="mb-0"),
-            ]),
-            dbc.CardBody([
-                html.Div([
-                    html.Div([
-                        html.Div([
-                            html.Span(str(h.get('date', ''))[:10], className="fw-bold small", style={"width": "85px", "display": "inline-block"}),
-                            dbc.Badge(
-                                f"{h.get('signal', 'N/A')}" + (f" ({h.get('strength', '')})" if h.get('strength') else ""),
-                                color="success" if h.get('signal') == 'ACCUMULATION' else "danger" if h.get('signal') == 'DISTRIBUTION' else "secondary",
-                                className="me-2", style={"width": "140px", "textAlign": "center"}
-                            ),
-                            html.Span(f"Rp {h.get('price', 0):,.0f}", className="text-warning me-3 small", style={"width": "90px", "display": "inline-block"}),
-                            html.Span(f"CPR: {h.get('cpr', 0):.0f}%", className="text-muted small me-2", style={"width": "70px", "display": "inline-block"}),
-                            html.Span(f"Net: {h.get('net_lot', 0):+,.0f}", className=f"small text-{'success' if h.get('net_lot', 0) > 0 else 'danger' if h.get('net_lot', 0) < 0 else 'muted'}", style={"width": "100px", "display": "inline-block"}),
-                        ], className="d-flex align-items-center py-1 px-2 rounded mb-1",
-                           style={"backgroundColor": "rgba(40,167,69,0.1)" if h.get('signal') == 'ACCUMULATION' else "rgba(220,53,69,0.1)" if h.get('signal') == 'DISTRIBUTION' else "rgba(255,255,255,0.03)"})
-                        for h in (detection.get('signal_history', []) if detection else [])[-10:]
-                    ]) if detection and detection.get('signal_history') else html.Small("Tidak ada riwayat sinyal", className="text-muted"),
-                ], style={"maxHeight": "200px", "overflowY": "auto"})
-            ])
-        ], className="mb-4", color="dark", outline=True),
-
-        # === 5. V6 SIDEWAYS & PHASE ANALYSIS ===
-        dbc.Card([
-            dbc.CardHeader([
-                html.H5([html.I(className="fas fa-chart-area me-2"), "Analisis Sideways V6"], className="mb-0 d-inline"),
+                html.H5([
+                    html.I(className="fas fa-history me-2 text-info"),
+                    "Backtest V10 History"
+                ], className="mb-0 d-inline"),
                 dbc.Badge(
-                    v6_phase if v6_phase else "N/A",
-                    color="success" if v6_phase == 'ACCUMULATION' else
-                          "danger" if v6_phase == 'DISTRIBUTION' else "secondary",
+                    f"{len(bt_result.get('trades', []))} trades" if bt_result else "No data",
+                    color="info",
                     className="ms-2"
                 ),
+                dbc.Badge(
+                    f"Win Rate: {bt_result.get('win_rate', 0):.0f}%" if bt_result else "",
+                    color="success" if bt_result and bt_result.get('win_rate', 0) >= 70 else "warning" if bt_result and bt_result.get('win_rate', 0) >= 50 else "danger",
+                    className="ms-2"
+                ) if bt_result and bt_result.get('trades') else None,
+                dbc.Badge(
+                    f"Total: {bt_result.get('total_pnl', 0):+.1f}%" if bt_result else "",
+                    color="success" if bt_result and bt_result.get('total_pnl', 0) > 0 else "danger",
+                    className="ms-2"
+                ) if bt_result and bt_result.get('trades') else None,
             ]),
             dbc.CardBody([
-                # V6 Formula Explanation
+                # Trade list
                 html.Div([
-                    html.H6([html.I(className="fas fa-flask me-2"), "Formula V6:"], className="text-info mb-2"),
                     html.Div([
-                        html.Code("SIDEWAYS = Range% < Percentile_40(Historical_Ranges)", className="d-block mb-1"),
-                        html.Code("ACCUMULATION = Volume_Lower > Volume_Upper (buying di support)", className="d-block mb-1"),
-                        html.Code("DISTRIBUTION = Volume_Upper > Volume_Lower (selling di resistance)", className="d-block mb-1"),
-                        html.Code("ENTRY = Sideways + Accumulation + Near_Support + Konfirmasi", className="d-block"),
-                    ], className="p-2 rounded small", style={"backgroundColor": "rgba(255,255,255,0.05)", "fontFamily": "monospace"})
-                ], className="mb-3"),
-
-                # V6 Analysis Results
-                dbc.Row([
-                    # Sideways Status
-                    dbc.Col([
-                        html.Div([
-                            html.H6("Status Sideways", className="text-muted mb-2"),
-                            dbc.Badge(
-                                "SIDEWAYS" if v6_sideways.get('is_sideways') else "TRENDING",
-                                color="info" if v6_sideways.get('is_sideways') else "warning",
-                                className="fs-6 mb-2"
-                            ),
-                            html.Div([
-                                html.Small(f"Range: Rp {v6_sideways.get('low', 0):,.0f} - Rp {v6_sideways.get('high', 0):,.0f}", className="d-block"),
-                                html.Small(f"Range%: {v6_sideways.get('range_pct', 0):.1f}% ", className="d-block"),
-                                html.Small([
-                                    "Threshold: ",
-                                    html.Span(f"< {v6_sideways.get('threshold_pct', 0):.1f}%", className="text-info")
-                                ], className="d-block"),
-                                html.Small(f"Periode: {v6_sideways.get('days', 0)} hari", className="d-block text-muted"),
-                            ])
-                        ], className="text-center p-3 rounded", style={"backgroundColor": "rgba(23,162,184,0.1)" if v6_sideways.get('is_sideways') else "rgba(255,193,7,0.1)"})
-                    ], md=4),
-
-                    # Phase Analysis
-                    dbc.Col([
-                        html.Div([
-                            html.H6("Fase Pasar", className="text-muted mb-2"),
-                            html.Div([
-                                html.Span("🟢 " if v6_phase == 'ACCUMULATION' else "🔴 " if v6_phase == 'DISTRIBUTION' else "⚪ ", style={"fontSize": "24px"}),
-                                html.Strong(v6_phase if v6_phase else "N/A", className=f"text-{'success' if v6_phase == 'ACCUMULATION' else 'danger' if v6_phase == 'DISTRIBUTION' else 'secondary'}")
-                            ], className="mb-2"),
-                            html.Div([
-                                html.Small([
-                                    "Vol Ratio: ",
-                                    html.Span(f"{v6_data.get('phase', {}).get('vol_ratio', 0):.2f}" if v6_data and not v6_data.get('error') else "N/A",
-                                             className=f"text-{'success' if v6_data and v6_data.get('phase', {}).get('vol_ratio', 1) > 1.2 else 'danger' if v6_data and v6_data.get('phase', {}).get('vol_ratio', 1) < 0.8 else 'secondary'}")
-                                ], className="d-block"),
-                                html.Small([
-                                    "ACC Score: ", html.Span(f"{v6_data.get('phase', {}).get('acc_score', 0)}" if v6_data else "0", className="text-success"),
-                                    " vs DIST Score: ", html.Span(f"{v6_data.get('phase', {}).get('dist_score', 0)}" if v6_data else "0", className="text-danger")
-                                ], className="d-block"),
-                            ])
-                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba({'40,167,69' if v6_phase == 'ACCUMULATION' else '220,53,69' if v6_phase == 'DISTRIBUTION' else '108,117,125'},0.1)"})
-                    ], md=4),
-
-                    # Entry Signal
-                    dbc.Col([
-                        html.Div([
-                            html.H6("Sinyal Aksi", className="text-muted mb-2"),
-                            html.Div([
-                                html.Span(v6_style['icon'], style={"fontSize": "24px"}),
-                                html.Strong(f" {v6_action}", className=f"text-{v6_style['color']}")
-                            ], className="mb-2"),
-                            html.Div([
-                                html.Small(v6_action_reason[:50] + "..." if len(v6_action_reason) > 50 else v6_action_reason, className="d-block text-muted"),
-                                html.Small([
-                                    "Konfirmasi: ",
-                                    html.Span(f"{v6_entry.get('score', 0)}/4" if v6_entry else "0/4", className="text-info")
-                                ], className="d-block") if v6_entry else None,
-                                html.Small([
-                                    "R:R Ratio: ",
-                                    html.Span(f"{v6_entry.get('rr_ratio', 0):.1f}x" if v6_entry else "N/A",
-                                             className=f"text-{'success' if v6_entry and v6_entry.get('rr_ratio', 0) >= 2 else 'warning' if v6_entry and v6_entry.get('rr_ratio', 0) >= 1.5 else 'danger'}")
-                                ], className="d-block") if v6_entry else None,
-                            ])
-                        ], className="text-center p-3 rounded", style={"backgroundColor": f"rgba(var(--bs-{v6_style['color']}-rgb), 0.1)"})
-                    ], md=4),
-                ], className="mb-3"),
-
-                # V6 Conclusion
+                        dbc.Row([
+                            dbc.Col([
+                                html.Div([
+                                    # Trade number and type badge
+                                    html.Span(f"#{idx}", className="fw-bold text-muted me-2"),
+                                    dbc.Badge(
+                                        t.get('type', 'UNKNOWN'),
+                                        color="warning" if 'RETEST' in t.get('type', '') else "info",
+                                        className="me-2 text-dark" if 'RETEST' in t.get('type', '') else "me-2"
+                                    ),
+                                    dbc.Badge(
+                                        f"Z{t.get('zone_num', '?')}",
+                                        color="secondary",
+                                        className="me-2"
+                                    ),
+                                ], className="mb-1"),
+                                # Dates
+                                html.Div([
+                                    html.I(className="fas fa-sign-in-alt text-success me-1"),
+                                    html.Small(t.get('entry_date', '-'), className="text-success me-3"),
+                                    html.I(className="fas fa-sign-out-alt text-danger me-1"),
+                                    html.Small(t.get('exit_date', '-'), className="text-danger me-2"),
+                                    html.Small(f"({t.get('exit_reason', '-')})", className="text-muted"),
+                                ], className="mb-1"),
+                            ], width=6),
+                            dbc.Col([
+                                # Prices
+                                html.Div([
+                                    html.Small("Entry: ", className="text-muted"),
+                                    html.Span(f"Rp {t.get('entry_price', 0):,.0f}", className="text-info me-3"),
+                                    html.Small("Exit: ", className="text-muted"),
+                                    html.Span(f"Rp {t.get('exit_price', 0):,.0f}", className="text-warning"),
+                                ], className="mb-1"),
+                                # P/L
+                                html.Div([
+                                    html.Small("SL: ", className="text-muted"),
+                                    html.Span(f"{t.get('sl', 0):,.0f}", className="text-danger small me-3"),
+                                    html.Small("TP: ", className="text-muted"),
+                                    html.Span(f"{t.get('tp', 0):,.0f}", className="text-success small me-3"),
+                                    dbc.Badge(
+                                        f"{t.get('pnl', 0):+.1f}%",
+                                        color="success" if t.get('pnl', 0) > 0 else "danger",
+                                        className="ms-2 fs-6"
+                                    ),
+                                ]),
+                            ], width=6, className="text-end"),
+                        ], className="align-items-center"),
+                        html.Hr(className="my-2") if idx < len(bt_result.get('trades', [])) else None,
+                    ]) for idx, t in enumerate(bt_result.get('trades', []), 1)
+                ], style={"maxHeight": "400px", "overflowY": "auto"}) if bt_result and bt_result.get('trades') else html.Div([
+                    html.I(className="fas fa-info-circle text-muted me-2"),
+                    html.Span("Tidak ada data backtest untuk saham ini", className="text-muted")
+                ], className="text-center py-3"),
+                # Summary footer
                 html.Div([
-                    html.Strong([html.I(className="fas fa-clipboard-check me-2"), "Kesimpulan V6: "], className="text-info"),
-                    html.Span(
-                        v6_action_reason if v6_action_reason else "Data tidak tersedia untuk analisis V6",
-                        className=f"fw-bold text-{v6_style['color']}"
-                    )
-                ], className="p-2 rounded", style={"backgroundColor": "rgba(255,255,255,0.05)"}),
-
-                # V6 Explanation
-                html.Hr(className="my-3"),
-                html.Small([
-                    html.I(className="fas fa-info-circle me-1"),
-                    "V6 menggunakan adaptive threshold (Percentile 40) untuk deteksi sideways. ",
-                    "Entry signal membutuhkan: Sideways + Fase Akumulasi + Dekat Support + Konfirmasi (bullish candle, range expansion, volume surge)."
-                ], className="text-muted fst-italic")
+                    html.Hr(className="my-2"),
+                    dbc.Row([
+                        dbc.Col([
+                            html.Small("Total Trades", className="text-muted d-block"),
+                            html.Strong(f"{len(bt_result.get('trades', []))}", className="text-info"),
+                        ], className="text-center"),
+                        dbc.Col([
+                            html.Small("Wins", className="text-muted d-block"),
+                            html.Strong(f"{bt_result.get('wins', 0)}", className="text-success"),
+                        ], className="text-center"),
+                        dbc.Col([
+                            html.Small("Losses", className="text-muted d-block"),
+                            html.Strong(f"{bt_result.get('losses', 0)}", className="text-danger"),
+                        ], className="text-center"),
+                        dbc.Col([
+                            html.Small("Win Rate", className="text-muted d-block"),
+                            html.Strong(f"{bt_result.get('win_rate', 0):.0f}%",
+                                       className=f"text-{'success' if bt_result.get('win_rate', 0) >= 70 else 'warning' if bt_result.get('win_rate', 0) >= 50 else 'danger'}"),
+                        ], className="text-center"),
+                        dbc.Col([
+                            html.Small("Total P/L", className="text-muted d-block"),
+                            html.Strong(f"{bt_result.get('total_pnl', 0):+.1f}%",
+                                       className=f"text-{'success' if bt_result.get('total_pnl', 0) > 0 else 'danger'}"),
+                        ], className="text-center"),
+                    ])
+                ]) if bt_result and bt_result.get('trades') else None,
             ])
-        ], className="mb-4", color="dark", outline=True),
+        ], color="dark", outline=True, className="mb-4") if get_zones(stock_code) else html.Div())(
+            run_v10_backtest(stock_code) if run_v10_backtest and get_zones(stock_code) else None
+        ),
 
         # === 6. WEEKLY ACCUMULATION ANALYSIS (Key Point dari Accumulation) ===
         dbc.Card([
@@ -16682,6 +17056,8 @@ def create_maintenance_banner():
 def create_app_layout():
     """Create app layout - dropdown uses persistence for session storage"""
     return html.Div([
+        # CSS is now loaded from assets/v10-styles.css automatically
+
         dcc.Location(id='url', refresh=False),  # No page refresh - use callbacks for navigation
         dcc.Store(id='theme-store', storage_type='local', data='dark'),  # Persist theme
         dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
@@ -16806,14 +17182,25 @@ app.clientside_callback(
 def refresh_stock_dropdown(pathname, user_session):
     """Refresh stock dropdown options on every page load.
     During maintenance, regular users see frozen snapshot of stocks."""
-    # Check if user is admin
-    is_admin = False
-    if user_session and isinstance(user_session, dict):
-        member_type = user_session.get('member_type', '')
-        is_admin = member_type in ['admin', 'superuser']
-    
-    stocks = get_available_stocks_for_user(is_admin)
-    return [{'label': s, 'value': s} for s in stocks]
+    try:
+        # Check if user is admin
+        is_admin = False
+        if user_session and isinstance(user_session, dict):
+            member_type = user_session.get('member_type', '')
+            is_admin = member_type in ['admin', 'superuser']
+
+        stocks = get_available_stocks_for_user(is_admin)
+
+        # Ensure we always return valid options
+        if stocks and len(stocks) > 0:
+            return [{'label': s, 'value': s} for s in stocks]
+        else:
+            # Fallback to default stock
+            return [{'label': 'CDIA', 'value': 'CDIA'}]
+    except Exception as e:
+        print(f"Error in refresh_stock_dropdown: {e}")
+        # Return fallback on error
+        return [{'label': 'CDIA', 'value': 'CDIA'}]
 
 @app.callback(
     Output('stock-selector', 'value'),
@@ -16823,15 +17210,20 @@ def refresh_stock_dropdown(pathname, user_session):
 )
 def sync_dropdown_with_url(search, current_value):
     """Sync stock-selector dropdown with URL query parameter.
-    When user clicks emiten link from home page (e.g. /analysis?stock=BBCA),
-    the dropdown should update to match."""
+    ONLY updates dropdown when URL contains ?stock= parameter.
+    Does NOT interfere with manual dropdown selection."""
+    from dash import no_update
+
+    # Only process if URL has stock parameter
     if search:
         from urllib.parse import parse_qs
         params = parse_qs(search.lstrip('?'))
         stock_from_url = params.get('stock', [None])[0]
         if stock_from_url:
             return stock_from_url.upper()
-    return current_value  # Keep current value if no stock in URL
+
+    # No stock in URL - don't change dropdown (let user's selection persist)
+    return no_update
 
 @app.callback(
     Output('page-content', 'children'),
@@ -16938,7 +17330,7 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
 
     # Route to appropriate page
     if pathname == '/':
-        return wrap_with_banner(create_landing_page(is_admin))
+        return wrap_with_banner(create_landing_page(is_admin, is_logged_in, is_trial_expired))
     
     # Pages that require stock selection - check access during maintenance
     stock_pages = ['/dashboard', '/analysis', '/bandarmology', '/summary', '/position',
@@ -16997,7 +17389,7 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     elif pathname == '/verify':
         return create_verify_page(token)  # No banner for auth pages
     else:
-        return wrap_with_banner(create_landing_page(is_admin))
+        return wrap_with_banner(create_landing_page(is_admin, is_logged_in, is_trial_expired))
 
 # Password validation callback for upload page - with session persistence
 @app.callback(
