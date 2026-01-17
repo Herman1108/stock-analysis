@@ -13951,6 +13951,28 @@ def create_analysis_page(stock_code='CDIA'):
     if v10_position:
         v6_action = 'RUNNING'
         v6_action_reason = f"Posisi {v10_position['type']} Z{v10_position['zone_num']} sejak {v10_position['entry_date']}"
+    elif v6_action == 'ENTRY' and stock_code.upper() in STOCK_ZONES:
+        # For V10 stocks, validate V10 checklist before showing ENTRY
+        v10_zones = get_zones(stock_code)
+        if v10_zones:
+            # Find active support zone (nearest zone below current price)
+            support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['high'] < current_price * 1.02), None)
+            if support_zone:
+                # Calculate TP (next resistance zone)
+                tp = next((z['low'] * 0.98 for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), current_price * 1.2)
+                # Check V10 conditions
+                touch_support = current_price <= support_zone['high'] * 1.02
+                hold_above_slow = current_price >= support_zone['low']
+                in_range_35pct = current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high'])
+                # If V10 conditions not met, downgrade ENTRY to WAIT
+                if not (touch_support and hold_above_slow and in_range_35pct):
+                    v6_action = 'WAIT'
+                    phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
+                    v6_action_reason = f"V10: Support {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Fase {phase}"
+            else:
+                # No support zone found (price above all zones), change to WAIT
+                v6_action = 'WAIT'
+                v6_action_reason = f"V10: Harga di atas semua zona - tunggu retest"
 
     # Use Strong S/R phase for PANI/BREN/MBMA, otherwise use v6_data phase
     if v6_entry.get('formula_info', {}).get('type') == 'STRONG_SR':
