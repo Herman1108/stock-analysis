@@ -19,13 +19,6 @@ from datetime import datetime, timedelta
 import statistics
 import math
 
-# Ensure app directory is in path for database import
-app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
-if app_dir not in sys.path:
-    sys.path.insert(0, app_dir)
-
-from database import get_connection
-
 # Import V8/V9 functions dari strong_sr_v8_atr untuk konsistensi
 from strong_sr_v8_atr import (
     filter_data_1year,
@@ -45,8 +38,17 @@ from strong_sr_v8_atr import (
 
 
 def get_db_connection():
-    """Wrapper for backward compatibility - uses shared database connection"""
-    return get_connection().__enter__()
+    """Get database connection - uses DATABASE_URL for Railway, localhost for local dev"""
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        return psycopg2.connect(database_url)
+    else:
+        return psycopg2.connect(
+            host='localhost',
+            database='stock_analysis',
+            user='postgres',
+            password='postgres'
+        )
 
 
 def get_stock_data(stock_code, conn):

@@ -20,21 +20,25 @@ try:
 except (AttributeError, OSError):
     pass
 
-# Ensure app directory is in path for database import
-app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
-if app_dir not in sys.path:
-    sys.path.insert(0, app_dir)
 
-from database import get_connection
-
-# Module-level connection removed - use get_connection() context manager instead
-conn = None
-cur = None
+def get_db_connection():
+    """Get database connection - uses DATABASE_URL for Railway, localhost for local dev"""
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        return psycopg2.connect(database_url)
+    else:
+        return psycopg2.connect(
+            host='localhost',
+            database='stock_analysis',
+            user='postgres',
+            password='postgres'
+        )
 
 
 def load_stock_data(stock_code):
     """Load data saham"""
-    with get_connection() as conn:
+    conn = get_db_connection()
+    try:
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute('''
             SELECT date, high_price as high, low_price as low,
@@ -44,6 +48,8 @@ def load_stock_data(stock_code):
             ORDER BY date ASC
         ''', (stock_code,))
         all_data = cur.fetchall()
+    finally:
+        conn.close()
 
     data_list = []
     for i, row in enumerate(all_data):

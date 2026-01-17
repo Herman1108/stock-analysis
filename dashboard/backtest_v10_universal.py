@@ -13,14 +13,23 @@ try:
 except (AttributeError, OSError):
     pass
 
-# Ensure app directory is in path for database import
-app_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app')
-if app_dir not in sys.path:
-    sys.path.insert(0, app_dir)
-
+import psycopg2
 from psycopg2.extras import RealDictCursor
 from zones_config import STOCK_ZONES, DEFAULT_PARAMS
-from database import get_connection
+
+
+def get_db_connection():
+    """Get database connection - uses DATABASE_URL for Railway, localhost for local dev"""
+    database_url = os.environ.get('DATABASE_URL')
+    if database_url:
+        return psycopg2.connect(database_url)
+    else:
+        return psycopg2.connect(
+            host='localhost',
+            database='stock_analysis',
+            user='postgres',
+            password='postgres'
+        )
 
 # State machine constants
 STATE_IDLE = 0
@@ -198,8 +207,9 @@ def run_backtest(stock_code, params=None, start_date='2024-01-01', verbose=False
     zh = ZoneHelper(zones)
 
     try:
-        with get_connection() as conn:
-            all_data = get_stock_data(stock_code, conn)
+        conn = get_db_connection()
+        all_data = get_stock_data(stock_code, conn)
+        conn.close()
     except Exception as e:
         print(f"Database error for {stock_code}: {e}")
         return None
