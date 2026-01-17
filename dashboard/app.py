@@ -13951,28 +13951,45 @@ def create_analysis_page(stock_code='CDIA'):
     if v10_position:
         v6_action = 'RUNNING'
         v6_action_reason = f"Posisi {v10_position['type']} Z{v10_position['zone_num']} sejak {v10_position['entry_date']}"
-    elif v6_action == 'ENTRY' and stock_code.upper() in STOCK_ZONES:
-        # For V10 stocks, validate V10 checklist before showing ENTRY
+    elif stock_code.upper() in STOCK_ZONES:
+        # For V10 stocks, action is based on V10 status, not Strong S/R
         v10_zones = get_zones(stock_code)
         if v10_zones:
-            # Find active support zone (nearest zone below current price)
-            support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['high'] < current_price * 1.02), None)
-            if support_zone:
-                # Calculate TP (next resistance zone)
-                tp = next((z['low'] * 0.98 for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), current_price * 1.2)
-                # Check V10 conditions
-                touch_support = current_price <= support_zone['high'] * 1.02
-                hold_above_slow = current_price >= support_zone['low']
-                in_range_35pct = current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high'])
-                # If V10 conditions not met, downgrade ENTRY to WAIT
-                if not (touch_support and hold_above_slow and in_range_35pct):
-                    v6_action = 'WAIT'
-                    phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
-                    v6_action_reason = f"V10: Support {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Fase {phase}"
-            else:
-                # No support zone found (price above all zones), change to WAIT
+            # Check if price is in any support zone
+            v10_in_zone = any(z['low'] <= current_price <= z['high'] * 1.02 for z in v10_zones.values())
+
+            # Find active support zone (nearest zone below or containing current price)
+            support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None)
+            if not support_zone:
+                # If not in zone, find nearest support below
+                support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['high'] < current_price), None)
+
+            # Find resistance zone (nearest zone above current price)
+            resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
+
+            # Get phase from v6_entry
+            phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
+
+            if v10_in_zone:
+                # Price is in a support zone - check for entry conditions
+                if phase in ['STRONG_ACCUMULATION', 'ACCUMULATION', 'WEAK_ACCUMULATION']:
+                    v6_action = 'ENTRY'
+                    v6_action_reason = f"V10: Dalam zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Fase {phase}"
+                else:
+                    v6_action = 'WATCH'
+                    v6_action_reason = f"V10: Dalam zona tapi fase {phase} - pantau akumulasi"
+            elif support_zone and resistance_zone:
+                # Price is between zones - WAIT for retest
                 v6_action = 'WAIT'
-                v6_action_reason = f"V10: Harga di atas semua zona - tunggu retest"
+                v6_action_reason = f"V10: Di antara zona S {support_zone['low']:,.0f}-{support_zone['high']:,.0f} dan R {resistance_zone['low']:,.0f}-{resistance_zone['high']:,.0f} - tunggu retest"
+            elif support_zone and not resistance_zone:
+                # Price is above all zones
+                v6_action = 'WATCH'
+                v6_action_reason = f"V10: Di atas semua zona - pantau breakout atau retest ke {support_zone['low']:,.0f}-{support_zone['high']:,.0f}"
+            else:
+                # No support zone (price below all zones)
+                v6_action = 'AVOID'
+                v6_action_reason = f"V10: Harga di bawah semua zona support"
 
     # Use Strong S/R phase for PANI/BREN/MBMA, otherwise use v6_data phase
     if v6_entry.get('formula_info', {}).get('type') == 'STRONG_SR':
