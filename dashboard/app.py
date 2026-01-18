@@ -13984,11 +13984,31 @@ def create_analysis_page(stock_code='CDIA'):
                     if v11b_vol_ratio >= 1.0:
                         # V11b: Volume confirmed - ENTRY
                         v6_action = 'ENTRY'
-                        v6_action_reason = f"V11b: Zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | {phase} | Vol {v11b_vol_ratio:.2f}x"
+                        v6_action_reason = f"V11b: Zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | {phase} | Vol {v11b_vol_ratio:.2f}x OK"
                     else:
-                        # V11b: Volume belum cukup - WATCH
-                        v6_action = 'WATCH'
-                        v6_action_reason = f"V11b: Zona OK, {phase} OK, tapi Vol {v11b_vol_ratio:.2f}x < 1.0x - tunggu volume"
+                        # V11b1: Volume belum cukup - MENUNGGU VOLUME (max 7 hari)
+                        # Hitung berapa hari sudah dalam zona dengan vol < 1.0x
+                        days_waiting = 0
+                        if not price_df.empty and len(price_df) >= 2:
+                            price_df_check = price_df.sort_values('date', ascending=False).reset_index(drop=True)
+                            for i in range(min(7, len(price_df_check))):
+                                row_price = price_df_check['close_price'].iloc[i]
+                                row_vol = price_df_check['volume'].iloc[i]
+                                row_avg_vol = price_df_check['volume'].iloc[1:21].mean() if len(price_df_check) >= 21 else price_df_check['volume'].mean()
+                                row_vol_ratio = row_vol / row_avg_vol if row_avg_vol > 0 else 1.0
+                                # Cek apakah dalam zona dan vol < 1.0x
+                                if support_zone and support_zone['low'] <= row_price <= support_zone['high'] * 1.02 and row_vol_ratio < 1.0:
+                                    days_waiting += 1
+                                else:
+                                    break
+
+                        if days_waiting >= 7:
+                            # Sudah 7 hari menunggu, skip sinyal ini
+                            v6_action = 'WAIT'
+                            v6_action_reason = f"V11b1: Menunggu volume >7 hari - sinyal expired, tunggu setup baru"
+                        else:
+                            v6_action = 'WATCH'
+                            v6_action_reason = f"V11b1: MENUNGGU VOLUME | Zona OK, {phase} OK | Vol {v11b_vol_ratio:.2f}x < 1.0x | Hari ke-{days_waiting + 1}/7"
                 else:
                     v6_action = 'WATCH'
                     v6_action_reason = f"V10: Dalam zona tapi fase {phase} - pantau akumulasi"
