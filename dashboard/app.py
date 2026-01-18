@@ -60,7 +60,9 @@ _v10_running_cache = {}
 _v10_cache_time = None
 
 def get_all_v10_running_stocks():
-    """Get all stocks with V10 running positions (cached for 5 minutes)"""
+    """Get all stocks with V10 running positions (cached for 5 minutes)
+    Returns dict with stock_code -> position data (entry_price, current_pnl, etc.)
+    """
     global _v10_running_cache, _v10_cache_time
     from datetime import datetime, timedelta
 
@@ -77,7 +79,13 @@ def get_all_v10_running_stocks():
                 if result and result.get('trades'):
                     for trade in result['trades']:
                         if trade.get('exit_reason') == 'OPEN':
-                            _v10_running_cache[stock_code] = True
+                            _v10_running_cache[stock_code] = {
+                                'entry_price': trade.get('entry_price', 0),
+                                'current_pnl': trade.get('pnl', 0),
+                                'type': trade.get('type', ''),
+                                'zone_num': trade.get('zone_num', 0),
+                                'entry_date': trade.get('entry_date', ''),
+                            }
                             break
             except:
                 pass
@@ -2875,8 +2883,10 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
             roe = fundamental.get('roe', 0)
             has_fundamental = fundamental.get('has_data', False)
 
-            # Check if V10 is running for this stock
-            v10_running = stock_code in v10_running_stocks
+            # Check if V10 is running for this stock and get position data
+            v10_position_data = v10_running_stocks.get(stock_code)
+            v10_running = v10_position_data is not None
+            running_pnl = v10_position_data.get('current_pnl', 0) if v10_position_data else 0
 
             # Create attractive TEASER card with Profile & Fundamental
             card = dbc.Col([
@@ -2911,14 +2921,14 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
                        style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"} if not v10_running else {}),
 
                     dbc.CardBody([
-                        # Price & Change Row
+                        # Price & Change & P/L Row
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
                                     html.Small("Harga Terakhir", className="text-muted d-block"),
                                     html.H4(f"Rp {current_price:,.0f}", className="mb-0 text-warning"),
                                 ], className="text-center")
-                            ], width=6),
+                            ], width=4 if v10_running else 6),
                             dbc.Col([
                                 html.Div([
                                     html.Small("Perubahan", className="text-muted d-block"),
@@ -2927,7 +2937,16 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
                                         className=f"mb-0 text-{'success' if price_change > 0 else 'danger' if price_change < 0 else 'muted'}"
                                     ),
                                 ], className="text-center")
-                            ], width=6),
+                            ], width=4 if v10_running else 6),
+                            dbc.Col([
+                                html.Div([
+                                    html.Small("P/L Running", className="text-muted d-block"),
+                                    html.H4(
+                                        f"{running_pnl:+.1f}%",
+                                        className=f"mb-0 text-{'primary' if running_pnl >= 0 else 'danger'}"
+                                    ),
+                                ], className="text-center")
+                            ], width=4) if v10_running else None,
                         ], className="mb-3"),
 
                         html.Hr(className="my-2"),
