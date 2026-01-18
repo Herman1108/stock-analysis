@@ -88,6 +88,12 @@ STOCK_ZONES = {
         3: {'low': 9200, 'high': 9375},
         4: {'low': 10175, 'high': 10275},
     },
+    'BMRI': {
+        1: {'low': 3130, 'high': 3300},
+        2: {'low': 4070, 'high': 4260},
+        3: {'low': 5550, 'high': 5675},
+        4: {'low': 7225, 'high': 7400},
+    },
 }
 
 # Default parameters for all stocks
