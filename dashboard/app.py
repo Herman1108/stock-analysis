@@ -13841,6 +13841,14 @@ def create_analysis_page(stock_code='CDIA'):
             'status': 'NO_DATA', 'significance': 'INSUFFICIENT', 'horizons': {}, 'conclusion': 'Data tidak tersedia'
         }
 
+        # V11b Volume Ratio Calculation (today volume / 20-day avg)
+        v11b_vol_ratio = 1.0  # Default
+        if not price_df.empty and len(price_df) >= 20:
+            price_df_vol = price_df.sort_values('date', ascending=False).reset_index(drop=True)
+            today_volume = price_df_vol['volume'].iloc[0] if len(price_df_vol) > 0 else 0
+            avg_volume_20d = price_df_vol['volume'].iloc[1:21].mean() if len(price_df_vol) >= 21 else price_df_vol['volume'].mean()
+            v11b_vol_ratio = today_volume / avg_volume_20d if avg_volume_20d > 0 else 1.0
+
         # Calculate price changes (today, 1 week, 1 month)
         change_today = 0
         change_1w = 0
@@ -13971,10 +13979,16 @@ def create_analysis_page(stock_code='CDIA'):
             phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
 
             if v10_in_zone:
-                # Price is in a support zone - check for entry conditions
+                # Price is in a support zone - check for entry conditions (V11b: + Volume >= 1.0x)
                 if phase in ['STRONG_ACCUMULATION', 'ACCUMULATION', 'WEAK_ACCUMULATION']:
-                    v6_action = 'ENTRY'
-                    v6_action_reason = f"V10: Dalam zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Fase {phase}"
+                    if v11b_vol_ratio >= 1.0:
+                        # V11b: Volume confirmed - ENTRY
+                        v6_action = 'ENTRY'
+                        v6_action_reason = f"V11b: Zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | {phase} | Vol {v11b_vol_ratio:.2f}x"
+                    else:
+                        # V11b: Volume belum cukup - WATCH
+                        v6_action = 'WATCH'
+                        v6_action_reason = f"V11b: Zona OK, {phase} OK, tapi Vol {v11b_vol_ratio:.2f}x < 1.0x - tunggu volume"
                 else:
                     v6_action = 'WATCH'
                     v6_action_reason = f"V10: Dalam zona tapi fase {phase} - pantau akumulasi"
