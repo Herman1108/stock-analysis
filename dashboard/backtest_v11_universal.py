@@ -329,6 +329,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
     pending_entry_zone_high = None
     pending_entry_zone_num = 0
     pending_entry_idx = 0
+    pending_entry_conditions = None  # V11b1 checklist conditions at entry
 
     trades = []
     events_log = []
@@ -404,6 +405,9 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                         events_log.append(f"{date_str}: V11_FILTER {pending_entry_type} Z{pending_entry_zone_num} - {reject_reason}")
                 else:
                     # Entry passes V11 filters
+                    # Add vol_ratio to entry_conditions for V11b1 checklist
+                    if pending_entry_conditions:
+                        pending_entry_conditions['vol_ratio'] = vol_ratio
                     position = {
                         'type': pending_entry_type,
                         'entry_date': date_str,
@@ -416,6 +420,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                         'tp': tp,
                         'vol_ratio': vol_ratio,
                         'rsi': rsi,
+                        'entry_conditions': pending_entry_conditions,  # V11b1 checklist at entry
                     }
                     if verbose:
                         events_log.append(f"{date_str}: ENTRY {pending_entry_type} Z{pending_entry_zone_num} @ {entry_price:,.0f} (Vol:{vol_ratio:.1f}x, RSI:{rsi:.0f})")
@@ -425,6 +430,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
             pending_entry_zone_high = None
             pending_entry_zone_num = 0
             pending_entry_idx = 0
+            pending_entry_conditions = None
 
         # Position management
         if position:
@@ -535,6 +541,16 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pending_entry_zone_high = locked_zone_high
                     pending_entry_zone_num = locked_zone_num
                     pending_entry_idx = i
+                    # Save entry conditions for BREAKOUT (different from RETEST)
+                    pending_entry_conditions = {
+                        'trigger_date': date_str,
+                        'touch_support': True,  # Breakout counts as support confirmation
+                        'hold_above_slow': True,
+                        'within_35pct': True,
+                        'from_above': True,
+                        'prior_r_touch': True,
+                        'reclaim': True,  # Breakout is a form of reclaim
+                    }
                     if verbose:
                         events_log.append(f"{date_str}: TRIGGER {pending_entry_type} Z{locked_zone_num}")
 
@@ -569,6 +585,16 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     locked_zone_low = s_low
                     locked_zone_high = s_high
                     locked_zone_num = s_zone_num
+                    # Save V11b1 checklist conditions at trigger time
+                    pending_entry_conditions = {
+                        'trigger_date': date_str,
+                        'touch_support': s_touch,
+                        'hold_above_slow': s_hold,
+                        'within_35pct': s_not_late,
+                        'from_above': s_from_above,
+                        'prior_r_touch': prior_resistance_touched,
+                        'reclaim': False,  # Will be set on confirm
+                    }
                     if verbose:
                         events_log.append(f"{date_str}: RETEST_TRIGGER Z{s_zone_num}")
 
@@ -587,6 +613,10 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                         pending_entry_zone_high = locked_zone_high
                         pending_entry_zone_num = locked_zone_num
                         pending_entry_idx = i
+                        # Mark reclaim confirmed in entry conditions
+                        if pending_entry_conditions:
+                            pending_entry_conditions['reclaim'] = True
+                            pending_entry_conditions['confirm_date'] = date_str
                         if verbose:
                             events_log.append(f"{date_str}: RETEST_CONFIRM Z{locked_zone_num}")
                         prior_resistance_touched = False

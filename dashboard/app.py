@@ -26,16 +26,16 @@ from datetime import datetime, timedelta
 from database import execute_query, get_cursor, clear_cache, clear_stock_cache, get_cache_stats, preload_stock_data
 from zones_config import STOCK_ZONES, get_zones
 try:
-    from backtest_v10_universal import run_backtest as run_v10_backtest
+    from backtest_v11_universal import run_backtest as run_v11b1_backtest
 except ImportError:
-    run_v10_backtest = None
+    run_v11b1_backtest = None
 
 def get_v10_open_position(stock_code):
-    """Get current open V10 position if any"""
-    if not run_v10_backtest or not get_zones(stock_code):
+    """Get current open V11b1 position if any"""
+    if not run_v11b1_backtest or not get_zones(stock_code):
         return None
     try:
-        result = run_v10_backtest(stock_code)
+        result = run_v11b1_backtest(stock_code)
         if result and result.get('trades'):
             # Find open position
             for trade in result['trades']:
@@ -49,6 +49,7 @@ def get_v10_open_position(stock_code):
                         'zone_num': trade.get('zone_num', 0),
                         'current_pnl': trade.get('pnl', 0),
                         'entry_conditions': trade.get('entry_conditions'),  # V10 checklist at entry
+                        'vol_ratio': trade.get('vol_ratio', 0),  # V11b1: volume ratio at entry
                     }
         return None
     except Exception:
@@ -69,10 +70,10 @@ def get_all_v10_running_stocks():
 
     # Rebuild cache
     _v10_running_cache = {}
-    if run_v10_backtest:
+    if run_v11b1_backtest:
         for stock_code in STOCK_ZONES.keys():
             try:
-                result = run_v10_backtest(stock_code)
+                result = run_v11b1_backtest(stock_code)
                 if result and result.get('trades'):
                     for trade in result['trades']:
                         if trade.get('exit_reason') == 'OPEN':
@@ -7252,7 +7253,7 @@ def create_avg_buy_card(avg_buy_analysis, stock_code, sr_analysis=None):
                 html.Br(),
                 html.Span("* Resistance Zone", className="text-danger"), " = Area di atas harga yang menjadi penghalang kenaikan",
                 html.Br(),
-                html.Strong("Tips: "), "Zona ini berdasarkan Formula V10 (jika tersedia) atau analisis dinamis."
+                html.Strong("Tips: "), "Zona ini berdasarkan Formula V11b1 (jika tersedia) atau analisis dinamis."
             ], className="text-muted")
         ])
     ], className="mb-4", color="dark", outline=True)
@@ -7958,7 +7959,7 @@ def create_fixed_zones_card(stock_code):
         dbc.CardHeader([
             html.H5([
                 html.I(className="fas fa-crosshairs me-2"),
-                "Formula V10 - Support & Resistance Zones ",
+                "Formula V11b1 - Support & Resistance Zones ",
                 dbc.Badge("FIX", color="warning", className="ms-2")
             ], className="mb-0"),
         ]),
@@ -8336,19 +8337,19 @@ def create_support_resistance_page(stock_code='CDIA'):
             create_submenu_nav('support-resistance', stock_code),
         ], className="d-flex align-items-center flex-wrap mb-4"),
 
-        # ========== FIXED V10 ZONES (primary - only show this) ==========
+        # ========== FIXED V11b1 ZONES (primary - only show this) ==========
         fixed_zones_card if fixed_zones_card else dbc.Alert([
             html.I(className="fas fa-info-circle me-2"),
-            f"Emiten {stock_code} belum memiliki konfigurasi zona V10. ",
+            f"Emiten {stock_code} belum memiliki konfigurasi zona V11b1. ",
             "Hubungi admin untuk menambahkan zona support & resistance."
         ], color="warning", className="mb-4"),
 
-        # ========== S/R CHART WITH V10 ZONES ==========
+        # ========== S/R CHART WITH V11b1 ZONES ==========
         dbc.Card([
             dbc.CardHeader([
                 html.H5([
                     html.I(className="fas fa-chart-area me-2"),
-                    "Price Chart with V10 Zones" if fixed_zones_card else "Price Chart"
+                    "Price Chart with V11b1 Zones" if fixed_zones_card else "Price Chart"
                 ], className="mb-0"),
             ]),
             dbc.CardBody([
@@ -12476,23 +12477,23 @@ def create_accumulation_page(stock_code='CDIA'):
         ], className="mb-4"),
 
         # ========================================================================
-        # ANALISIS HUBUNGAN AKUMULASI & ZONA V10
+        # ANALISIS HUBUNGAN AKUMULASI & ZONA V11b1
         # ========================================================================
         html.Hr(className="my-4"),
 
         html.Div([
             html.H4([
                 html.I(className="fas fa-crosshairs me-2"),
-                "ANALISIS ZONA V10 & AKUMULASI"
+                "ANALISIS ZONA V11b1 & AKUMULASI"
             ], className="text-success mb-1"),
-            html.P("Hubungan antara fase akumulasi dengan Support & Resistance zona V10", className="text-muted mb-0 small")
+            html.P("Hubungan antara fase akumulasi dengan Support & Resistance zona V11b1", className="text-muted mb-0 small")
         ], className="mb-4") if stock_code.upper() in STOCK_ZONES else html.Div(),
 
-        # V10 Zone Analysis Card
+        # V11b1 Zone Analysis Card
         dbc.Card([
             dbc.CardHeader([
                 html.I(className="fas fa-layer-group me-2"),
-                html.Strong("Posisi Harga vs Zona V10"),
+                html.Strong("Posisi Harga vs Zona V11b1"),
                 dbc.Badge(f"{len(get_zones(stock_code))} Zona", color="info", className="ms-2")
             ], className="bg-success text-white"),
             dbc.CardBody([
@@ -12516,7 +12517,7 @@ def create_accumulation_page(stock_code='CDIA'):
                     ], md=4),
                     dbc.Col([
                         html.Div([
-                            html.Small("Support Aktif (V10)", className="text-muted d-block"),
+                            html.Small("Support Aktif (V11b1)", className="text-muted d-block"),
                             html.H4([
                                 html.Span(f"Z{min((znum for znum, z in get_zones(stock_code).items() if z['high'] <= snapshot['close']), default='-')}", className="text-success"),
                             ] if any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) else [
@@ -12529,7 +12530,7 @@ def create_accumulation_page(stock_code='CDIA'):
                     ], md=4),
                     dbc.Col([
                         html.Div([
-                            html.Small("Resistance Aktif (V10)", className="text-muted d-block"),
+                            html.Small("Resistance Aktif (V11b1)", className="text-muted d-block"),
                             html.H4([
                                 html.Span(f"Z{min((znum for znum, z in get_zones(stock_code).items() if z['low'] >= snapshot['close']), default='-')}", className="text-danger"),
                             ] if any(z['low'] >= snapshot['close'] for z in get_zones(stock_code).values()) else [
@@ -12580,7 +12581,7 @@ def create_accumulation_page(stock_code='CDIA'):
         dbc.Card([
             dbc.CardHeader([
                 html.I(className="fas fa-brain me-2"),
-                html.Strong("Kesimpulan: Akumulasi + Zona V10")
+                html.Strong("Kesimpulan: Akumulasi + Zona V11b1")
             ], className="bg-warning text-dark"),
             dbc.CardBody([
                 dbc.Row([
@@ -12605,7 +12606,7 @@ def create_accumulation_page(stock_code='CDIA'):
                     # Middle: Zone Position
                     dbc.Col([
                         html.Div([
-                            html.H6("Posisi di Zona V10", className="text-muted mb-2"),
+                            html.H6("Posisi di Zona V11b1", className="text-muted mb-2"),
                             html.Div([
                                 html.Span(
                                     "📍 DI SUPPORT" if any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or (
@@ -12677,13 +12678,13 @@ def create_accumulation_page(stock_code='CDIA'):
                     html.I(className="fas fa-info-circle me-2 text-info"),
                     html.Strong("Interpretasi: ", className="text-info"),
                     html.Span(
-                        "Fase akumulasi terdeteksi DAN harga berada dekat zona support V10. Kondisi ideal untuk entry dengan SL di bawah zona." if (
+                        "Fase akumulasi terdeteksi DAN harga berada dekat zona support V11b1. Kondisi ideal untuk entry dengan SL di bawah zona." if (
                             (sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.5) and
                             (any(z['low'] <= snapshot['close'] <= z['high'] for z in get_zones(stock_code).values()) or
                              (any(z['high'] <= snapshot['close'] for z in get_zones(stock_code).values()) and
                               min((snapshot['close'] - z['high']) / z['high'] * 100 for z in get_zones(stock_code).values() if z['high'] <= snapshot['close']) < 5))
                         ) else
-                        "Sinyal akumulasi lemah. Harga perlu mendekati zona V10 untuk entry yang lebih aman." if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2 else
+                        "Sinyal akumulasi lemah. Harga perlu mendekati zona V11b1 untuk entry yang lebih aman." if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 > 1.2 else
                         "Fase netral/sideways. Tunggu konfirmasi akumulasi dan posisi harga di zona support." if sum(weeks.get(w, {}).get('vol_ratio', 1) for w in range(1, 5)) / 4 >= 0.8 else
                         "Fase distribusi terdeteksi. Hindari entry, lebih baik wait atau reduce position.",
                         className="small"
@@ -14011,19 +14012,19 @@ def create_analysis_page(stock_code='CDIA'):
                             v6_action_reason = f"V11b1: MENUNGGU VOLUME | Zona OK, {phase} OK | Vol {v11b_vol_ratio:.2f}x < 1.0x | Hari ke-{days_waiting + 1}/7"
                 else:
                     v6_action = 'WATCH'
-                    v6_action_reason = f"V10: Dalam zona tapi fase {phase} - pantau akumulasi"
+                    v6_action_reason = f"V11b1: Dalam zona tapi fase {phase} - pantau akumulasi"
             elif support_zone and resistance_zone:
                 # Price is between zones - WAIT for retest
                 v6_action = 'WAIT'
-                v6_action_reason = f"V10: Di antara zona S {support_zone['low']:,.0f}-{support_zone['high']:,.0f} dan R {resistance_zone['low']:,.0f}-{resistance_zone['high']:,.0f} - tunggu retest"
+                v6_action_reason = f"V11b1: Di antara zona S {support_zone['low']:,.0f}-{support_zone['high']:,.0f} dan R {resistance_zone['low']:,.0f}-{resistance_zone['high']:,.0f} - tunggu retest"
             elif support_zone and not resistance_zone:
                 # Price is above all zones
                 v6_action = 'WATCH'
-                v6_action_reason = f"V10: Di atas semua zona - pantau breakout atau retest ke {support_zone['low']:,.0f}-{support_zone['high']:,.0f}"
+                v6_action_reason = f"V11b1: Di atas semua zona - pantau breakout atau retest ke {support_zone['low']:,.0f}-{support_zone['high']:,.0f}"
             else:
                 # No support zone (price below all zones)
                 v6_action = 'AVOID'
-                v6_action_reason = f"V10: Harga di bawah semua zona support"
+                v6_action_reason = f"V11b1: Harga di bawah semua zona support"
 
     # Use Strong S/R phase for PANI/BREN/MBMA, otherwise use v6_data phase
     if v6_entry.get('formula_info', {}).get('type') == 'STRONG_SR':
@@ -14032,8 +14033,8 @@ def create_analysis_page(stock_code='CDIA'):
         v6_phase = v6_data.get('phase', {}).get('phase', 'NEUTRAL') if v6_data and not v6_data.get('error') else 'NEUTRAL'
     v6_action_map = {
         'ENTRY': {'icon': '🟢', 'color': 'success', 'desc': 'Sinyal masuk - Akumulasi terdeteksi'},
-        'ALREADY_ENTRY': {'icon': '📈', 'color': 'primary', 'desc': 'Sudah entry - Posisi terbuka V10'},
-        'RUNNING': {'icon': '🚀', 'color': 'primary', 'desc': 'Posisi V10 sedang berjalan'},
+        'ALREADY_ENTRY': {'icon': '📈', 'color': 'primary', 'desc': 'Sudah entry - Posisi terbuka V11b1'},
+        'RUNNING': {'icon': '🚀', 'color': 'primary', 'desc': 'Posisi V11b1 sedang berjalan'},
         'WATCH': {'icon': '👁️', 'color': 'info', 'desc': 'Observasi - Tunggu konfirmasi'},
         'EXIT': {'icon': '🔴', 'color': 'danger', 'desc': 'Sinyal keluar - Distribusi terdeteksi'},
         'AVOID': {'icon': '⛔', 'color': 'danger', 'desc': 'Hindari - Distribusi kuat'},
@@ -14215,7 +14216,7 @@ def create_analysis_page(stock_code='CDIA'):
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.Small("Konfirmasi V10", className="text-muted"),
+                                    html.Small("Konfirmasi V11b1", className="text-muted"),
                                     html.Div([
                                         html.Strong(
                                             "RETEST OK" if (zones_v10 := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.02 for z in zones_v10.values()) else
@@ -14253,7 +14254,7 @@ def create_analysis_page(stock_code='CDIA'):
                         # Formula V10 Zones Info
                         (lambda v10_zones, v10_support, v10_resistance, v10_s_dist, v10_r_dist, v10_in_zone, v10_has_position: dbc.Row([
                             dbc.Col([
-                                html.H6([html.I(className="fas fa-layer-group text-info me-2"), "Formula V10"], className="mb-2"),
+                                html.H6([html.I(className="fas fa-layer-group text-info me-2"), "Formula V11b1"], className="mb-2"),
                                 html.Div([
                                     html.Div([
                                         html.Span("S ", className="text-success fw-bold"),
@@ -14269,10 +14270,10 @@ def create_analysis_page(stock_code='CDIA'):
                                         html.Span("Harga: ", className="text-muted small"),
                                         html.Span(f"Rp {current_price:,.0f}", className="text-warning fw-bold small"),
                                     ], className="mb-1"),
-                                ]) if v10_zones else html.Small(f"Zona V10 belum dikonfigurasi untuk {stock_code}", className="text-muted")
+                                ]) if v10_zones else html.Small(f"Zona V11b1 belum dikonfigurasi untuk {stock_code}", className="text-muted")
                             ], md=6),
                             dbc.Col([
-                                html.H6([html.I(className="fas fa-crosshairs text-warning me-2"), "Status V10"], className="mb-2"),
+                                html.H6([html.I(className="fas fa-crosshairs text-warning me-2"), "Status V11b1"], className="mb-2"),
                                 html.Div([
                                     dbc.Badge(
                                         "RETEST ZONE" if v10_in_zone else "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
@@ -14427,7 +14428,7 @@ def create_analysis_page(stock_code='CDIA'):
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
-                        html.H6([html.I(className="fas fa-layer-group me-2 text-info"), "S/R Fix (V10)"], className="mb-0 d-inline"),
+                        html.H6([html.I(className="fas fa-layer-group me-2 text-info"), "S/R Fix (V11b1)"], className="mb-0 d-inline"),
                     ]),
                     dbc.CardBody([
                         # Get fixed zones for stock
@@ -14474,13 +14475,13 @@ def create_analysis_page(stock_code='CDIA'):
                 ], color="dark", outline=True, className="h-100")
             ], md=4),
 
-            # KONFIRMASI V10 CARD
+            # KONFIRMASI V11b1 CARD
             dbc.Col([
                 dbc.Card([
                     dbc.CardHeader([
                         html.H6([
                             html.I(className="fas fa-clipboard-check me-2 text-warning"),
-                            html.Span("Konfirmasi V10")
+                            html.Span("Konfirmasi V11b1")
                         ], className="mb-0 d-inline"),
                     ]),
                     dbc.CardBody([
@@ -14495,8 +14496,8 @@ def create_analysis_page(stock_code='CDIA'):
                         ], className="text-center mb-2"),
                         html.Hr(className="my-2"),
                         # V10 Checklist - use stored entry conditions if position exists
-                        html.Small(f"Checklist V10{' (' + v10_position['entry_date'] + ')' if v10_position and v10_position.get('entry_conditions') else ''}:", className="text-muted d-block mb-1"),
-                        (lambda ec: html.Div([
+                        html.Small(f"Checklist V11b1{' (' + v10_position['entry_date'] + ')' if v10_position and v10_position.get('entry_conditions') else ''}:", className="text-muted d-block mb-1"),
+                        (lambda ec, pos_vol: html.Div([
                             # Use stored entry conditions from position
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if ec.get('touch_support') else 'times'} text-{'success' if ec.get('touch_support') else 'danger'} me-1"),
@@ -14518,9 +14519,14 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.I(className=f"fas fa-{'check' if ec.get('reclaim') else 'times'} text-{'success' if ec.get('reclaim') else 'danger'} me-1"),
                                 html.Small("Konfirmasi Reclaim", className="text-muted"),
                             ], className="mb-1"),
-                        ]))(v10_position.get('entry_conditions', {})) if v10_position and v10_position.get('entry_conditions') else (
+                            # V11b1: Volume >= 1.0x (use vol_ratio from position directly)
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if pos_vol >= 1.0 else 'times'} text-{'success' if pos_vol >= 1.0 else 'danger'} me-1"),
+                                html.Small(f"Volume >= 1.0x ({pos_vol:.2f}x)", className="text-muted"),
+                            ], className="mb-1"),
+                        ]))(v10_position.get('entry_conditions', {}), v10_position.get('vol_ratio', 0)) if v10_position and v10_position.get('entry_conditions') else (
                         # Calculate current conditions if no position
-                        (lambda zones, support_zone: html.Div([
+                        (lambda zones, support_zone, cur_vol_ratio: html.Div([
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if support_zone and current_price <= support_zone['high'] * 1.02 else 'times'} text-{'success' if support_zone and current_price <= support_zone['high'] * 1.02 else 'danger'} me-1"),
                                 html.Small("Touch Support", className="text-muted"),
@@ -14541,21 +14547,27 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.I(className="fas fa-minus text-secondary me-1"),
                                 html.Small("Konfirmasi Reclaim", className="text-muted"),
                             ], className="mb-1"),
+                            # V11b1: Volume >= 1.0x
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if cur_vol_ratio >= 1.0 else 'times'} text-{'success' if cur_vol_ratio >= 1.0 else 'danger'} me-1"),
+                                html.Small(f"Volume >= 1.0x ({cur_vol_ratio:.2f}x)", className="text-muted"),
+                            ], className="mb-1"),
                         ]) if zones else html.Small("Zona belum dikonfigurasi", className="text-muted"))(
                             get_zones(stock_code),
-                            (lambda zs: next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price * 1.02), None) if zs else None)(get_zones(stock_code))
+                            (lambda zs: next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price * 1.02), None) if zs else None)(get_zones(stock_code)),
+                            weeks.get(1, {}).get('vol_ratio', 0) if weeks else 0
                         ))
                     ])
                 ], color="dark", outline=True, className="h-100")
             ], md=4),
         ], className="mb-4"),
 
-        # === 5.5 BACKTEST HISTORY V10 ===
+        # === 5.5 BACKTEST HISTORY V11b1 ===
         (lambda bt_result: dbc.Card([
             dbc.CardHeader([
                 html.H5([
                     html.I(className="fas fa-history me-2 text-info"),
-                    "Backtest V10 History"
+                    "Backtest V11b1 History"
                 ], className="mb-0 d-inline"),
                 dbc.Badge(
                     f"{len(bt_result.get('trades', []))} trades" if bt_result else "No data",
@@ -14660,7 +14672,7 @@ def create_analysis_page(stock_code='CDIA'):
                 ]) if bt_result and bt_result.get('trades') else None,
             ])
         ], color="dark", outline=True, className="mb-4") if get_zones(stock_code) else html.Div())(
-            run_v10_backtest(stock_code) if run_v10_backtest and get_zones(stock_code) else None
+            run_v11b1_backtest(stock_code) if run_v11b1_backtest and get_zones(stock_code) else None
         ),
 
         # === 6. WEEKLY ACCUMULATION ANALYSIS (Key Point dari Accumulation) ===
@@ -17139,8 +17151,8 @@ def create_app_layout():
 
         # Hidden dummy components to prevent callback errors when page components don't exist
         html.Div([
-            html.Button(id='upload-password-submit', n_clicks=0),
-            dcc.Input(id='upload-password-input', value=''),
+            dbc.Button(id='upload-password-submit', n_clicks=0, style={'display': 'none'}),
+            dbc.Input(id='upload-password-input', value='', style={'display': 'none'}),
             html.Div(id='upload-password-gate'),
             html.Div(id='upload-form-container'),
             html.Div(id='upload-password-error'),
