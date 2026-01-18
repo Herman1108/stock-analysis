@@ -82,6 +82,12 @@ STOCK_ZONES = {
         5: {'low': 1395, 'high': 1435},
         6: {'low': 1680, 'high': 1710},
     },
+    'BBCA': {
+        1: {'low': 7050, 'high': 7225},
+        2: {'low': 8075, 'high': 8150},
+        3: {'low': 9200, 'high': 9375},
+        4: {'low': 10175, 'high': 10275},
+    },
 }
 
 # Default parameters for all stocks
