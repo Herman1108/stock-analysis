@@ -1,11 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Universal Backtest Formula V11
-V10 + Volume Confirmation + RSI Filter
+Universal Backtest Formula V11b1
+V10 + Volume Confirmation
 
 Perubahan dari V10:
 1. Entry hanya jika Volume >= 1.0x average (20-day)
-2. Entry hanya jika RSI < 70 (hindari overbought)
+
+Note: RSI filter tersedia tapi dimatikan untuk V11b1
 """
 
 import sys
@@ -41,7 +42,7 @@ V11_PARAMS = {
     'min_vol_ratio': 1.0,      # Minimum volume ratio vs average
     'rsi_period': 14,          # RSI calculation period
     'max_rsi': 70,             # Maximum RSI for entry (avoid overbought)
-    'use_rsi_filter': True,    # Enable/disable RSI filter
+    'use_rsi_filter': False,   # V11b1: Hanya Volume filter, tanpa RSI
 }
 
 # State machine constants
@@ -168,6 +169,13 @@ class ZoneHelper:
     def __init__(self, zones):
         self.zones = zones
 
+    def get_lowest_zone(self):
+        """Get the lowest support zone (Z1)"""
+        if not self.zones:
+            return None, None, 0
+        min_zone_num = min(self.zones.keys())
+        return self.zones[min_zone_num]['low'], self.zones[min_zone_num]['high'], min_zone_num
+
     def get_active_support(self, close):
         for znum in sorted(self.zones.keys()):
             if self.zones[znum]['low'] <= close <= self.zones[znum]['high']:
@@ -258,14 +266,13 @@ def calculate_sl_tp(zh, entry_type, zone_low, zone_high, zone_num, entry_price, 
     sl_pct = params['sl_pct']
     tp_buffer_pct = params.get('tp_buffer_pct', 0.02)
 
-    if entry_type == 'RETEST':
-        sl = zone_low * (1 - sl_pct)
-    elif entry_type == 'BO_HOLD':
-        sl = zone_high * (1 - sl_pct)
-    elif entry_type == 'BO_PULLBACK':
-        sl = zone_low * (1 - sl_pct)
+    # SL dari zona support terbawah - 5%
+    lowest_low, lowest_high, lowest_num = zh.get_lowest_zone()
+    if lowest_low is not None:
+        sl = lowest_low * (1 - sl_pct)
     else:
-        sl = zone_low * (1 - sl_pct)
+        # Fallback jika tidak ada zona
+        sl = entry_price * (1 - sl_pct)
 
     next_r_zone = zh.get_next_resistance_zone(entry_price)
     if next_r_zone is not None:
