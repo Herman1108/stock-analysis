@@ -266,13 +266,9 @@ def calculate_sl_tp(zh, entry_type, zone_low, zone_high, zone_num, entry_price, 
     sl_pct = params['sl_pct']
     tp_buffer_pct = params.get('tp_buffer_pct', 0.02)
 
-    # SL dari zona support terbawah - 5%
-    lowest_low, lowest_high, lowest_num = zh.get_lowest_zone()
-    if lowest_low is not None:
-        sl = lowest_low * (1 - sl_pct)
-    else:
-        # Fallback jika tidak ada zona
-        sl = entry_price * (1 - sl_pct)
+    # SL dari zona entry (harga terbawah zona) - 5%
+    # Contoh: zona 12,550-13,050 -> SL = 12,550 * 0.95 = 11,922.50
+    sl = zone_low * (1 - sl_pct)
 
     next_r_zone = zh.get_next_resistance_zone(entry_price)
     if next_r_zone is not None:
