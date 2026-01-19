@@ -387,7 +387,15 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
     min_data_required = 30
     if v11_params.get('use_ma_filter', False):
         ma_long = v11_params.get('ma_long', 200)
-        min_data_required = max(min_data_required, ma_long + 50)  # Need extra days for trading
+        min_data_v11b2 = ma_long + 50  # Need extra days for trading
+
+        if not all_data or len(all_data) < min_data_v11b2:
+            # Fallback to V11b1 (no MA filter) when data insufficient for V11b2
+            if verbose:
+                print(f"Insufficient data for V11b2 ({len(all_data) if all_data else 0} < {min_data_v11b2}), falling back to V11b1")
+            v11_params['use_ma_filter'] = False
+        else:
+            min_data_required = min_data_v11b2
 
     if not all_data or len(all_data) < min_data_required:
         if verbose:
