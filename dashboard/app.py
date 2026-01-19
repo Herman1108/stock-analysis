@@ -18173,24 +18173,31 @@ def extend_account_membership(clicks_7d, clicks_30d):
 
     triggered = ctx.triggered[0]
     prop_id = triggered['prop_id']
+    triggered_value = triggered.get('value')
+
+    # Must have a click value (not None or 0)
+    if not triggered_value:
+        raise dash.exceptions.PreventUpdate
 
     # Check which button was clicked
-    if 'extend-account-7d' in prop_id and any(c for c in (clicks_7d or []) if c):
+    if 'extend-account-7d' in prop_id:
         days = 7
-    elif 'extend-account-30d' in prop_id and any(c for c in (clicks_30d or []) if c):
+    elif 'extend-account-30d' in prop_id:
         days = 30
     else:
         raise dash.exceptions.PreventUpdate
 
     import json
     try:
-        button_info = json.loads(prop_id.replace('.n_clicks', ''))
+        # Extract button info from prop_id
+        button_id_str = prop_id.replace('.n_clicks', '')
+        button_info = json.loads(button_id_str)
         account_id = button_info['index']
 
         # Get account info for feedback
         account = get_account_by_id(account_id)
         if not account:
-            return dbc.Alert("Akun tidak ditemukan", color="danger")
+            return dbc.Alert("Akun tidak ditemukan", color="danger", dismissable=True)
 
         # Extend membership
         result = extend_member(account_id, days)
@@ -18199,9 +18206,9 @@ def extend_account_membership(clicks_7d, clicks_30d):
                 html.I(className="fas fa-check-circle me-2"),
                 f"Akun '{account['username']}' diperpanjang {days} hari. Refresh untuk melihat perubahan."
             ], color="success", dismissable=True)
-        return dbc.Alert("Gagal memperpanjang akun", color="danger")
+        return dbc.Alert("Gagal memperpanjang akun", color="danger", dismissable=True)
     except Exception as e:
-        return dbc.Alert(f"Error: {str(e)}", color="danger")
+        return dbc.Alert(f"Error: {str(e)}", color="danger", dismissable=True)
 
 
 # ============================================================
