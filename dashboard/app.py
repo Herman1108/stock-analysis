@@ -2711,16 +2711,17 @@ def create_navbar():
                 dbc.NavbarBrand("HermanStock", href="/", className="me-2", style={"fontSize": "0.95rem"}),
 
                 # Stock Selector - searchable dropdown
-                # Options will be populated by refresh_stock_dropdown callback
+                # Value will be synced with URL by callback
                 dcc.Dropdown(
                     id='stock-selector',
                     options=[{'label': s, 'value': s} for s in stocks] if stocks else [],
-                    value=default_value,
+                    value=None,  # Will be set by sync_dropdown_with_url callback
                     style={'width': '100px', 'minWidth': '100px'},
                     clearable=False,
                     searchable=True,
                     placeholder="Emiten",
-                    className="stock-dropdown me-2"
+                    className="stock-dropdown me-2",
+                    persistence=False  # Don't persist value between page loads
                 ),
 
                 # Desktop content menus
