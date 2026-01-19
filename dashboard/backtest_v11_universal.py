@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """
-Universal Backtest Formula V11b1
+Universal Backtest Formula V11b1 & V11b2
 V10 + Volume Confirmation
 
-Perubahan dari V10:
-1. Entry hanya jika Volume >= 1.0x average (20-day)
+Formula V11b1 (default):
+- Entry hanya jika Volume >= 1.0x average (20-day)
 
-Note: RSI filter tersedia tapi dimatikan untuk V11b1
+Formula V11b2 (BBCA, MBMA, HRUM, CDIA):
+- V11b1 + MA30 > MA100 (trend filter)
+- Hanya entry saat uptrend untuk menghindari loss
 """
 
 import sys
@@ -45,6 +47,15 @@ V11_PARAMS = {
     'use_rsi_filter': False,   # V11b1: Hanya Volume filter, tanpa RSI
 }
 
+# V11b2 Parameters (V11b1 + MA30 > MA100 trend filter)
+# Digunakan untuk: BBCA, MBMA, HRUM, CDIA
+V11B2_STOCKS = ['BBCA', 'MBMA', 'HRUM', 'CDIA']
+V11B2_PARAMS = {
+    'use_ma_filter': True,     # Enable MA trend filter
+    'ma_short': 30,            # MA short period
+    'ma_long': 100,            # MA long period
+}
+
 # State machine constants
 STATE_IDLE = 0
 STATE_RETEST_PENDING = 1
@@ -56,12 +67,34 @@ def get_stock_data(stock_code, conn):
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute('''
         SELECT date, open_price as open, high_price as high,
-               low_price as low, close_price as close, volume
+               low_price as low, close_price as close, volume,
+               net_foreign
         FROM stock_daily WHERE stock_code = %s
         AND open_price IS NOT NULL AND close_price IS NOT NULL
         ORDER BY date ASC
     ''', (stock_code,))
     return cur.fetchall()
+
+
+def calculate_net_foreign_sum(data, idx, lookback=4):
+    """Calculate cumulative net foreign for last N days"""
+    if idx < lookback - 1:
+        return None
+
+    total = 0
+    for i in range(idx - lookback + 1, idx + 1):
+        nf = data[i].get('net_foreign')
+        if nf is not None:
+            total += float(nf)
+    return total
+
+
+def calculate_ma(data, idx, period):
+    """Calculate Simple Moving Average - V11b2"""
+    if idx < period - 1:
+        return None
+    total = sum(float(data[i]['close']) for i in range(idx - period + 1, idx + 1))
+    return total / period
 
 
 def calculate_true_range(data):
@@ -131,30 +164,38 @@ def calculate_rsi(data, idx, period=14):
     return rsi
 
 
-def check_v11_filters(data, idx, v11_params):
+def check_v11_filters(data, idx, v11_params, stock_code=None):
     """
-    Check V11 additional filters - Volume and RSI
-    Returns (passed, vol_ratio, rsi, reject_reason)
+    Check V11 additional filters
+    V11b1: Volume only
+    V11b2: Volume + MA50 > MA200 (for BBCA, MBMA, CDIA)
+    Returns (passed, vol_ratio, ma50, ma200, reject_reason)
     """
     vol_ratio = calculate_volume_ratio(data, idx, v11_params['vol_lookback'])
-    rsi = calculate_rsi(data, idx, v11_params['rsi_period'])
+    ma50 = None
+    ma200 = None
 
     # Check volume filter
     if vol_ratio is None:
-        return False, vol_ratio, rsi, "VOL_NO_DATA"
+        return False, vol_ratio, ma50, ma200, "VOL_NO_DATA"
 
     if vol_ratio < v11_params['min_vol_ratio']:
-        return False, vol_ratio, rsi, f"VOL_LOW ({vol_ratio:.2f}x < {v11_params['min_vol_ratio']}x)"
+        return False, vol_ratio, ma50, ma200, f"VOL_LOW ({vol_ratio:.2f}x < {v11_params['min_vol_ratio']}x)"
 
-    # Check RSI filter (if enabled)
-    if v11_params['use_rsi_filter']:
-        if rsi is None:
-            return False, vol_ratio, rsi, "RSI_NO_DATA"
+    # V11b2: Check MA filter (for BBCA, MBMA, CDIA)
+    if v11_params.get('use_ma_filter', False):
+        ma_short = v11_params.get('ma_short', 50)
+        ma_long = v11_params.get('ma_long', 200)
+        ma50 = calculate_ma(data, idx, ma_short)
+        ma200 = calculate_ma(data, idx, ma_long)
 
-        if rsi >= v11_params['max_rsi']:
-            return False, vol_ratio, rsi, f"RSI_HIGH ({rsi:.0f} >= {v11_params['max_rsi']})"
+        if ma50 is None or ma200 is None:
+            return False, vol_ratio, ma50, ma200, "MA_NO_DATA"
 
-    return True, vol_ratio, rsi, None
+        if ma50 <= ma200:
+            return False, vol_ratio, ma50, ma200, f"MA50<=MA200 ({ma50:,.0f} <= {ma200:,.0f})"
+
+    return True, vol_ratio, ma50, ma200, None
 
 
 def get_buffer(data, idx, atr_list, params):
@@ -286,6 +327,10 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
     if v11_params is None:
         v11_params = V11_PARAMS.copy()
 
+    # V11b2: Use MA50 > MA200 filter for BBCA, MBMA, CDIA
+    if stock_code.upper() in V11B2_STOCKS:
+        v11_params = {**v11_params, **V11B2_PARAMS}
+
     zones = STOCK_ZONES.get(stock_code.upper())
     if not zones:
         print(f"No zones configured for {stock_code}")
@@ -301,8 +346,15 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
         print(f"Database error for {stock_code}: {e}")
         return None
 
-    if not all_data or len(all_data) < 30:
-        print(f"Insufficient data for {stock_code}")
+    # Check minimum data requirements
+    min_data_required = 30
+    if v11_params.get('use_ma_filter', False):
+        ma_long = v11_params.get('ma_long', 200)
+        min_data_required = max(min_data_required, ma_long + 50)  # Need extra days for trading
+
+    if not all_data or len(all_data) < min_data_required:
+        if verbose:
+            print(f"Insufficient data for {stock_code} (need {min_data_required}, have {len(all_data) if all_data else 0})")
         return None
 
     tr_list = calculate_true_range(all_data)
@@ -338,9 +390,15 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
     events_log = []
     filtered_entries = []  # V11: Track filtered entries
 
-    start_idx = params['atr_len'] + 1
+    # V11b2 stocks need 200 days for MA200 calculation
+    min_start = params['atr_len'] + 1
+    if v11_params.get('use_ma_filter', False):
+        ma_long = v11_params.get('ma_long', 200)
+        min_start = max(min_start, ma_long)
+
+    start_idx = min_start
     for i, d in enumerate(all_data):
-        if str(d['date']) >= start_date and i >= start_idx:
+        if str(d['date']) >= start_date and i >= min_start:
             start_idx = i
             break
 
@@ -390,8 +448,8 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 if verbose:
                     events_log.append(f"{date_str}: SKIP_ENTRY {pending_entry_type} Z{pending_entry_zone_num} - TP ({tp:,.0f}) <= entry ({entry_price:,.0f})")
             else:
-                # V11: Check volume and RSI filters
-                v11_passed, vol_ratio, rsi, reject_reason = check_v11_filters(all_data, pending_entry_idx, v11_params)
+                # V11: Check volume and MA filters
+                v11_passed, vol_ratio, ma50, ma200, reject_reason = check_v11_filters(all_data, pending_entry_idx, v11_params, stock_code)
 
                 if not v11_passed:
                     # Entry filtered out by V11
@@ -401,14 +459,14 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                         'zone_num': pending_entry_zone_num,
                         'price': entry_price,
                         'vol_ratio': vol_ratio,
-                        'rsi': rsi,
+                        'ma50': ma50,
+                        'ma200': ma200,
                         'reason': reject_reason,
                     })
                     if verbose:
                         events_log.append(f"{date_str}: V11_FILTER {pending_entry_type} Z{pending_entry_zone_num} - {reject_reason}")
                 else:
                     # Entry passes V11 filters
-                    # Add vol_ratio to entry_conditions for V11b1 checklist
                     if pending_entry_conditions:
                         pending_entry_conditions['vol_ratio'] = vol_ratio
                     position = {
@@ -422,11 +480,13 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                         'sl': sl,
                         'tp': tp,
                         'vol_ratio': vol_ratio,
-                        'rsi': rsi,
-                        'entry_conditions': pending_entry_conditions,  # V11b1 checklist at entry
+                        'ma50': ma50,
+                        'ma200': ma200,
+                        'entry_conditions': pending_entry_conditions,
                     }
+                    ma_str = f", MA50:{ma50:,.0f}>MA200:{ma200:,.0f}" if ma50 and ma200 else ""
                     if verbose:
-                        events_log.append(f"{date_str}: ENTRY {pending_entry_type} Z{pending_entry_zone_num} @ {entry_price:,.0f} (Vol:{vol_ratio:.1f}x, RSI:{rsi:.0f})")
+                        events_log.append(f"{date_str}: ENTRY {pending_entry_type} Z{pending_entry_zone_num} @ {entry_price:,.0f} (Vol:{vol_ratio:.1f}x{ma_str})")
 
             pending_entry_type = None
             pending_entry_zone_low = None
@@ -679,6 +739,10 @@ def print_report(result):
 
     print(f"\n{'='*90}")
     print(f"BACKTEST V11 - {stock_code}")
+    if stock_code.upper() in V11B2_STOCKS:
+        print(f"Formula: V11b2 (Vol>=1.0x + MA50>MA200)")
+    else:
+        print(f"Formula: V11b1 (Vol>=1.0x)")
     print(f"{'='*90}")
 
     print("\nZONES:")
@@ -697,21 +761,19 @@ def print_report(result):
 
     if trades:
         print(f"\nTRADES:")
-        print(f"  {'#':<3} {'Type':<12} {'Zone':<5} {'Entry':<12} {'Price':>10} {'Exit':<12} {'ExitP':>10} {'Reason':<10} {'PnL':>8} {'Vol':>6} {'RSI':>5}")
-        print(f"  {'-'*100}")
+        print(f"  {'#':<3} {'Type':<12} {'Zone':<5} {'Entry':<12} {'Price':>10} {'Exit':<12} {'ExitP':>10} {'Reason':<10} {'PnL':>8} {'Vol':>6}")
+        print(f"  {'-'*95}")
         for idx, t in enumerate(trades, 1):
             vol = f"{t.get('vol_ratio', 0):.1f}x" if t.get('vol_ratio') else "N/A"
-            rsi = f"{t.get('rsi', 0):.0f}" if t.get('rsi') else "N/A"
-            print(f"  {idx:<3} {t['type']:<12} Z{t['zone_num']:<4} {t['entry_date']:<12} {t['entry_price']:>10,.0f} {t['exit_date']:<12} {t['exit_price']:>10,.0f} {t['exit_reason']:<10} {t['pnl']:>+7.1f}% {vol:>6} {rsi:>5}")
+            print(f"  {idx:<3} {t['type']:<12} Z{t['zone_num']:<4} {t['entry_date']:<12} {t['entry_price']:>10,.0f} {t['exit_date']:<12} {t['exit_price']:>10,.0f} {t['exit_reason']:<10} {t['pnl']:>+7.1f}% {vol:>6}")
 
     if filtered:
         print(f"\nFILTERED ENTRIES (V11):")
-        print(f"  {'#':<3} {'Type':<12} {'Zone':<5} {'Date':<12} {'Price':>10} {'Vol':>8} {'RSI':>5} {'Reason':<30}")
-        print(f"  {'-'*90}")
+        print(f"  {'#':<3} {'Type':<12} {'Zone':<5} {'Date':<12} {'Price':>10} {'Vol':>8} {'Reason':<35}")
+        print(f"  {'-'*95}")
         for idx, f in enumerate(filtered, 1):
             vol = f"{f.get('vol_ratio', 0):.2f}x" if f.get('vol_ratio') else "N/A"
-            rsi = f"{f.get('rsi', 0):.0f}" if f.get('rsi') else "N/A"
-            print(f"  {idx:<3} {f['type']:<12} Z{f['zone_num']:<4} {f['date']:<12} {f['price']:>10,.0f} {vol:>8} {rsi:>5} {f['reason']:<30}")
+            print(f"  {idx:<3} {f['type']:<12} Z{f['zone_num']:<4} {f['date']:<12} {f['price']:>10,.0f} {vol:>8} {f['reason']:<35}")
 
 
 def run_all_backtests():
@@ -720,7 +782,8 @@ def run_all_backtests():
 
     print("=" * 90)
     print("FORMULA V11 - BACKTEST ALL STOCKS")
-    print("V10 + Volume >= 1.0x + RSI < 70")
+    print("V11b1: Vol >= 1.0x (default)")
+    print(f"V11b2: Vol >= 1.0x + MA50 > MA200 ({', '.join(V11B2_STOCKS)})")
     print("=" * 90)
 
     for stock_code in sorted(STOCK_ZONES.keys()):
