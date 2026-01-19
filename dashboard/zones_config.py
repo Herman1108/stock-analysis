@@ -94,6 +94,13 @@ STOCK_ZONES = {
         3: {'low': 5550, 'high': 5675},
         4: {'low': 7225, 'high': 7400},
     },
+    'ADMR': {
+        1: {'low': 1005, 'high': 1065},
+        2: {'low': 1195, 'high': 1260},
+        3: {'low': 1435, 'high': 1525},
+        4: {'low': 1830, 'high': 1930},
+        5: {'low': 2300, 'high': 2360},
+    },
 }
 
 # Default parameters for all stocks
