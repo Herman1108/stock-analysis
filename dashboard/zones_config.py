@@ -101,6 +101,14 @@ STOCK_ZONES = {
         4: {'low': 1830, 'high': 1930},
         5: {'low': 2300, 'high': 2360},
     },
+    'MDKA': {
+        1: {'low': 1160, 'high': 1290},
+        2: {'low': 2160, 'high': 2240},
+        3: {'low': 2810, 'high': 3030},
+        4: {'low': 3780, 'high': 3940},
+        5: {'low': 4680, 'high': 4840},
+        6: {'low': 5450, 'high': 5600},
+    },
 }
 
 # Default parameters for all stocks
