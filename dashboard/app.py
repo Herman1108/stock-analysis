@@ -17326,15 +17326,14 @@ def refresh_stock_dropdown(pathname, user_session):
 
 @app.callback(
     Output('stock-selector', 'value'),
-    [Input('url', 'search')],
-    [State('stock-selector', 'value')],
-    prevent_initial_call=True
+    [Input('url', 'search'), Input('url', 'pathname')],
+    [State('stock-selector', 'value')]
 )
-def sync_dropdown_with_url(search, current_value):
+def sync_dropdown_with_url(search, pathname, current_value):
     """Sync stock-selector dropdown with URL query parameter.
-    ONLY updates dropdown when URL contains ?stock= parameter.
-    Does NOT interfere with manual dropdown selection."""
-    from dash import no_update
+    Updates dropdown when URL contains ?stock= parameter.
+    Works on initial page load and URL changes."""
+    from dash import no_update, ctx
 
     # Only process if URL has stock parameter
     if search:
@@ -17344,8 +17343,13 @@ def sync_dropdown_with_url(search, current_value):
         if stock_from_url:
             return stock_from_url.upper()
 
-    # No stock in URL - don't change dropdown (let user's selection persist)
-    return no_update
+    # No stock in URL - return current value or default
+    if current_value:
+        return current_value
+
+    # Default to first available stock
+    stocks = get_available_stocks()
+    return stocks[0] if stocks else 'PANI'
 
 @app.callback(
     Output('page-content', 'children'),
