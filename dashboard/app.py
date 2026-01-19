@@ -13998,10 +13998,10 @@ def create_analysis_page(stock_code='CDIA'):
             resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
 
             # === V11b1 Price Direction Detection ===
-            # RETEST: Harga dari resistance (atas), perlu touch support
-            # BREAKOUT: Harga dari bawah zona, perlu 3 hari di atas zona
-            came_from_resistance = False
+            # RETEST: Harga TURUN dari resistance ke support
+            # BREAKOUT: Harga NAIK dari bawah menembus zona
             came_from_below = False
+            price_trend_up = False
             v11_confirm_type = 'WAIT'
             breakout_days_above = 0
             touch_support = False
@@ -14010,19 +14010,18 @@ def create_analysis_page(stock_code='CDIA'):
                 price_df_check = price_df.sort_values('date', ascending=False).reset_index(drop=True)
                 lookback_days = min(14, len(price_df_check))
 
-                # Check last 7 days for price below support (BREAKOUT candidate)
+                # Check last 7 days for price below support zone_low (BREAKOUT candidate)
                 for i in range(min(7, len(price_df_check))):
                     if price_df_check['close_price'].iloc[i] < support_zone['low']:
                         came_from_below = True
                         break
 
-                # Check last 14 days for price above zone high (came from resistance)
-                for i in range(lookback_days):
-                    if price_df_check['high_price'].iloc[i] > support_zone['high'] * 1.05:
-                        came_from_resistance = True
-                        break
+                # Check price trend: compare current vs 7 days ago
+                if len(price_df_check) >= 7:
+                    price_7d_ago = price_df_check['close_price'].iloc[6]
+                    price_trend_up = current_price > price_7d_ago
 
-                # Check if price touched support (low <= zone_high)
+                # Check if price touched support zone (low <= zone_high)
                 today_low = price_df_check['low_price'].iloc[0] if len(price_df_check) > 0 else 0
                 if today_low <= support_zone['high']:
                     touch_support = True
@@ -14034,9 +14033,9 @@ def create_analysis_page(stock_code='CDIA'):
                     else:
                         break
 
-                # Determine confirmation type
-                if came_from_below and not came_from_resistance:
-                    # BREAKOUT scenario - harga dari bawah
+                # Determine confirmation type based on trend and position
+                if came_from_below and price_trend_up:
+                    # BREAKOUT scenario - harga naik dari bawah
                     if current_price > support_zone['high']:
                         if breakout_days_above >= 3:
                             v11_confirm_type = 'BREAKOUT_OK'
@@ -14044,8 +14043,8 @@ def create_analysis_page(stock_code='CDIA'):
                             v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     else:
                         v11_confirm_type = 'BREAKOUT_WAIT'
-                elif came_from_resistance:
-                    # RETEST scenario - harga dari atas (resistance)
+                elif not price_trend_up:
+                    # RETEST scenario - harga turun (dari atas)
                     if touch_support and v10_in_zone:
                         v11_confirm_type = 'RETEST_OK'
                     elif v10_in_zone:
@@ -14053,11 +14052,14 @@ def create_analysis_page(stock_code='CDIA'):
                     else:
                         v11_confirm_type = 'RETEST_WAIT'
                 else:
-                    # Default - check position
+                    # Price trend up but didn't come from below recently
                     if v10_in_zone:
                         v11_confirm_type = 'RETEST'
                     elif current_price > support_zone['high']:
-                        v11_confirm_type = 'ABOVE'
+                        if breakout_days_above >= 3:
+                            v11_confirm_type = 'BREAKOUT_OK'
+                        else:
+                            v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     else:
                         v11_confirm_type = 'WAIT'
 
