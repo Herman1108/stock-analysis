@@ -6,6 +6,21 @@ V10 + Volume Confirmation
 Formula V11b1 (default):
 - Entry hanya jika Volume >= 1.0x average (20-day)
 
+SYARAT RETEST:
+1. Harga harus dari RESISTANCE (prior_resistance_touched)
+2. Low menyentuh support zone
+3. Close tetap di atas support low
+4. Belum naik >35% ke TP
+5. Konfirmasi reclaim dalam 3 bar
+6. Volume >= 1.0x (V11b1 filter)
+
+SYARAT BREAKOUT:
+1. Close TEMBUS ke atas zona (close > zona high)
+2. Close di ATAS zona selama 3 hari berturut-turut
+3. Jika kembali ke dalam zona sebelum 3 hari -> GAGAL, reset
+4. Setelah 3 hari confirmed -> jalankan konfirmasi V11b1
+5. Volume >= 1.0x (V11b1 filter)
+
 Formula V11b2 (BBCA, MBMA, HRUM, CDIA):
 - V11b1 + MA30 > MA100 (trend filter)
 - Hanya entry saat uptrend untuk menghindari loss
@@ -546,29 +561,34 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 if verbose:
                     events_log.append(f"{date_str}: BO_START Z{bo_zone_num}")
 
-        # Breakout gate
+        # Breakout gate - V11b1 revised:
+        # Close harus > zona high (di ATAS zona) selama 3 hari berturut-turut
+        # Jika kembali ke dalam zona atau di bawah zona -> reset/gagal
         if breakout_locked and state == STATE_BREAKOUT_GATE and breakout_count < 3:
             days_since_start = i - breakout_start_idx
             if days_since_start > 0:
-                if close >= locked_zone_high:
+                if close > locked_zone_high:
+                    # Close di ATAS zona - count breakout
                     breakout_count += 1
                     if breakout_count >= 3:
                         breakout_gate_passed = True
                         state = STATE_BREAKOUT_ARMED
                         if verbose:
-                            events_log.append(f"{date_str}: GATE_PASSED Z{locked_zone_num}")
-                elif close >= locked_zone_low and close < locked_zone_high:
+                            events_log.append(f"{date_str}: GATE_PASSED Z{locked_zone_num} (3 hari close > {locked_zone_high})")
+                elif close >= locked_zone_low:
+                    # Close kembali ke DALAM zona - breakout gagal, reset
                     breakout_count = 0
                     breakout_start_idx = i
                     if verbose:
-                        events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num}")
+                        events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num} (kembali ke zona)")
                 else:
+                    # Close di BAWAH zona - breakout gagal total
                     breakout_locked = False
                     breakout_count = 0
                     breakout_gate_passed = False
                     state = STATE_IDLE
                     if verbose:
-                        events_log.append(f"{date_str}: GATE_FAIL Z{locked_zone_num}")
+                        events_log.append(f"{date_str}: GATE_FAIL Z{locked_zone_num} (close < {locked_zone_low})")
 
         # Breakout entry
         if breakout_gate_passed and state == STATE_BREAKOUT_ARMED:
@@ -633,7 +653,9 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 if not locked_r_inside:
                     post_gate_confirm_count = 0
 
-        # Retest
+        # Retest - V11b1 revised:
+        # Harga harus dari RESISTANCE untuk retest support
+        # Syarat: touch support, hold above, not late, DAN harus pernah sentuh resistance
         if not frozen and position is None:
             if state == STATE_IDLE and s_low is not None:
                 tp_for_check = zh.get_tp_for_zone(s_zone_num, s_high, params)
@@ -642,6 +664,8 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 s_from_above = support_from_above(prev_close, s_high)
                 s_not_late = support_not_late(close, s_high, tp_for_check, params)
 
+                # V11b1: Harga harus dari resistance (prior_resistance_touched)
+                # Tidak cukup hanya dari atas support, harus pernah sentuh resistance dulu
                 if s_touch and s_hold and s_not_late and s_from_above and prior_resistance_touched:
                     state = STATE_RETEST_PENDING
                     retest_touch_idx = i
