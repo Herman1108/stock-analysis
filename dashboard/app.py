@@ -14049,6 +14049,9 @@ def create_analysis_page(stock_code='CDIA'):
                     # RETEST scenario - harga turun (dari atas)
                     if touch_support and v10_in_zone:
                         v11_confirm_type = 'RETEST_OK'
+                    elif touch_support:
+                        # Low menyentuh zona, meskipun close sedikit di atas
+                        v11_confirm_type = 'RETEST'
                     elif v10_in_zone:
                         v11_confirm_type = 'RETEST'
                     else:
