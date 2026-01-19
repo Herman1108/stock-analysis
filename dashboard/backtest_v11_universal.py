@@ -8,18 +8,19 @@ Formula V11b1 (default):
 
 SYARAT RETEST:
 1. Harga harus dari RESISTANCE (prior_resistance_touched)
-2. Low menyentuh support zone
+2. Low menyentuh bagian ATAS zona support (zona high) - tidak harus menyentuh zona low
 3. Close tetap di atas support low
 4. Belum naik >35% ke TP
 5. Konfirmasi reclaim dalam 3 bar
 6. Volume >= 1.0x (V11b1 filter)
 
 SYARAT BREAKOUT:
-1. Close TEMBUS ke atas zona (close > zona high)
-2. Close di ATAS zona selama 3 hari berturut-turut
-3. Jika kembali ke dalam zona sebelum 3 hari -> GAGAL, reset
-4. Setelah 3 hari confirmed -> jalankan konfirmasi V11b1
-5. Volume >= 1.0x (V11b1 filter)
+1. Dalam 7 hari terakhir, pernah ada close <= zona high (pernah di dalam/bawah zona)
+2. Close TEMBUS ke atas zona (close > zona high)
+3. Close di ATAS zona selama 3 hari berturut-turut
+4. Jika kembali ke dalam zona sebelum 3 hari -> GAGAL, reset
+5. Setelah 3 hari confirmed -> jalankan konfirmasi V11b1
+6. Volume >= 1.0x (V11b1 filter)
 
 Formula V11b2 (BBCA, MBMA, HRUM, CDIA):
 - V11b1 + MA30 > MA100 (trend filter)
@@ -290,12 +291,33 @@ class ZoneHelper:
             tp = price * 1.20
         return tp
 
-    def detect_breakout_zone(self, prev_close, close):
+    def detect_breakout_zone(self, close, recent_closes, lookback=7):
+        """
+        Detect breakout: harga dari dalam/bawah zona naik ke atas zona high
+        Syarat:
+        - close > zone_high (tembus ke atas)
+        - Dalam 7 hari terakhir, pernah ada close <= zone_high (pernah di dalam/bawah zona)
+
+        Args:
+            close: current close price
+            recent_closes: list of recent close prices (last N days)
+            lookback: berapa hari ke belakang untuk cek (default 7)
+        """
         for znum in sorted(self.zones.keys()):
             z_high = self.zones[znum]['high']
             z_low = self.zones[znum]['low']
-            if prev_close <= z_low and close > z_high:
-                return z_low, z_high, znum
+
+            # Current close harus > zone_high (tembus ke atas)
+            if close > z_high:
+                # Cek apakah dalam 7 hari terakhir pernah di dalam/bawah zona
+                was_below = False
+                for rc in recent_closes[-lookback:]:
+                    if rc <= z_high:
+                        was_below = True
+                        break
+
+                if was_below:
+                    return z_low, z_high, znum
         return None, None, 0
 
 
@@ -539,8 +561,9 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 position = None
                 continue
 
-        # Breakout detection
-        bo_zone_low, bo_zone_high, bo_zone_num = zh.detect_breakout_zone(prev_close, close)
+        # Breakout detection - cek 7 hari terakhir
+        recent_closes = [float(all_data[j]['close']) for j in range(max(0, i-7), i)]
+        bo_zone_low, bo_zone_high, bo_zone_num = zh.detect_breakout_zone(close, recent_closes, lookback=7)
         if bo_zone_num > 0:
             is_different_zone = (locked_zone_num != bo_zone_num)
             if not breakout_locked or (is_different_zone and state in [STATE_BREAKOUT_ARMED, STATE_BREAKOUT_GATE]):
