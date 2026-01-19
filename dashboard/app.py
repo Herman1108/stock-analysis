@@ -13975,6 +13975,8 @@ def create_analysis_page(stock_code='CDIA'):
     v6_action = v6_entry.get('action', 'WAIT') if v6_entry else 'WAIT'
     v6_action_reason = v6_entry.get('action_reason', '') if v6_entry else ''
     v11_confirm_type = 'WAIT'  # Initialize - will be updated based on price direction
+    breakout_days_above = 0  # Initialize for checklist
+    came_from_below = False  # Initialize for checklist
 
     # Check for V10 open position
     v10_position = get_v10_open_position(stock_code)
@@ -14603,8 +14605,8 @@ def create_analysis_page(stock_code='CDIA'):
                             ),
                         ], className="text-center mb-2"),
                         html.Hr(className="my-2"),
-                        # V10 Checklist - use stored entry conditions if position exists
-                        html.Small(f"Checklist V11b1{' (' + v10_position['entry_date'] + ')' if v10_position and v10_position.get('entry_conditions') else ''}:", className="text-muted d-block mb-1"),
+                        # V10 Checklist - different for BREAKOUT vs RETEST
+                        html.Small(f"Checklist V11b1 ({'BREAKOUT' if 'BREAKOUT' in v11_confirm_type else 'RETEST'}):", className="text-muted d-block mb-1"),
                         (lambda ec, pos_vol: html.Div([
                             # Use stored entry conditions from position
                             html.Div([
@@ -14633,29 +14635,34 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Small(f"Volume >= 1.0x ({pos_vol:.2f}x)", className="text-muted"),
                             ], className="mb-1"),
                         ]))(v10_position.get('entry_conditions', {}), v10_position.get('vol_ratio', 0)) if v10_position and v10_position.get('entry_conditions') else (
-                        # Calculate current conditions if no position
-                        (lambda zones, support_zone, cur_vol_ratio: html.Div([
+                        # Calculate current conditions - different checklist for BREAKOUT vs RETEST
+                        (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below: html.Div([
+                            # BREAKOUT checklist
                             html.Div([
+                                html.I(className=f"fas fa-{'check' if from_below else 'times'} text-{'success' if from_below else 'danger'} me-1"),
+                                html.Small("Dari Bawah Zona (7 hari)", className="text-muted"),
+                            ], className="mb-1") if is_breakout else html.Div([
                                 html.I(className=f"fas fa-{'check' if support_zone and current_price <= support_zone['high'] * 1.02 else 'times'} text-{'success' if support_zone and current_price <= support_zone['high'] * 1.02 else 'danger'} me-1"),
                                 html.Small("Touch Support", className="text-muted"),
                             ], className="mb-1"),
+
                             html.Div([
+                                html.I(className=f"fas fa-{'check' if support_zone and current_price > support_zone['high'] else 'times'} text-{'success' if support_zone and current_price > support_zone['high'] else 'danger'} me-1"),
+                                html.Small("Close > Zone High", className="text-muted"),
+                            ], className="mb-1") if is_breakout else html.Div([
                                 html.I(className=f"fas fa-{'check' if support_zone and current_price >= support_zone['low'] else 'times'} text-{'success' if support_zone and current_price >= support_zone['low'] else 'danger'} me-1"),
                                 html.Small("Hold di Atas S_low", className="text-muted"),
                             ], className="mb-1"),
+
                             html.Div([
+                                html.I(className=f"fas fa-{'check' if days_above >= 3 else 'times'} text-{'success' if days_above >= 3 else 'warning'} me-1"),
+                                html.Small(f"3 Hari di Atas Zona ({days_above}/3)", className="text-muted"),
+                            ], className="mb-1") if is_breakout else html.Div([
                                 html.I(className=f"fas fa-{'check' if support_zone and (lambda tp: current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high']))(next((z['low'] * 0.98 for zn, z in sorted(zones.items()) if z['low'] > current_price), current_price * 1.2)) else 'times'} text-{'success' if support_zone and (lambda tp: current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high']))(next((z['low'] * 0.98 for zn, z in sorted(zones.items()) if z['low'] > current_price), current_price * 1.2)) else 'danger'} me-1"),
                                 html.Small("Dalam 35% ke TP", className="text-muted"),
                             ], className="mb-1"),
-                            html.Div([
-                                html.I(className="fas fa-minus text-secondary me-1"),
-                                html.Small("Prior R Touch", className="text-muted"),
-                            ], className="mb-1"),
-                            html.Div([
-                                html.I(className="fas fa-minus text-secondary me-1"),
-                                html.Small("Konfirmasi Reclaim", className="text-muted"),
-                            ], className="mb-1"),
-                            # V11b1: Volume >= 1.0x
+
+                            # V11b1: Volume >= 1.0x (same for both)
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if cur_vol_ratio >= 1.0 else 'times'} text-{'success' if cur_vol_ratio >= 1.0 else 'danger'} me-1"),
                                 html.Small(f"Volume >= 1.0x ({cur_vol_ratio:.2f}x)", className="text-muted"),
@@ -14663,7 +14670,10 @@ def create_analysis_page(stock_code='CDIA'):
                         ]) if zones else html.Small("Zona belum dikonfigurasi", className="text-muted"))(
                             get_zones(stock_code),
                             (lambda zs: next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price * 1.02), None) if zs else None)(get_zones(stock_code)),
-                            weeks.get(1, {}).get('vol_ratio', 0) if weeks else 0
+                            v11b_vol_ratio,
+                            'BREAKOUT' in v11_confirm_type,
+                            breakout_days_above if 'breakout_days_above' in dir() else 0,
+                            came_from_below if 'came_from_below' in dir() else False
                         ))
                     ])
                 ], color="dark", outline=True, className="h-100")
