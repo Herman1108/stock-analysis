@@ -14325,6 +14325,24 @@ def create_analysis_page(stock_code='CDIA'):
             ])
         ], className="mb-4", style={"border": f"3px solid var(--bs-{v6_style['color']})", "background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
 
+        # === DISCLAIMER ===
+        html.Div([
+            html.Small([
+                html.I(className="fas fa-exclamation-triangle text-warning me-2"),
+                html.Strong("Disclaimer: ", className="text-warning"),
+                "Informasi di atas bukan merupakan ajakan untuk membeli atau menjual saham tertentu. ",
+                "Analisis ini dibuat berdasarkan formulasi teknikal dan data historis yang tidak menjamin hasil di masa depan. ",
+                "Keputusan investasi sepenuhnya menjadi tanggung jawab Anda. ",
+                "Untuk keputusan investasi yang lebih tepat, ",
+                html.Strong("konsultasikan dengan penasihat keuangan profesional"),
+                " yang memahami profil risiko dan tujuan keuangan Anda."
+            ], className="text-muted", style={"fontSize": "11px", "lineHeight": "1.4"})
+        ], className="text-center mb-3 px-3 py-2", style={
+            "backgroundColor": "rgba(255,193,7,0.1)",
+            "borderRadius": "5px",
+            "border": "1px dashed rgba(255,193,7,0.3)"
+        }),
+
         # === IMPULSE/MOMENTUM ALERT (tertinggi prioritas) - INDONESIAN ===
         dbc.Alert([
             dbc.Row([
