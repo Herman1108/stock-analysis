@@ -14055,15 +14055,13 @@ def create_analysis_page(stock_code='CDIA'):
                         v11_confirm_type = 'RETEST_WAIT'
                 else:
                     # Price trend up but didn't come from below recently
+                    # This is NOT a breakout - just normal price movement between zones
                     if v10_in_zone:
                         v11_confirm_type = 'RETEST'
-                    elif current_price > support_zone['high']:
-                        if breakout_days_above >= 3:
-                            v11_confirm_type = 'BREAKOUT_OK'
-                        else:
-                            v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     else:
-                        v11_confirm_type = 'WAIT'
+                        # Harga di antara zona, bukan breakout baru
+                        # Tunggu retest ke support atau breakout ke resistance baru
+                        v11_confirm_type = 'PANTAU'
 
             # Get phase from v6_entry
             phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
@@ -14372,6 +14370,7 @@ def create_analysis_page(stock_code='CDIA'):
                                         "BREAKOUT ZONE" if 'BREAKOUT' in v11_confirm_type and v10_in_zone else
                                         "BREAKOUT" if 'BREAKOUT' in v11_confirm_type else
                                         "RETEST ZONE" if v10_in_zone else
+                                        "DI ANTARA ZONA" if v11_confirm_type == 'PANTAU' else
                                         "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
                                         color="info" if 'BREAKOUT' in v11_confirm_type else "success" if v10_in_zone else "secondary",
                                         className="mb-2"
@@ -14384,7 +14383,8 @@ def create_analysis_page(stock_code='CDIA'):
                                             "Tunggu breakout konfirmasi" if 'BREAKOUT' in v11_confirm_type and 'OK' not in v11_confirm_type else
                                             "Siap entry (breakout)" if 'BREAKOUT_OK' in v11_confirm_type else
                                             "Siap entry 30%" if v10_in_zone and 'RETEST' in v11_confirm_type else
-                                            "Tunggu retest" if 'RETEST' in v11_confirm_type else "Pantau",
+                                            "Tunggu retest" if 'RETEST' in v11_confirm_type else
+                                            "Tunggu retest/breakout" if v11_confirm_type == 'PANTAU' else "Pantau",
                                             className="text-success fw-bold" if 'OK' in v11_confirm_type or (v10_in_zone and 'RETEST' in v11_confirm_type) else "text-info"
                                         ),
                                     ]),
@@ -14612,7 +14612,7 @@ def create_analysis_page(stock_code='CDIA'):
                         ], className="text-center mb-2"),
                         html.Hr(className="my-2"),
                         # V10 Checklist - different for BREAKOUT vs RETEST
-                        html.Small(f"Checklist V11b1 ({'BREAKOUT' if 'BREAKOUT' in v11_confirm_type else 'RETEST'}):", className="text-muted d-block mb-1"),
+                        html.Small(f"Checklist V11b1 ({'BREAKOUT' if 'BREAKOUT' in v11_confirm_type else 'PANTAU' if v11_confirm_type == 'PANTAU' else 'RETEST'}):", className="text-muted d-block mb-1"),
                         (lambda ec, pos_vol: html.Div([
                             # Use stored entry conditions from position
                             html.Div([
