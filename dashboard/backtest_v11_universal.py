@@ -15,10 +15,10 @@ SYARAT RETEST:
 6. Volume >= 1.0x (V11b1 filter)
 
 SYARAT BREAKOUT:
-1. Dalam 7 hari terakhir, pernah ada close <= zona high (pernah di dalam/bawah zona)
+1. Dalam 7 hari terakhir, pernah ada close < zona low (pernah di BAWAH zona, bukan di dalam)
 2. Close TEMBUS ke atas zona (close > zona high)
 3. Close di ATAS zona selama 3 hari berturut-turut
-4. Jika kembali ke dalam zona sebelum 3 hari -> GAGAL, reset
+4. Jika kembali ke dalam zona sebelum 3 hari -> GAGAL, tunggu 3 hari lagi di atas zona
 5. Setelah 3 hari confirmed -> jalankan konfirmasi V11b1
 6. Volume >= 1.0x (V11b1 filter)
 
@@ -293,10 +293,10 @@ class ZoneHelper:
 
     def detect_breakout_zone(self, close, recent_closes, lookback=7):
         """
-        Detect breakout: harga dari dalam/bawah zona naik ke atas zona high
+        Detect breakout: harga dari BAWAH zona naik ke atas zona high
         Syarat:
         - close > zone_high (tembus ke atas)
-        - Dalam 7 hari terakhir, pernah ada close <= zone_high (pernah di dalam/bawah zona)
+        - Dalam 7 hari terakhir, pernah ada close < zone_low (pernah di BAWAH zona, bukan di dalam)
 
         Args:
             close: current close price
@@ -309,10 +309,10 @@ class ZoneHelper:
 
             # Current close harus > zone_high (tembus ke atas)
             if close > z_high:
-                # Cek apakah dalam 7 hari terakhir pernah di dalam/bawah zona
+                # Cek apakah dalam 7 hari terakhir pernah di BAWAH zona (close < zone_low)
                 was_below = False
                 for rc in recent_closes[-lookback:]:
-                    if rc <= z_high:
+                    if rc < z_low:
                         was_below = True
                         break
 
