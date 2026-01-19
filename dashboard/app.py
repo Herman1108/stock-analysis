@@ -17325,32 +17325,36 @@ def refresh_stock_dropdown(pathname, user_session):
         # Return fallback on error
         return [{'label': 'CDIA', 'value': 'CDIA'}]
 
-@app.callback(
+# Clientside callback for faster dropdown sync with URL
+app.clientside_callback(
+    """
+    function(search, pathname, currentValue, options) {
+        // Parse stock from URL
+        if (search) {
+            const params = new URLSearchParams(search);
+            const stockFromUrl = params.get('stock');
+            if (stockFromUrl) {
+                return stockFromUrl.toUpperCase();
+            }
+        }
+
+        // No stock in URL - return current value or first option
+        if (currentValue) {
+            return currentValue;
+        }
+
+        // Default to first available stock
+        if (options && options.length > 0) {
+            return options[0].value;
+        }
+
+        return 'PANI';
+    }
+    """,
     Output('stock-selector', 'value'),
     [Input('url', 'search'), Input('url', 'pathname')],
-    [State('stock-selector', 'value')]
+    [State('stock-selector', 'value'), State('stock-selector', 'options')]
 )
-def sync_dropdown_with_url(search, pathname, current_value):
-    """Sync stock-selector dropdown with URL query parameter.
-    Updates dropdown when URL contains ?stock= parameter.
-    Works on initial page load and URL changes."""
-    from dash import no_update, ctx
-
-    # Only process if URL has stock parameter
-    if search:
-        from urllib.parse import parse_qs
-        params = parse_qs(search.lstrip('?'))
-        stock_from_url = params.get('stock', [None])[0]
-        if stock_from_url:
-            return stock_from_url.upper()
-
-    # No stock in URL - return current value or default
-    if current_value:
-        return current_value
-
-    # Default to first available stock
-    stocks = get_available_stocks()
-    return stocks[0] if stocks else 'PANI'
 
 @app.callback(
     Output('page-content', 'children'),
