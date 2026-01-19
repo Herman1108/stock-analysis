@@ -13974,6 +13974,7 @@ def create_analysis_page(stock_code='CDIA'):
     # === V6 SYSTEM VARIABLES (BEFORE RETURN) ===
     v6_action = v6_entry.get('action', 'WAIT') if v6_entry else 'WAIT'
     v6_action_reason = v6_entry.get('action_reason', '') if v6_entry else ''
+    v11_confirm_type = 'WAIT'  # Initialize - will be updated based on price direction
 
     # Check for V10 open position
     v10_position = get_v10_open_position(stock_code)
@@ -13995,6 +13996,70 @@ def create_analysis_page(stock_code='CDIA'):
 
             # Find resistance zone (nearest zone above current price)
             resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
+
+            # === V11b1 Price Direction Detection ===
+            # RETEST: Harga dari resistance (atas), perlu touch support
+            # BREAKOUT: Harga dari bawah zona, perlu 3 hari di atas zona
+            came_from_resistance = False
+            came_from_below = False
+            v11_confirm_type = 'WAIT'
+            breakout_days_above = 0
+            touch_support = False
+
+            if not price_df.empty and len(price_df) >= 7 and support_zone:
+                price_df_check = price_df.sort_values('date', ascending=False).reset_index(drop=True)
+                lookback_days = min(14, len(price_df_check))
+
+                # Check last 7 days for price below support (BREAKOUT candidate)
+                for i in range(min(7, len(price_df_check))):
+                    if price_df_check['close_price'].iloc[i] < support_zone['low']:
+                        came_from_below = True
+                        break
+
+                # Check last 14 days for price above zone high (came from resistance)
+                for i in range(lookback_days):
+                    if price_df_check['high_price'].iloc[i] > support_zone['high'] * 1.05:
+                        came_from_resistance = True
+                        break
+
+                # Check if price touched support (low <= zone_high)
+                today_low = price_df_check['low_price'].iloc[0] if len(price_df_check) > 0 else 0
+                if today_low <= support_zone['high']:
+                    touch_support = True
+
+                # Count consecutive days with close > zone_high (for BREAKOUT)
+                for i in range(min(7, len(price_df_check))):
+                    if price_df_check['close_price'].iloc[i] > support_zone['high']:
+                        breakout_days_above += 1
+                    else:
+                        break
+
+                # Determine confirmation type
+                if came_from_below and not came_from_resistance:
+                    # BREAKOUT scenario - harga dari bawah
+                    if current_price > support_zone['high']:
+                        if breakout_days_above >= 3:
+                            v11_confirm_type = 'BREAKOUT_OK'
+                        else:
+                            v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    else:
+                        v11_confirm_type = 'BREAKOUT_WAIT'
+                elif came_from_resistance:
+                    # RETEST scenario - harga dari atas (resistance)
+                    if touch_support and v10_in_zone:
+                        v11_confirm_type = 'RETEST_OK'
+                    elif v10_in_zone:
+                        v11_confirm_type = 'RETEST'
+                    else:
+                        v11_confirm_type = 'RETEST_WAIT'
+                else:
+                    # Default - check position
+                    if v10_in_zone:
+                        v11_confirm_type = 'RETEST'
+                    elif current_price > support_zone['high']:
+                        v11_confirm_type = 'ABOVE'
+                    else:
+                        v11_confirm_type = 'WAIT'
 
             # Get phase from v6_entry
             phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
@@ -14232,17 +14297,20 @@ def create_analysis_page(stock_code='CDIA'):
                             html.P(v6_action_reason if v6_action_reason else decision.get('reason', ''), className="mb-2"),
                         ]),
 
-                        # V10 Metrics Row
+                        # V10 Metrics Row - Konfirmasi V11b1 based on price direction
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
                                     html.Small("Konfirmasi V11b1", className="text-muted"),
                                     html.Div([
                                         html.Strong(
-                                            "RETEST OK" if (zones_v10 := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.02 for z in zones_v10.values()) else
-                                            "BREAKOUT" if zones_v10 and any(current_price > z['high'] * 1.02 for z in zones_v10.values()) else
-                                            "WAIT",
-                                            className='text-' + ('success' if (zones_v10 := get_zones(stock_code)) and any(z['low'] <= current_price <= z['high'] * 1.02 for z in zones_v10.values()) else 'info' if zones_v10 and any(current_price > z['high'] * 1.02 for z in zones_v10.values()) else 'secondary')
+                                            v11_confirm_type,
+                                            className='text-' + (
+                                                'success' if v11_confirm_type in ['RETEST_OK', 'BREAKOUT_OK'] else
+                                                'info' if 'BREAKOUT' in str(v11_confirm_type) else
+                                                'warning' if 'RETEST' in str(v11_confirm_type) else
+                                                'secondary'
+                                            )
                                         )
                                     ])
                                 ], className="text-center")
