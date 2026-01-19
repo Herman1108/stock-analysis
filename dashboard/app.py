@@ -17921,7 +17921,7 @@ def load_account_list(active_tab, refresh_clicks, user_session):
             html.Th("Tipe", style={"width": "100px"}),
             html.Th("Expired", style={"width": "100px"}),
             html.Th("Status", style={"width": "80px"}),
-            html.Th("Aksi", style={"width": "120px"}),
+            html.Th("Aksi", style={"width": "200px"}),
         ]))
 
         table_rows = []
@@ -17963,6 +17963,14 @@ def load_account_list(active_tab, refresh_clicks, user_session):
                 ], className="text-center")
             else:
                 action_cell = html.Td([
+                    # Extend buttons
+                    dbc.Button(["+7d"], id={"type": "extend-account-7d", "index": acc['id']},
+                              color="success", size="sm", className="me-1", title="Perpanjang 7 hari",
+                              style={"fontSize": "10px", "padding": "2px 6px"}),
+                    dbc.Button(["+30d"], id={"type": "extend-account-30d", "index": acc['id']},
+                              color="warning", size="sm", className="me-1", title="Perpanjang 30 hari",
+                              style={"fontSize": "10px", "padding": "2px 6px"}),
+                    # Edit & Delete buttons
                     dbc.Button([html.I(className="fas fa-edit")], id={"type": "edit-account-btn", "index": acc['id']},
                               color="primary", size="sm", className="me-1", title="Edit"),
                     dbc.Button([html.I(className="fas fa-trash")], id={"type": "delete-account-btn", "index": acc['id']},
@@ -18148,6 +18156,52 @@ def confirm_delete_account(n_clicks, account_id):
         return False, dbc.Alert("Gagal menghapus akun", color="danger")
     except Exception as e:
         return False, dbc.Alert(f"Error: {str(e)}", color="danger")
+
+
+# Extend account membership (7 days or 30 days)
+@app.callback(
+    Output('account-action-feedback', 'children', allow_duplicate=True),
+    [Input({"type": "extend-account-7d", "index": ALL}, "n_clicks"),
+     Input({"type": "extend-account-30d", "index": ALL}, "n_clicks")],
+    prevent_initial_call=True
+)
+def extend_account_membership(clicks_7d, clicks_30d):
+    """Extend account membership by 7 or 30 days"""
+    ctx = dash.callback_context
+    if not ctx.triggered:
+        raise dash.exceptions.PreventUpdate
+
+    triggered = ctx.triggered[0]
+    prop_id = triggered['prop_id']
+
+    # Check which button was clicked
+    if 'extend-account-7d' in prop_id and any(c for c in (clicks_7d or []) if c):
+        days = 7
+    elif 'extend-account-30d' in prop_id and any(c for c in (clicks_30d or []) if c):
+        days = 30
+    else:
+        raise dash.exceptions.PreventUpdate
+
+    import json
+    try:
+        button_info = json.loads(prop_id.replace('.n_clicks', ''))
+        account_id = button_info['index']
+
+        # Get account info for feedback
+        account = get_account_by_id(account_id)
+        if not account:
+            return dbc.Alert("Akun tidak ditemukan", color="danger")
+
+        # Extend membership
+        result = extend_member(account_id, days)
+        if result:
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                f"Akun '{account['username']}' diperpanjang {days} hari. Refresh untuk melihat perubahan."
+            ], color="success", dismissable=True)
+        return dbc.Alert("Gagal memperpanjang akun", color="danger")
+    except Exception as e:
+        return dbc.Alert(f"Error: {str(e)}", color="danger")
 
 
 # ============================================================
