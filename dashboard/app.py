@@ -14368,18 +14368,24 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.H6([html.I(className="fas fa-crosshairs text-warning me-2"), "Status V11b1"], className="mb-2"),
                                 html.Div([
                                     dbc.Badge(
-                                        "RETEST ZONE" if v10_in_zone else "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
-                                        color="success" if v10_in_zone else "info" if v10_resistance == "-" else "secondary",
+                                        # Use v11_confirm_type for consistency
+                                        "BREAKOUT ZONE" if 'BREAKOUT' in v11_confirm_type and v10_in_zone else
+                                        "BREAKOUT" if 'BREAKOUT' in v11_confirm_type else
+                                        "RETEST ZONE" if v10_in_zone else
+                                        "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
+                                        color="info" if 'BREAKOUT' in v11_confirm_type else "success" if v10_in_zone else "secondary",
                                         className="mb-2"
                                     ),
                                     html.Div([
                                         html.Small("Entry: ", className="text-muted"),
                                         html.Small(
                                             "TAMBAH POSISI 30% (avg)" if v10_has_position and v10_in_zone else
-                                            "Tunggu retest untuk avg" if v10_has_position and not v10_in_zone else
-                                            "Siap entry 30%" if v10_in_zone else
-                                            "Tunggu retest" if v10_support != "-" else "Pantau breakout",
-                                            className="text-success fw-bold" if (v10_has_position and v10_in_zone) or (not v10_has_position and v10_in_zone) else "text-info"
+                                            "Tunggu retest untuk avg" if v10_has_position and not v10_in_zone and 'RETEST' in v11_confirm_type else
+                                            "Tunggu breakout konfirmasi" if 'BREAKOUT' in v11_confirm_type and 'OK' not in v11_confirm_type else
+                                            "Siap entry (breakout)" if 'BREAKOUT_OK' in v11_confirm_type else
+                                            "Siap entry 30%" if v10_in_zone and 'RETEST' in v11_confirm_type else
+                                            "Tunggu retest" if 'RETEST' in v11_confirm_type else "Pantau",
+                                            className="text-success fw-bold" if 'OK' in v11_confirm_type or (v10_in_zone and 'RETEST' in v11_confirm_type) else "text-info"
                                         ),
                                     ]),
                                 ]) if v10_zones else html.Small("-", className="text-muted")
