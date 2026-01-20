@@ -14036,35 +14036,29 @@ def create_analysis_page(stock_code='CDIA'):
                         break
 
                 # Determine confirmation type based on trend and position
-                if came_from_below and price_trend_up:
-                    # BREAKOUT scenario - harga naik dari bawah
-                    if current_price > support_zone['high']:
-                        if breakout_days_above >= 3:
-                            v11_confirm_type = 'BREAKOUT_OK'
-                        else:
-                            v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                # BREAKOUT: Harga di atas zona dan bertahan 3+ hari
+                # RETEST: Harga turun ke zona support
+
+                if current_price > support_zone['high']:
+                    # Harga di atas zona - cek apakah BREAKOUT confirmed
+                    if breakout_days_above >= 3:
+                        # 3+ hari di atas zona = BREAKOUT confirmed
+                        v11_confirm_type = 'BREAKOUT_OK'
                     else:
-                        v11_confirm_type = 'BREAKOUT_WAIT'
-                elif not price_trend_up:
-                    # RETEST scenario - harga turun (dari atas)
-                    if touch_support and v10_in_zone:
+                        # Belum 3 hari - masih dalam proses konfirmasi
+                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                elif v10_in_zone:
+                    # Harga dalam zona - RETEST scenario
+                    if touch_support:
                         v11_confirm_type = 'RETEST_OK'
-                    elif touch_support:
-                        # Low menyentuh zona, meskipun close sedikit di atas
-                        v11_confirm_type = 'RETEST'
-                    elif v10_in_zone:
-                        v11_confirm_type = 'RETEST'
                     else:
-                        v11_confirm_type = 'RETEST_WAIT'
+                        v11_confirm_type = 'RETEST'
+                elif touch_support:
+                    # Low menyentuh zona, close sedikit di atas
+                    v11_confirm_type = 'RETEST'
                 else:
-                    # Price trend up but didn't come from below recently
-                    # This is NOT a breakout - just normal price movement between zones
-                    if v10_in_zone:
-                        v11_confirm_type = 'RETEST'
-                    else:
-                        # Harga di antara zona, bukan breakout baru
-                        # Tunggu retest ke support atau breakout ke resistance baru
-                        v11_confirm_type = 'PANTAU'
+                    # Harga di bawah zona
+                    v11_confirm_type = 'WAIT'
 
             # Get phase from v6_entry
             phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'

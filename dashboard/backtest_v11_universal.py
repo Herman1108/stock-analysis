@@ -686,9 +686,9 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 locked_zone_num = 0
                 state = STATE_IDLE
 
-        # Retest - V11b1 revised:
-        # Harga harus dari RESISTANCE untuk retest support
-        # Syarat: touch support, hold above, not late, DAN harus pernah sentuh resistance
+        # BREAKOUT CONFIRMATION / RETEST detection
+        # Jika harga sudah di atas zona dan touch zona (support test) = BREAKOUT_CONFIRM
+        # Jika harga baru turun dari resistance ke support = RETEST
         if not frozen and position is None:
             if state == STATE_IDLE and s_low is not None:
                 tp_for_check = zh.get_tp_for_zone(s_zone_num, s_high, params)
@@ -697,9 +697,36 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 s_from_above = support_from_above(prev_close, s_high)
                 s_not_late = support_not_late(close, s_high, tp_for_check, params)
 
-                # V11b1: Harga harus dari resistance (prior_resistance_touched)
-                # Tidak cukup hanya dari atas support, harus pernah sentuh resistance dulu
-                if s_touch and s_hold and s_not_late and s_from_above and prior_resistance_touched:
+                # Count consecutive days above zone (for BREAKOUT CONFIRMATION)
+                days_above_zone = 0
+                for j in range(max(0, i-7), i):
+                    if float(all_data[j]['close']) > s_high:
+                        days_above_zone += 1
+                    else:
+                        days_above_zone = 0  # Reset if any day was in/below zone
+
+                # BREAKOUT CONFIRMATION: Harga sudah 3+ hari di atas zona, touch zona sebagai support test
+                if s_touch and s_hold and close > s_high and days_above_zone >= 3:
+                    # Langsung set pending entry sebagai BREAKOUT (sudah confirmed)
+                    pending_entry_type = 'BO_CONFIRM'
+                    pending_entry_zone_low = s_low
+                    pending_entry_zone_high = s_high
+                    pending_entry_zone_num = s_zone_num
+                    pending_entry_idx = i
+                    pending_entry_conditions = {
+                        'trigger_date': date_str,
+                        'touch_support': s_touch,
+                        'hold_above_slow': s_hold,
+                        'within_35pct': s_not_late,
+                        'from_above': True,
+                        'prior_r_touch': True,
+                        'reclaim': True,
+                        'days_above': days_above_zone,
+                    }
+                    if verbose:
+                        events_log.append(f"{date_str}: BO_CONFIRM_TRIGGER Z{s_zone_num} ({days_above_zone} days above)")
+                # RETEST: Harga turun dari resistance ke support (belum lama di atas zona)
+                elif s_touch and s_hold and s_not_late and s_from_above and prior_resistance_touched:
                     state = STATE_RETEST_PENDING
                     retest_touch_idx = i
                     locked_zone_low = s_low
