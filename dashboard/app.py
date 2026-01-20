@@ -2880,7 +2880,7 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
 
             # Fundamental data
             per = fundamental.get('per', 0)
-            pbv = fundamental.get('pbv', 0)
+            pbv = fundamental.get('pbvr', 0)  # Fix: use 'pbvr' not 'pbv'
             roe = fundamental.get('roe', 0)
             has_fundamental = fundamental.get('has_data', False)
 
