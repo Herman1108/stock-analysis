@@ -1,8 +1,41 @@
 # -*- coding: utf-8 -*-
 """
 Master Configuration - Support & Resistance Zones
-Formula V10 - All Stocks
+Formula Assignment per Stock
+
+Updated: 2026-01-20 (Added CUAN)
 """
+
+# ============================================================================
+# FORMULA ASSIGNMENT PER STOCK
+# ============================================================================
+# V11b1: Volume >= 1.0x (tunggu max 6 hari) - Lihat formula_v11b1_spec.py
+# V11b2: V11b1 + MA30 > MA100 trend filter  - Lihat formula_v11b2_spec.py
+
+STOCK_FORMULA = {
+    # V11b1 Stocks (18 emiten) - Volume >= 1.0x
+    'ADMR': 'V11b1',
+    'BMRI': 'V11b1',
+    'BREN': 'V11b1',
+    'BRPT': 'V11b1',
+    'CBDK': 'V11b1',
+    'CBRE': 'V11b1',   # Note: 0% win rate - HINDARI
+    'CDIA': 'V11b1',
+    'CUAN': 'V11b1',
+    'DSNG': 'V11b1',
+    'FUTR': 'V11b1',
+    'HRUM': 'V11b1',
+    'MBMA': 'V11b1',
+    'MDKA': 'V11b1',   # Reference stock untuk V11b1
+    'NCKL': 'V11b1',
+    'PANI': 'V11b1',
+    'PTRO': 'V11b1',
+    'TINS': 'V11b1',
+    'WIFI': 'V11b1',   # Note: Low win rate - HINDARI
+
+    # V11b2 Stocks (1 emiten) - V11b1 + MA30 > MA100 filter
+    'BBCA': 'V11b2',   # Reference stock untuk V11b2
+}
 
 STOCK_ZONES = {
     'CBDK': {
@@ -69,6 +102,8 @@ STOCK_ZONES = {
     'TINS': {
         1: {'low': 1485, 'high': 1585},
         2: {'low': 2170, 'high': 2380},
+        3: {'low': 2940, 'high': 3040},
+        4: {'low': 3490, 'high': 3610},
     },
     'WIFI': {
         1: {'low': 1140, 'high': 1245},
@@ -109,9 +144,16 @@ STOCK_ZONES = {
         5: {'low': 4680, 'high': 4840},
         6: {'low': 5450, 'high': 5600},
     },
+    'CUAN': {
+        1: {'low': 484, 'high': 545},
+        2: {'low': 910, 'high': 980},
+        3: {'low': 1370, 'high': 1450},
+        4: {'low': 1920, 'high': 2010},
+        5: {'low': 2560, 'high': 2680},
+    },
 }
 
-# Default parameters for all stocks
+# Default parameters for all stocks (REVISED V11b1)
 DEFAULT_PARAMS = {
     'buffer_method': 'ATR',
     'atr_len': 14,
@@ -121,7 +163,7 @@ DEFAULT_PARAMS = {
     'sl_pct': 0.05,
     'tp_mode': 'next_zone_2pct',
     'tp_buffer_pct': 0.02,
-    'max_hold_bars': 60,
+    'max_hold_bars': 90,  # Updated: 60 → 90 hari
 
     'entry_execution': 'next_open',
 
@@ -131,13 +173,18 @@ DEFAULT_PARAMS = {
     'confirm_bars_retest': 3,
     'confirm_closes_breakout': 2,
     'retest_confirm_mode': 'ANY',
-    'not_late_pct': 0.35,
+    'not_late_pct': 0.40,  # Updated: 0.35 → 0.40
 }
 
 
 def get_zones(stock_code):
     """Get zones for a specific stock"""
     return STOCK_ZONES.get(stock_code.upper(), {})
+
+
+def get_formula(stock_code):
+    """Get assigned formula for a specific stock"""
+    return STOCK_FORMULA.get(stock_code.upper(), 'V11b1')
 
 
 def print_all_zones():
@@ -148,8 +195,19 @@ def print_all_zones():
             print(f"  Z{znum}: {z['low']:,} - {z['high']:,}")
 
 
+def print_formula_assignments():
+    """Print formula assignments per stock"""
+    print("\nFORMULA ASSIGNMENTS:")
+    print("-" * 40)
+    v11b1_stocks = [s for s, f in STOCK_FORMULA.items() if f == 'V11b1']
+    v11b2_stocks = [s for s, f in STOCK_FORMULA.items() if f == 'V11b2']
+    print(f"V11b1 ({len(v11b1_stocks)} stocks): {', '.join(sorted(v11b1_stocks))}")
+    print(f"V11b2 ({len(v11b2_stocks)} stocks): {', '.join(sorted(v11b2_stocks))}")
+
+
 if __name__ == '__main__':
     print("=" * 60)
-    print("MASTER ZONES CONFIGURATION - Formula V10")
+    print("MASTER CONFIGURATION - Formula V11b1/V11b2")
     print("=" * 60)
+    print_formula_assignments()
     print_all_zones()

@@ -41,12 +41,14 @@ def get_db_connection():
         )
 
 
-# V11b1 Parameters
+# V11b1 Parameters (REVISED)
 V11B1_PARAMS = {
-    'vol_lookback': 20,
-    'min_vol_ratio': 1.0,
-    'max_wait_days': 5,  # Maksimal tunggu berapa hari untuk volume confirmation
-    'not_late_pct': 0.35,  # Harga harus dalam 35% dari S_high ke TP
+    'vol_lookback': 20,           # Periode rata-rata volume
+    'min_vol_ratio': 1.0,         # Min volume ratio untuk entry
+    'max_wait_days': 6,           # Maksimal tunggu 6 hari (cancel di hari ke-7)
+    'not_late_pct': 0.40,         # Harga harus dalam 40% dari S_high ke TP
+    'bo_accumulation_days': 7,    # Cek 7 hari sebelumnya untuk akumulasi breakout
+    'gate_days': 3,               # Validasi 3 hari berturut-turut di atas resistance
 }
 
 # State machine constants
@@ -168,12 +170,42 @@ class ZoneHelper:
             tp = price * 1.20
         return tp
 
-    def detect_breakout_zone(self, prev_close, close):
+    def detect_breakout_zone(self, data, idx, accumulation_days=7):
+        """
+        Breakout Detection dengan Akumulasi 7 Hari (REVISED)
+
+        Kondisi:
+        1. Close hari ini > zone_high (breakout)
+        2. Dalam 7 hari sebelumnya, minimal ada 1 close <= zone_high
+           (bisa dari bawah zona, dalam zona, atau sempat di atas lalu turun)
+        """
+        if idx < 1:
+            return None, None, 0
+
+        close = float(data[idx]['close'])
+
         for znum in sorted(self.zones.keys()):
             z_high = self.zones[znum]['high']
             z_low = self.zones[znum]['low']
-            if prev_close <= z_low and close > z_high:
-                return z_low, z_high, znum
+
+            # Kondisi 1: Close hari ini di atas zona
+            if close > z_high:
+                # Kondisi 2: Cek akumulasi - minimal 1 hari dalam 7 hari sebelumnya
+                # ada close <= zone_high (di bawah atau dalam zona)
+                has_accumulation = False
+                lookback = min(accumulation_days, idx)
+
+                for j in range(1, lookback + 1):
+                    prev_idx = idx - j
+                    if prev_idx >= 0:
+                        prev_close = float(data[prev_idx]['close'])
+                        if prev_close <= z_high:  # Di bawah atau dalam zona
+                            has_accumulation = True
+                            break
+
+                if has_accumulation:
+                    return z_low, z_high, znum
+
         return None, None, 0
 
 
@@ -315,38 +347,44 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 prior_resistance_zone = r_zone_num
 
         # ================================================================
-        # V11b1: CHECK WAITING ENTRY FOR VOLUME CONFIRMATION
+        # V11b1: CHECK WAITING ENTRY FOR VOLUME CONFIRMATION (REVISED)
         # ================================================================
         if waiting_entry and position is None:
             days_waiting = i - waiting_entry['start_idx']
 
-            # Check if price still valid (within 35% to TP)
+            # Check if price still valid (within 40% to TP) - untuk entry
             price_valid = support_not_late(close, waiting_entry['zone_high'], waiting_entry['tp'], v11b1_params['not_late_pct'])
 
-            # Check if price still above zone low
-            above_zone = close >= waiting_entry['zone_low']
+            # Check if price still >= zone_low (di bawah zona = RESET)
+            above_zone_low = close >= waiting_entry['zone_low']
 
-            if not above_zone:
-                # Price dropped below zone - cancel waiting
+            if not above_zone_low:
+                # Price dropped BELOW zone_low → RESET waiting
                 if verbose:
-                    events_log.append(f"{date_str}: WAIT_CANCEL {waiting_entry['type']} Z{waiting_entry['zone_num']} - price below zone")
+                    events_log.append(f"{date_str}: WAIT_RESET {waiting_entry['type']} Z{waiting_entry['zone_num']} - price below zone_low")
                 waiting_entry = None
-            elif not price_valid:
-                # Price moved too far from support - cancel waiting
-                if verbose:
-                    events_log.append(f"{date_str}: WAIT_CANCEL {waiting_entry['type']} Z{waiting_entry['zone_num']} - price too far (>{v11b1_params['not_late_pct']*100:.0f}%)")
-                waiting_entry = None
+                # Also reset breakout state if applicable
+                if state == STATE_BREAKOUT_ARMED:
+                    breakout_locked = False
+                    breakout_count = 0
+                    breakout_gate_passed = False
+                    state = STATE_IDLE
             elif days_waiting > v11b1_params['max_wait_days']:
-                # Waited too long - cancel
+                # Waited > 6 hari (cancel di hari ke-7)
                 if verbose:
                     events_log.append(f"{date_str}: WAIT_TIMEOUT {waiting_entry['type']} Z{waiting_entry['zone_num']} after {days_waiting} days")
                 waiting_entry = None
-            elif vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
-                # VOLUME CONFIRMED! Execute entry
+                if state == STATE_BREAKOUT_ARMED:
+                    breakout_locked = False
+                    breakout_count = 0
+                    breakout_gate_passed = False
+                    state = STATE_IDLE
+            elif vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio'] and price_valid:
+                # VOLUME CONFIRMED dan harga masih valid (< 40% ke TP) → ENTRY!
                 entry_price = open_price
-                sl, tp = calculate_sl_tp(zh, waiting_entry['type'], waiting_entry['zone_low'],
-                                         waiting_entry['zone_high'], waiting_entry['zone_num'],
-                                         entry_price, params)
+                # SL selalu dari zone_low (unified)
+                sl = waiting_entry['zone_low'] * (1 - params['sl_pct'])
+                tp = zh.get_tp_for_zone(waiting_entry['zone_num'], entry_price, params)
 
                 if tp > entry_price:
                     position = {
@@ -375,6 +413,13 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     })
                     if verbose:
                         events_log.append(f"{date_str}: WAIT_ENTRY {waiting_entry['type']} Z{waiting_entry['zone_num']} @ {entry_price:,.0f} (waited {days_waiting}d, vol {vol_ratio:.2f}x)")
+
+                    # Reset breakout state after entry
+                    if state == STATE_BREAKOUT_ARMED:
+                        breakout_locked = False
+                        breakout_count = 0
+                        breakout_gate_passed = False
+                        state = STATE_IDLE
 
                 waiting_entry = None
 
@@ -407,8 +452,10 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 position = None
                 continue
 
-        # Breakout detection
-        bo_zone_low, bo_zone_high, bo_zone_num = zh.detect_breakout_zone(prev_close, close)
+        # Breakout detection (dengan akumulasi 7 hari)
+        bo_zone_low, bo_zone_high, bo_zone_num = zh.detect_breakout_zone(
+            all_data, i, v11b1_params.get('bo_accumulation_days', 7)
+        )
         if bo_zone_num > 0:
             is_different_zone = (locked_zone_num != bo_zone_num)
             if not breakout_locked or (is_different_zone and state in [STATE_BREAKOUT_ARMED, STATE_BREAKOUT_GATE]):
@@ -429,116 +476,116 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 if verbose:
                     events_log.append(f"{date_str}: BO_START Z{bo_zone_num}")
 
-        # Breakout gate
+        # Breakout gate (REVISED: reset instead of cancel)
         if breakout_locked and state == STATE_BREAKOUT_GATE and breakout_count < 3:
             days_since_start = i - breakout_start_idx
             if days_since_start > 0:
-                if close >= locked_zone_high:
+                if close > locked_zone_high:
+                    # Close di atas zona → count++
                     breakout_count += 1
                     if breakout_count >= 3:
                         breakout_gate_passed = True
                         state = STATE_BREAKOUT_ARMED
                         if verbose:
                             events_log.append(f"{date_str}: GATE_PASSED Z{locked_zone_num}")
-                elif close >= locked_zone_low and close < locked_zone_high:
+                elif close >= locked_zone_low:
+                    # Close dalam zona (zone_low <= close <= zone_high) → RESET count
                     breakout_count = 0
                     breakout_start_idx = i
+                    if verbose:
+                        events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num} (dalam zona)")
                 else:
-                    breakout_locked = False
+                    # Close di bawah zona (< zone_low) → RESET count (bukan cancel)
                     breakout_count = 0
-                    breakout_gate_passed = False
-                    state = STATE_IDLE
+                    breakout_start_idx = i
+                    if verbose:
+                        events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num} (di bawah zona)")
 
-        # Breakout entry
+        # Breakout entry (REVISED: simplified, langsung setelah GATE_PASSED)
         if breakout_gate_passed and state == STATE_BREAKOUT_ARMED and position is None and waiting_entry is None:
-            locked_r_break = close > locked_zone_high
-            locked_r_inside = resistance_inside(close, locked_zone_low, locked_zone_high, buffer)
+            # Setelah GATE_PASSED (3 hari valid), langsung cek konfirmasi
+            tp = zh.get_tp_for_zone(locked_zone_num, close, params)
+            tp_for_check = tp
 
-            if locked_r_inside and not pulled_back:
-                pulled_back = True
-                pullback_rebreak = False
-                post_gate_confirm_count = 0
+            # Cek not_late: harga masih dalam 40% jarak ke TP
+            price_valid = support_not_late(close, locked_zone_high, tp_for_check, v11b1_params['not_late_pct'])
 
-            if locked_r_break:
-                can_enter = False
-                if pulled_back:
-                    if not pullback_rebreak:
-                        pullback_rebreak = True
-                        post_gate_confirm_count = 1
-                    else:
-                        post_gate_confirm_count += 1
-                        if post_gate_confirm_count >= 2:
-                            can_enter = True
-                else:
-                    post_gate_confirm_count += 1
-                    if post_gate_confirm_count >= params['confirm_closes_breakout']:
-                        can_enter = True
+            if price_valid:
+                entry_type = 'BREAKOUT'  # Unified type (no more BO_HOLD/BO_PULLBACK distinction)
 
-                if can_enter:
-                    entry_type = 'BO_PULLBACK' if pulled_back else 'BO_HOLD'
-                    tp = zh.get_tp_for_zone(locked_zone_num, close, params)
+                # V11b1: Check volume
+                if vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
+                    # Volume OK - direct entry
+                    entry_price = open_price
+                    # SL selalu dari zone_low (unified)
+                    sl = locked_zone_low * (1 - params['sl_pct'])
+                    tp = zh.get_tp_for_zone(locked_zone_num, entry_price, params)
 
-                    # V11b1: Check volume
-                    if vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
-                        # Volume OK - direct entry next bar
-                        entry_price = open_price
-                        sl, tp = calculate_sl_tp(zh, entry_type, locked_zone_low, locked_zone_high, locked_zone_num, entry_price, params)
-
-                        if tp > entry_price:
-                            position = {
-                                'type': entry_type,
-                                'entry_date': date_str,
-                                'entry_price': entry_price,
-                                'entry_idx': i,
-                                'zone_num': locked_zone_num,
-                                'zone_low': locked_zone_low,
-                                'zone_high': locked_zone_high,
-                                'sl': sl,
-                                'tp': tp,
-                                'vol_ratio': vol_ratio,
-                                'waited_days': 0,
-                                'trigger_vol': vol_ratio,
-                                'entry_method': 'DIRECT',
-                            }
-                            direct_entries.append({
-                                'stock': stock_code,
-                                'type': entry_type,
-                                'date': date_str,
-                                'vol': vol_ratio,
-                            })
-                            if verbose:
-                                events_log.append(f"{date_str}: DIRECT_ENTRY {entry_type} Z{locked_zone_num} (vol {vol_ratio:.2f}x)")
-                    else:
-                        # Volume LOW - enter waiting mode
-                        waiting_entry = {
+                    if tp > entry_price:
+                        position = {
                             'type': entry_type,
+                            'entry_date': date_str,
+                            'entry_price': entry_price,
+                            'entry_idx': i,
+                            'zone_num': locked_zone_num,
                             'zone_low': locked_zone_low,
                             'zone_high': locked_zone_high,
-                            'zone_num': locked_zone_num,
+                            'sl': sl,
                             'tp': tp,
-                            'start_idx': i,
-                            'trigger_date': date_str,
+                            'vol_ratio': vol_ratio,
+                            'waited_days': 0,
                             'trigger_vol': vol_ratio,
+                            'entry_method': 'DIRECT',
                         }
+                        direct_entries.append({
+                            'stock': stock_code,
+                            'type': entry_type,
+                            'date': date_str,
+                            'vol': vol_ratio,
+                        })
                         if verbose:
-                            events_log.append(f"{date_str}: WAIT_START {entry_type} Z{locked_zone_num} (vol {vol_ratio:.2f}x < {v11b1_params['min_vol_ratio']}x)")
+                            events_log.append(f"{date_str}: DIRECT_ENTRY {entry_type} Z{locked_zone_num} (vol {vol_ratio:.2f}x)")
 
-                    # Reset breakout state
-                    prior_resistance_touched = False
-                    prior_resistance_zone = 0
-                    breakout_locked = False
-                    breakout_count = 0
-                    breakout_gate_passed = False
-                    pulled_back = False
-                    pullback_rebreak = False
-                    post_gate_confirm_count = 0
-                    locked_zone_low = None
-                    locked_zone_high = None
-                    locked_zone_num = 0
-                    state = STATE_IDLE
+                        # Reset breakout state after entry
+                        prior_resistance_touched = False
+                        prior_resistance_zone = 0
+                        breakout_locked = False
+                        breakout_count = 0
+                        breakout_gate_passed = False
+                        state = STATE_IDLE
+                else:
+                    # Volume LOW - enter waiting mode
+                    waiting_entry = {
+                        'type': entry_type,
+                        'zone_low': locked_zone_low,
+                        'zone_high': locked_zone_high,
+                        'zone_num': locked_zone_num,
+                        'tp': tp,
+                        'start_idx': i,
+                        'trigger_date': date_str,
+                        'trigger_vol': vol_ratio if vol_ratio else 0,
+                    }
+                    if verbose:
+                        vol_str = f"{vol_ratio:.2f}x" if vol_ratio else "N/A"
+                        events_log.append(f"{date_str}: WAIT_START {entry_type} Z{locked_zone_num} (vol {vol_str} < {v11b1_params['min_vol_ratio']}x)")
+
+                    # Keep breakout state during waiting (don't reset yet)
             else:
-                if not locked_r_inside:
-                    post_gate_confirm_count = 0
+                # Price too far from zone, but stay in ARMED state
+                if verbose:
+                    events_log.append(f"{date_str}: BO_ARMED Z{locked_zone_num} waiting (price {close:,.0f} > 40% to TP)")
+
+        # Handle waiting entry during BREAKOUT_ARMED state
+        if waiting_entry and state == STATE_BREAKOUT_ARMED:
+            # If price drops below zone_low during waiting → RESET
+            if close < locked_zone_low:
+                if verbose:
+                    events_log.append(f"{date_str}: WAIT_RESET {waiting_entry['type']} Z{locked_zone_num} (close < zone_low)")
+                waiting_entry = None
+                breakout_locked = False
+                breakout_count = 0
+                breakout_gate_passed = False
+                state = STATE_IDLE
 
         # Retest detection
         if not frozen and position is None and waiting_entry is None:
@@ -549,7 +596,8 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 s_from_above = support_from_above(prev_close, s_high)
                 s_not_late = support_not_late(close, s_high, tp_for_check, v11b1_params['not_late_pct'])
 
-                if s_touch and s_hold and s_not_late and s_from_above and prior_resistance_touched:
+                # prior_resistance_zone harus > s_zone_num (resistance di ATAS support)
+                if s_touch and s_hold and s_not_late and s_from_above and prior_resistance_touched and prior_resistance_zone > s_zone_num:
                     state = STATE_RETEST_PENDING
                     retest_touch_idx = i
                     locked_zone_low = s_low
@@ -561,6 +609,7 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
             if state == STATE_RETEST_PENDING:
                 bars_from_touch = i - retest_touch_idx
                 if close < locked_zone_low:
+                    # Price dropped below zone → RESET
                     state = STATE_IDLE
                     retest_touch_idx = 0
                 elif bars_from_touch <= params['confirm_bars_retest']:
@@ -570,9 +619,11 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
 
                         # V11b1: Check volume
                         if vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
-                            # Volume OK - direct entry next bar
+                            # Volume OK - direct entry
                             entry_price = open_price
-                            sl, tp = calculate_sl_tp(zh, 'RETEST', locked_zone_low, locked_zone_high, locked_zone_num, entry_price, params)
+                            # SL selalu dari zone_low (unified)
+                            sl = locked_zone_low * (1 - params['sl_pct'])
+                            tp = zh.get_tp_for_zone(locked_zone_num, entry_price, params)
 
                             if tp > entry_price:
                                 position = {
@@ -608,10 +659,11 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                                 'tp': tp,
                                 'start_idx': i,
                                 'trigger_date': date_str,
-                                'trigger_vol': vol_ratio,
+                                'trigger_vol': vol_ratio if vol_ratio else 0,
                             }
                             if verbose:
-                                events_log.append(f"{date_str}: WAIT_START RETEST Z{locked_zone_num} (vol {vol_ratio:.2f}x < {v11b1_params['min_vol_ratio']}x)")
+                                vol_str = f"{vol_ratio:.2f}x" if vol_ratio else "N/A"
+                                events_log.append(f"{date_str}: WAIT_START RETEST Z{locked_zone_num} (vol {vol_str} < {v11b1_params['min_vol_ratio']}x)")
 
                         prior_resistance_touched = False
                         state = STATE_IDLE

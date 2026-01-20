@@ -77,6 +77,7 @@ STATE_IDLE = 0
 STATE_RETEST_PENDING = 1
 STATE_BREAKOUT_GATE = 2
 STATE_BREAKOUT_ARMED = 3
+STATE_WAIT_PULLBACK = 4  # V11b1: Waiting for pullback to recommended entry price
 
 
 def get_stock_data(stock_code, conn):
@@ -345,6 +346,28 @@ def support_not_late(close, s_high, tp, params):
     max_close = s_high + (not_late_pct * distance_to_tp)
     return close <= max_close
 
+
+def calculate_pullback_entry(zone_high, tp, params):
+    """
+    V11b1: Calculate recommended pullback entry price when current price > 40% threshold.
+    Returns the maximum entry price that satisfies the 40% rule.
+    """
+    not_late_pct = params.get('not_late_pct', 0.40)
+    distance_to_tp = tp - zone_high
+    recommended_entry = zone_high + (not_late_pct * distance_to_tp)
+    return recommended_entry
+
+
+def check_pullback_entry(close, entry_price, zone_high, tp, params):
+    """
+    V11b1: Check if current price is too late for entry and needs pullback.
+    Returns (is_too_late, recommended_entry_price)
+    """
+    recommended_entry = calculate_pullback_entry(zone_high, tp, params)
+    is_too_late = entry_price > recommended_entry
+    return is_too_late, recommended_entry
+
+
 def resistance_inside(close, r_low, r_high, buffer):
     return close >= r_low - buffer and close <= r_high + buffer
 
@@ -432,6 +455,16 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
     locked_zone_high = None
     locked_zone_num = 0
 
+    # V11b1: WAIT_PULLBACK tracking
+    pullback_zone_low = None
+    pullback_zone_high = None
+    pullback_zone_num = 0
+    pullback_recommended_entry = None
+    pullback_sl = None
+    pullback_tp = None
+    pullback_start_idx = 0
+    pullback_entry_type = None
+
     position = None
     pending_entry_type = None
     pending_entry_zone_low = None
@@ -505,8 +538,19 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 # V11: Check volume and MA filters
                 v11_passed, vol_ratio, ma50, ma200, reject_reason = check_v11_filters(all_data, pending_entry_idx, v11_params, stock_code)
 
-                if not v11_passed:
-                    # Entry filtered out by V11
+                # V11b1: Check if price is too late (> 40% from zone_high to TP)
+                # Skip this check for pullback entries (already validated)
+                is_pullback_entry = pending_entry_type and '_PB' in pending_entry_type
+                if is_pullback_entry:
+                    is_too_late = False
+                    recommended_entry = entry_price  # Already at pullback level
+                else:
+                    is_too_late, recommended_entry = check_pullback_entry(
+                        entry_price, entry_price, pending_entry_zone_high, tp, params
+                    )
+
+                if not v11_passed and not is_pullback_entry:
+                    # Entry filtered out by V11 volume
                     filtered_entries.append({
                         'date': date_str,
                         'type': pending_entry_type,
@@ -519,8 +563,21 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     })
                     if verbose:
                         events_log.append(f"{date_str}: V11_FILTER {pending_entry_type} Z{pending_entry_zone_num} - {reject_reason}")
+                elif is_too_late:
+                    # V11b1: Price too far, enter WAIT_PULLBACK mode
+                    state = STATE_WAIT_PULLBACK
+                    pullback_zone_low = pending_entry_zone_low
+                    pullback_zone_high = pending_entry_zone_high
+                    pullback_zone_num = pending_entry_zone_num
+                    pullback_recommended_entry = recommended_entry
+                    pullback_sl = sl
+                    pullback_tp = tp
+                    pullback_start_idx = i
+                    pullback_entry_type = pending_entry_type + '_PB'  # Mark as pullback entry
+                    if verbose:
+                        events_log.append(f"{date_str}: WAIT_PULLBACK Z{pending_entry_zone_num} - harga {entry_price:,.0f} > threshold {recommended_entry:,.0f}, tunggu pullback")
                 else:
-                    # Entry passes V11 filters
+                    # Entry passes V11 filters and price is OK
                     if pending_entry_conditions:
                         pending_entry_conditions['vol_ratio'] = vol_ratio
                     position = {
@@ -560,7 +617,8 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
             elif high >= position['tp']:
                 exit_reason = 'TP Hit'
                 exit_price = position['tp']
-            elif (i - position['entry_idx']) >= params['max_hold_bars']:
+            elif (i - position['entry_idx'] + 1) >= params['max_hold_bars']:
+                # V11b1: +1 to include entry day as day 1
                 exit_reason = 'Max Hold'
                 exit_price = close
 
@@ -579,8 +637,13 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                 continue
 
         # Breakout detection - cek 7 hari terakhir
-        recent_closes = [float(all_data[j]['close']) for j in range(max(0, i-7), i)]
-        bo_zone_low, bo_zone_high, bo_zone_num = zh.detect_breakout_zone(close, recent_closes, lookback=7)
+        # BUGFIX: Skip breakout detection while position is open to prevent stale zone tracking
+        if position is None:
+            recent_closes = [float(all_data[j]['close']) for j in range(max(0, i-7), i)]
+            bo_zone_low, bo_zone_high, bo_zone_num = zh.detect_breakout_zone(close, recent_closes, lookback=7)
+        else:
+            bo_zone_num = 0  # Skip detection while position is running
+
         if bo_zone_num > 0:
             is_different_zone = (locked_zone_num != bo_zone_num)
             if not breakout_locked or (is_different_zone and state in [STATE_BREAKOUT_ARMED, STATE_BREAKOUT_GATE]):
@@ -604,7 +667,8 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
         # Breakout gate - V11b1 revised:
         # Close harus > zona high (di ATAS zona) selama 3 hari berturut-turut
         # Jika kembali ke dalam zona atau di bawah zona -> reset/gagal
-        if breakout_locked and state == STATE_BREAKOUT_GATE and breakout_count < 3:
+        # BUGFIX: Skip gate counting while position is open
+        if breakout_locked and state == STATE_BREAKOUT_GATE and breakout_count < 3 and position is None:
             days_since_start = i - breakout_start_idx
             if days_since_start > 0:
                 if close > locked_zone_high:
@@ -775,15 +839,111 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     if verbose:
                         events_log.append(f"{date_str}: RETEST_TIMEOUT Z{locked_zone_num}")
 
+            # V11b1: WAIT_PULLBACK monitoring - check if pullback condition is met
+            if state == STATE_WAIT_PULLBACK and position is None:
+                days_waiting = i - pullback_start_idx
+                max_wait = v11_params.get('max_wait_days', 6)
+
+                # Check if price dropped below zone_low (breakout failed)
+                if close < pullback_zone_low:
+                    state = STATE_IDLE
+                    if verbose:
+                        events_log.append(f"{date_str}: PULLBACK_CANCEL Z{pullback_zone_num} - close {close:,.0f} < zone_low {pullback_zone_low:,.0f}")
+                    # Reset pullback tracking
+                    pullback_zone_low = None
+                    pullback_zone_high = None
+                    pullback_zone_num = 0
+                    pullback_recommended_entry = None
+                    pullback_sl = None
+                    pullback_tp = None
+                    pullback_start_idx = 0
+                    pullback_entry_type = None
+
+                # Check if price reached TP without pullback (missed opportunity)
+                elif high >= pullback_tp:
+                    state = STATE_IDLE
+                    if verbose:
+                        events_log.append(f"{date_str}: PULLBACK_CANCEL Z{pullback_zone_num} - high {high:,.0f} >= TP {pullback_tp:,.0f} tanpa pullback")
+                    # Reset pullback tracking
+                    pullback_zone_low = None
+                    pullback_zone_high = None
+                    pullback_zone_num = 0
+                    pullback_recommended_entry = None
+                    pullback_sl = None
+                    pullback_tp = None
+                    pullback_start_idx = 0
+                    pullback_entry_type = None
+
+                # Check if low touched or went below recommended entry (pullback achieved)
+                elif low <= pullback_recommended_entry:
+                    # Check volume on pullback day
+                    vol_ratio = calculate_volume_ratio(all_data, i, v11_params['vol_lookback'])
+
+                    # Trigger entry at next open (will be processed next iteration)
+                    pending_entry_type = pullback_entry_type
+                    pending_entry_zone_low = pullback_zone_low
+                    pending_entry_zone_high = pullback_zone_high
+                    pending_entry_zone_num = pullback_zone_num
+                    pending_entry_idx = i
+                    pending_entry_conditions = {
+                        'trigger_date': date_str,
+                        'pullback_entry': True,
+                        'recommended_price': pullback_recommended_entry,
+                        'actual_low': low,
+                        'vol_ratio': vol_ratio,
+                    }
+
+                    if verbose:
+                        events_log.append(f"{date_str}: PULLBACK_TRIGGER Z{pullback_zone_num} - low {low:,.0f} <= rekom {pullback_recommended_entry:,.0f} (Vol:{vol_ratio:.1f}x)")
+
+                    state = STATE_IDLE
+                    # Reset pullback tracking
+                    pullback_zone_low = None
+                    pullback_zone_high = None
+                    pullback_zone_num = 0
+                    pullback_recommended_entry = None
+                    pullback_sl = None
+                    pullback_tp = None
+                    pullback_start_idx = 0
+                    pullback_entry_type = None
+
+                # Check if max wait days exceeded
+                elif days_waiting >= max_wait:
+                    state = STATE_IDLE
+                    if verbose:
+                        events_log.append(f"{date_str}: PULLBACK_TIMEOUT Z{pullback_zone_num} - tunggu {days_waiting} hari > max {max_wait}")
+                    # Reset pullback tracking
+                    pullback_zone_low = None
+                    pullback_zone_high = None
+                    pullback_zone_num = 0
+                    pullback_recommended_entry = None
+                    pullback_sl = None
+                    pullback_tp = None
+                    pullback_start_idx = 0
+                    pullback_entry_type = None
+
     # Close open position
     if position:
         last = all_data[-1]
+        last_idx = len(all_data) - 1
+        # V11b1: bars_held counts bars AFTER entry, add 1 to include entry day
+        # So total_days = bars_held + 1
+        bars_held = last_idx - position['entry_idx']
+        total_days_held = bars_held + 1  # Include entry day as day 1
         pnl = (float(last['close']) - position['entry_price']) / position['entry_price'] * 100
+
+        # V11b1: Check if position exceeded max_hold_bars (90 days)
+        # Position should close when total_days_held >= max_hold_bars
+        if total_days_held >= params['max_hold_bars']:
+            exit_reason = 'Max Hold'
+        else:
+            exit_reason = 'OPEN'
+
         trades.append({
             **position,
             'exit_date': str(last['date'])[:10],
             'exit_price': float(last['close']),
-            'exit_reason': 'OPEN',
+            'exit_reason': exit_reason,
             'pnl': pnl,
         })
 

@@ -14036,8 +14036,11 @@ def create_analysis_page(stock_code='CDIA'):
                         break
 
                 # Determine confirmation type based on trend and position
-                # BREAKOUT: Harga di atas zona dan bertahan 3+ hari
-                # RETEST: Harga turun ke zona support
+                # BREAKOUT: Harga datang dari BAWAH zona (zona = resistance)
+                # RETEST: Harga datang dari ATAS zona (zona = support)
+
+                # V11b1: Jika dalam 7 hari ada close < zone_low, zona menjadi RESISTANCE
+                # dan skenario adalah BREAKOUT (bukan RETEST)
 
                 if current_price > support_zone['high']:
                     # Harga di atas zona - cek apakah BREAKOUT confirmed
@@ -14048,16 +14051,27 @@ def create_analysis_page(stock_code='CDIA'):
                         # Belum 3 hari - masih dalam proses konfirmasi
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                 elif v10_in_zone:
-                    # Harga dalam zona - RETEST scenario
-                    if touch_support:
+                    # Harga dalam zona - cek apakah dari bawah (BREAKOUT) atau dari atas (RETEST)
+                    if came_from_below:
+                        # V11b1: Harga datang dari BAWAH zona (ada close < zone_low dalam 7 hari)
+                        # Zona sekarang menjadi RESISTANCE, skenario = BREAKOUT
+                        # Hitung hari dengan close > zone_high untuk gate validation
+                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    elif touch_support:
+                        # Harga datang dari atas dan menyentuh support
                         v11_confirm_type = 'RETEST_OK'
                     else:
                         v11_confirm_type = 'RETEST'
                 elif touch_support:
                     # Low menyentuh zona, close sedikit di atas
-                    v11_confirm_type = 'RETEST'
-                else:
+                    if came_from_below:
+                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    else:
+                        v11_confirm_type = 'RETEST'
+                elif current_price < support_zone['low']:
                     # Harga di bawah zona
+                    v11_confirm_type = 'WAIT'
+                else:
                     v11_confirm_type = 'WAIT'
 
             # Get phase from v6_entry
@@ -14098,10 +14112,24 @@ def create_analysis_page(stock_code='CDIA'):
                     v6_action = 'WATCH'
                     v6_action_reason = f"V11b1: Dalam zona tapi fase {phase} - pantau akumulasi"
             elif support_zone and resistance_zone:
-                # Price is between zones - check if BREAKOUT confirmed
-                if v11_confirm_type == 'BREAKOUT_OK':
+                # Price is between zones - check if BREAKOUT confirmed + Volume + Not Late
+                # Calculate not_late threshold (40% dari zone_high ke TP)
+                tp_price = resistance_zone['low'] * 0.98
+                distance_to_tp = tp_price - support_zone['high']
+                not_late_threshold = support_zone['high'] + distance_to_tp * 0.40
+                is_not_late = current_price <= not_late_threshold
+
+                if v11_confirm_type == 'BREAKOUT_OK' and v11b_vol_ratio >= 1.0 and is_not_late:
                     v6_action = 'ENTRY'
-                    v6_action_reason = f"V11b1: BREAKOUT confirmed! 3+ hari di atas zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Vol OK"
+                    v6_action_reason = f"V11b1: BREAKOUT confirmed! 3+ hari di atas zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Vol {v11b_vol_ratio:.2f}x OK"
+                elif v11_confirm_type == 'BREAKOUT_OK' and not is_not_late:
+                    # Breakout OK but price too far from support - WAIT_PULLBACK mode
+                    v6_action = 'WAIT_PULLBACK'
+                    v6_action_reason = f"V11b1: BREAKOUT OK! Tunggu pullback ke Rp {not_late_threshold:,.0f} (harga {current_price:,.0f} > threshold 40%)"
+                elif v11_confirm_type == 'BREAKOUT_OK':
+                    # Breakout structure OK but volume not enough
+                    v6_action = 'WATCH'
+                    v6_action_reason = f"V11b1: BREAKOUT struktur OK, tapi Vol {v11b_vol_ratio:.2f}x < 1.0x - tunggu volume"
                 elif 'BREAKOUT' in v11_confirm_type:
                     v6_action = 'WATCH'
                     v6_action_reason = f"V11b1: Breakout dalam proses ({v11_confirm_type}) - tunggu konfirmasi 3 hari"
@@ -14127,6 +14155,7 @@ def create_analysis_page(stock_code='CDIA'):
         'ALREADY_ENTRY': {'icon': '📈', 'color': 'primary', 'desc': 'Sudah entry - Posisi terbuka V11b1'},
         'RUNNING': {'icon': '🚀', 'color': 'primary', 'desc': 'Posisi V11b1 sedang berjalan'},
         'WATCH': {'icon': '👁️', 'color': 'info', 'desc': 'Observasi - Tunggu konfirmasi'},
+        'WAIT_PULLBACK': {'icon': '🎯', 'color': 'warning', 'desc': 'Tunggu pullback - Entry jika harga turun'},
         'EXIT': {'icon': '🔴', 'color': 'danger', 'desc': 'Sinyal keluar - Distribusi terdeteksi'},
         'AVOID': {'icon': '⛔', 'color': 'danger', 'desc': 'Hindari - Distribusi kuat'},
         'WAIT': {'icon': '⏸️', 'color': 'secondary', 'desc': 'Tunggu - Belum ada sinyal jelas'}
@@ -14143,6 +14172,100 @@ def create_analysis_page(stock_code='CDIA'):
         except Exception as e:
             print(f"Error loading signal history: {e}")
             signal_history = {'error': str(e), 'signals': []}
+
+    # === ENTRY CALCULATIONS FOR ENTRY STATUS ONLY (V11b1 Format) ===
+    entry_calc = None
+    if v6_action == 'ENTRY' and stock_code.upper() in STOCK_ZONES:
+        v10_zones = get_zones(stock_code)
+        if v10_zones:
+            # Find active support zone (where entry signal is)
+            entry_support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None)
+            if not entry_support_zone:
+                entry_support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['high'] < current_price), None)
+
+            # Find resistance zone (TP target)
+            entry_resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
+
+            if entry_support_zone:
+                # Calculate entry points
+                entry_1 = entry_support_zone['high']  # Entry 1 = zone_high (resistance of support zone)
+                entry_sl = entry_support_zone['low'] * 0.95  # SL = zone_low * 0.95
+                entry_tp = entry_resistance_zone['low'] * 0.98 if entry_resistance_zone else entry_1 * 1.15  # TP = next_res_low * 0.98 or +15%
+
+                # Entry 2 & 3 calculation (same as RUNNING)
+                entry_2 = entry_1 - (entry_1 - entry_sl) / 3
+                entry_3 = entry_1 - 2 * (entry_1 - entry_sl) / 3
+
+                # Average prices
+                avg_price_2 = 0.5 * entry_1 + 0.5 * entry_2
+                avg_price_3 = 0.3 * entry_1 + 0.3 * entry_2 + 0.4 * entry_3
+
+                # P/L calculations at current price
+                pl_e1 = (current_price - entry_1) / entry_1 * 100 if entry_1 > 0 else 0
+                pl_avg2 = (current_price - avg_price_2) / avg_price_2 * 100 if avg_price_2 > 0 else 0
+                pl_avg3 = (current_price - avg_price_3) / avg_price_3 * 100 if avg_price_3 > 0 else 0
+
+                # Find zone number
+                zone_num = next((zn for zn, z in v10_zones.items() if z == entry_support_zone), 0)
+
+                entry_calc = {
+                    'zone_num': zone_num,
+                    'zone_low': entry_support_zone['low'],
+                    'zone_high': entry_support_zone['high'],
+                    'entry_1': entry_1,
+                    'entry_2': entry_2,
+                    'entry_3': entry_3,
+                    'sl': entry_sl,
+                    'tp': entry_tp,
+                    'avg_price_2': avg_price_2,
+                    'avg_price_3': avg_price_3,
+                    'pl_e1': pl_e1,
+                    'pl_avg2': pl_avg2,
+                    'pl_avg3': pl_avg3,
+                    'show_avg2': current_price <= entry_2,
+                    'show_avg3': current_price <= entry_3,
+                }
+
+    # === PULLBACK CALCULATIONS FOR WAIT_PULLBACK STATUS (V11b1 Format) ===
+    pullback_calc = None
+    if v6_action == 'WAIT_PULLBACK' and stock_code.upper() in STOCK_ZONES:
+        v10_zones = get_zones(stock_code)
+        if v10_zones:
+            # Find active support zone (where breakout signal is)
+            pb_support_zone = next((z for zn, z in sorted(v10_zones.items(), reverse=True) if z['high'] < current_price), None)
+            # Find resistance zone (TP target)
+            pb_resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
+
+            if pb_support_zone and pb_resistance_zone:
+                # Calculate pullback entry price (40% threshold)
+                pb_zone_high = pb_support_zone['high']
+                pb_tp = pb_resistance_zone['low'] * 0.98
+                pb_distance_to_tp = pb_tp - pb_zone_high
+                pb_recommended_entry = pb_zone_high + pb_distance_to_tp * 0.40
+                pb_sl = pb_support_zone['low'] * 0.95
+
+                # Find zone number
+                pb_zone_num = next((zn for zn, z in v10_zones.items() if z == pb_support_zone), 0)
+
+                # Calculate risk/reward
+                pb_risk_pct = (pb_recommended_entry - pb_sl) / pb_recommended_entry * 100
+                pb_reward_pct = (pb_tp - pb_recommended_entry) / pb_recommended_entry * 100
+                pb_rr_ratio = pb_reward_pct / pb_risk_pct if pb_risk_pct > 0 else 0
+
+                pullback_calc = {
+                    'zone_num': pb_zone_num,
+                    'zone_low': pb_support_zone['low'],
+                    'zone_high': pb_support_zone['high'],
+                    'recommended_entry': pb_recommended_entry,
+                    'sl': pb_sl,
+                    'tp': pb_tp,
+                    'risk_pct': pb_risk_pct,
+                    'reward_pct': pb_reward_pct,
+                    'rr_ratio': pb_rr_ratio,
+                    'current_price': current_price,
+                    'distance_to_entry': current_price - pb_recommended_entry,
+                    'distance_pct': (current_price - pb_recommended_entry) / pb_recommended_entry * 100,
+                }
 
     # ========== BUILD THE PAGE ==========
     return html.Div([
@@ -14259,6 +14382,88 @@ def create_analysis_page(stock_code='CDIA'):
                                 # Show Avg 1+2+3 only if current price <= Entry 3
                                 current_price <= e3,
                             ) if v10_position else (
+                            # V11b1 Entry Details (for ENTRY/WATCH status with zone)
+                            html.Div([
+                                html.Hr(className="my-2"),
+                                html.Div([
+                                    html.Div([
+                                        html.Small("Zona: ", className="text-muted"),
+                                        html.Span(f"Z{entry_calc['zone_num']} ({entry_calc['zone_low']:,.0f}-{entry_calc['zone_high']:,.0f})", className="text-warning fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Entry 1: ", className="text-muted"),
+                                        html.Span(f"Rp {entry_calc['entry_1']:,.0f}", className="text-info fw-bold"),
+                                        html.Span(" (30%)", className="text-warning fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Entry 2: ", className="text-muted"),
+                                        html.Span(f"Rp {entry_calc['entry_2']:,.0f}", className="text-info"),
+                                        html.Span(" (30%)", className="text-warning"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Entry 3: ", className="text-muted"),
+                                        html.Span(f"Rp {entry_calc['entry_3']:,.0f}", className="text-info"),
+                                        html.Span(" (40%)", className="text-warning"),
+                                    ], className="mb-1"),
+                                    html.Hr(className="my-1"),
+                                    html.Div([
+                                        html.Small("Target: ", className="text-muted"),
+                                        html.Span(f"Rp {entry_calc['tp']:,.0f}", className="text-success fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Stop Loss: ", className="text-muted"),
+                                        html.Span(f"Rp {entry_calc['sl']:,.0f}", className="text-danger fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Hr(className="my-1"),
+                                    # P/L Projections
+                                    html.Div([
+                                        html.Small("E1 Only: ", className="text-muted fw-bold"),
+                                        html.Span(f"TP +{(entry_calc['tp']-entry_calc['entry_1'])/entry_calc['entry_1']*100:.1f}%", className="text-success me-2"),
+                                        html.Span(f"SL {(entry_calc['sl']-entry_calc['entry_1'])/entry_calc['entry_1']*100:.1f}%", className="text-danger"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Avg(1+2+3): ", className="text-warning fw-bold"),
+                                        html.Span(f"TP +{(entry_calc['tp']-entry_calc['avg_price_3'])/entry_calc['avg_price_3']*100:.1f}%", className="text-success fw-bold me-2"),
+                                        html.Span(f"SL {(entry_calc['sl']-entry_calc['avg_price_3'])/entry_calc['avg_price_3']*100:.1f}%", className="text-danger fw-bold"),
+                                        html.Small(f" @{entry_calc['avg_price_3']:,.0f}", className="text-muted"),
+                                    ]),
+                                ], className="text-start small")
+                            ], className="mt-2") if entry_calc else (
+                            # V11b1 Pullback Details (for WAIT_PULLBACK status)
+                            html.Div([
+                                html.Hr(className="my-2"),
+                                html.Div([
+                                    html.Div([
+                                        html.Small("Zona Breakout: ", className="text-muted"),
+                                        html.Span(f"Z{pullback_calc['zone_num']} ({pullback_calc['zone_low']:,.0f}-{pullback_calc['zone_high']:,.0f})", className="text-info fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Hr(className="my-1"),
+                                    html.Div([
+                                        html.Small("Rekom Entry: ", className="text-muted"),
+                                        html.Span(f"Rp {pullback_calc['recommended_entry']:,.0f}", className="text-warning fw-bold"),
+                                        html.Small(f" (-{pullback_calc['distance_pct']:.1f}%)", className="text-success"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Target: ", className="text-muted"),
+                                        html.Span(f"Rp {pullback_calc['tp']:,.0f}", className="text-success fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Stop Loss: ", className="text-muted"),
+                                        html.Span(f"Rp {pullback_calc['sl']:,.0f}", className="text-danger fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Hr(className="my-1"),
+                                    html.Div([
+                                        html.Small("Risk/Reward: ", className="text-muted fw-bold"),
+                                        html.Span(f"1 : {pullback_calc['rr_ratio']:.2f}", className="text-info fw-bold"),
+                                    ], className="mb-1"),
+                                    html.Div([
+                                        html.Small("Risk: ", className="text-muted"),
+                                        html.Span(f"-{pullback_calc['risk_pct']:.1f}%", className="text-danger me-2"),
+                                        html.Small("Reward: ", className="text-muted"),
+                                        html.Span(f"+{pullback_calc['reward_pct']:.1f}%", className="text-success"),
+                                    ], className="mb-1"),
+                                ], className="text-start small")
+                            ], className="mt-2") if pullback_calc else (
                             # V10 Criteria (only for ALREADY_ENTRY)
                             html.Div([
                                 html.Hr(className="my-2"),
@@ -14270,7 +14475,7 @@ def create_analysis_page(stock_code='CDIA'):
                                     html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('hold_above_support_desc', ''))], className="mb-1"),
                                     html.Div([html.I(className="fas fa-check text-success me-1"), html.Small(v6_entry.get('v10_criteria', {}).get('confirmation_desc', ''))], className="mb-1"),
                                 ], className="text-start small")
-                            ], className="mt-2") if v6_action == 'ALREADY_ENTRY' and v6_entry and v6_entry.get('v10_criteria') else html.Div())
+                            ], className="mt-2") if v6_action == 'ALREADY_ENTRY' and v6_entry and v6_entry.get('v10_criteria') else html.Div())))
                         ], className="text-center")
                     ], md=3, className="border-end d-flex align-items-center justify-content-center"),
 
@@ -14326,7 +14531,11 @@ def create_analysis_page(stock_code='CDIA'):
                                     html.Small("Support Fix", className="text-muted"),
                                     html.Div([
                                         html.Strong(
-                                            (lambda zones: next((f"{z['low']:,}-{z['high']:,}" for zn, z in sorted(zones.items(), reverse=True) if z['high'] < current_price), "N/A") if zones else "N/A")(get_zones(stock_code)),
+                                            # V11b1: First check if price is IN zone, then fallback to zone below
+                                            (lambda zones: (lambda in_zone, below_zone: f"{in_zone['low']:,}-{in_zone['high']:,}" if in_zone else (f"{below_zone['low']:,}-{below_zone['high']:,}" if below_zone else "N/A"))(
+                                                next((z for zn, z in sorted(zones.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None),
+                                                next((z for zn, z in sorted(zones.items(), reverse=True) if z['high'] < current_price), None)
+                                            ) if zones else "N/A")(get_zones(stock_code)),
                                             className='text-success'
                                         )
                                     ])
@@ -14370,7 +14579,7 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.H6([html.I(className="fas fa-crosshairs text-warning me-2"), "Status V11b1"], className="mb-2"),
                                 html.Div([
                                     dbc.Badge(
-                                        # Use v11_confirm_type for consistency
+                                        # Use v11_confirm_type for badge
                                         "BREAKOUT ZONE" if 'BREAKOUT' in v11_confirm_type and v10_in_zone else
                                         "BREAKOUT" if 'BREAKOUT' in v11_confirm_type else
                                         "RETEST ZONE" if v10_in_zone else
@@ -14382,23 +14591,35 @@ def create_analysis_page(stock_code='CDIA'):
                                     html.Div([
                                         html.Small("Entry: ", className="text-muted"),
                                         html.Small(
+                                            # Consistent with v6_action (main status)
+                                            "Posisi aktif" if v6_action == 'RUNNING' else
                                             "TAMBAH POSISI 30% (avg)" if v10_has_position and v10_in_zone else
-                                            "Tunggu retest untuk avg" if v10_has_position and not v10_in_zone and 'RETEST' in v11_confirm_type else
-                                            "Tunggu breakout konfirmasi" if 'BREAKOUT' in v11_confirm_type and 'OK' not in v11_confirm_type else
-                                            "Siap entry (breakout)" if 'BREAKOUT_OK' in v11_confirm_type else
-                                            "Siap entry 30%" if v10_in_zone and 'RETEST' in v11_confirm_type else
-                                            "Tunggu retest" if 'RETEST' in v11_confirm_type else
-                                            "Tunggu retest/breakout" if v11_confirm_type == 'PANTAU' else "Pantau",
-                                            className="text-success fw-bold" if 'OK' in v11_confirm_type or (v10_in_zone and 'RETEST' in v11_confirm_type) else "text-info"
+                                            "Siap entry" if v6_action == 'ENTRY' else
+                                            "Tunggu volume >= 1.0x" if v6_action == 'WATCH' and 'Vol' in v6_action_reason else
+                                            "Tunggu konfirmasi 3 hari" if v6_action == 'WATCH' and 'proses' in v6_action_reason else
+                                            "Terlalu jauh (>40%)" if v6_action == 'WAIT' and 'terlalu jauh' in v6_action_reason else
+                                            "Tunggu retest/breakout" if v6_action == 'WAIT' else
+                                            "Pantau" if v6_action == 'WATCH' else "Pantau",
+                                            className="text-success fw-bold" if v6_action == 'ENTRY' else
+                                                      "text-primary fw-bold" if v6_action == 'RUNNING' else
+                                                      "text-warning" if v6_action == 'WATCH' else "text-muted"
                                         ),
                                     ]),
                                 ]) if v10_zones else html.Small("-", className="text-muted")
                             ], md=6),
                         ]))(
                             get_zones(stock_code),
-                            (lambda zs: next((f"{z['low']:,}-{z['high']:,}" for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), "-") if zs else "-")(get_zones(stock_code)),
+                            # V11b1 Support: First check if price is IN zone, then fallback to zone below
+                            (lambda zs: (lambda in_zone, below_zone: f"{in_zone['low']:,}-{in_zone['high']:,}" if in_zone else (f"{below_zone['low']:,}-{below_zone['high']:,}" if below_zone else "-"))(
+                                next((z for zn, z in sorted(zs.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None),
+                                next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), None)
+                            ) if zs else "-")(get_zones(stock_code)),
                             (lambda zs: next((f"{z['low']:,}-{z['high']:,}" for zn, z in sorted(zs.items()) if z['low'] > current_price), "-") if zs else "-")(get_zones(stock_code)),
-                            (lambda zs: next((f"{abs(current_price - z['high'])/current_price*100:.1f}%" for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), "-") if zs else "-")(get_zones(stock_code)),
+                            # V11b1 Support distance %: Use correct zone
+                            (lambda zs: (lambda in_zone, below_zone: f"{abs(current_price - in_zone['high'])/current_price*100:.1f}%" if in_zone else (f"{abs(current_price - below_zone['high'])/current_price*100:.1f}%" if below_zone else "-"))(
+                                next((z for zn, z in sorted(zs.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None),
+                                next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), None)
+                            ) if zs else "-")(get_zones(stock_code)),
                             (lambda zs: next((f"{abs(z['low'] - current_price)/current_price*100:.1f}%" for zn, z in sorted(zs.items()) if z['low'] > current_price), "-") if zs else "-")(get_zones(stock_code)),
                             (lambda zs: any(z['low'] <= current_price <= z['high'] * 1.02 for z in zs.values()) if zs else False)(get_zones(stock_code)),
                             v10_position is not None,
@@ -14551,33 +14772,37 @@ def create_analysis_page(stock_code='CDIA'):
                         html.H6([html.I(className="fas fa-layer-group me-2 text-info"), "S/R Fix (V11b1)"], className="mb-0 d-inline"),
                     ]),
                     dbc.CardBody([
-                        # Get fixed zones for stock
+                        # Get fixed zones for stock - V11b1 logic
+                        # Support = zona yang mengandung harga ATAU zona terdekat di bawah
+                        # Resistance = zona terdekat di atas harga
                         html.Div([
                             # Find nearest support and resistance from fixed zones
                             *([
                                 html.Div([
                                     html.Div([
-                                        html.Span(f"S: {support_zone['low']:,}-{support_zone['high']:,}", className="small text-success"),
+                                        html.Span(f"S: {sr_support['low']:,}-{sr_support['high']:,}", className="small text-success"),
                                     ], className="text-start", style={"width": "40%"}),
                                     html.Div([
                                         html.Span(f"Rp {current_price:,.0f}", className="small text-warning fw-bold"),
                                     ], className="text-center", style={"width": "20%"}),
                                     html.Div([
-                                        html.Span(f"R: {resistance_zone['low']:,}-{resistance_zone['high']:,}", className="small text-danger"),
+                                        html.Span(f"R: {sr_resistance['low']:,}-{sr_resistance['high']:,}", className="small text-danger"),
                                     ], className="text-end", style={"width": "40%"}),
                                 ], className="d-flex justify-content-between mb-2"),
                                 html.Div([
                                     dbc.Progress([
-                                        dbc.Progress(value=min(100, max(0, int((current_price - support_zone['high']) / (resistance_zone['low'] - support_zone['high']) * 100) if resistance_zone['low'] > support_zone['high'] else 50)), color="info", bar=True),
+                                        dbc.Progress(value=min(100, max(0, int((current_price - sr_support['high']) / (sr_resistance['low'] - sr_support['high']) * 100) if sr_resistance['low'] > sr_support['high'] else 50)), color="info", bar=True),
                                     ], style={"height": "8px"})
                                 ], className="mb-2"),
                                 html.Div([
-                                    html.Small(f"Jarak S: {abs(current_price - support_zone['high'])/current_price*100:.1f}%", className="text-success me-2"),
-                                    html.Small(f"Jarak R: {abs(resistance_zone['low'] - current_price)/current_price*100:.1f}%", className="text-danger"),
+                                    html.Small(f"Jarak S: {abs(current_price - sr_support['high'])/current_price*100:.1f}%", className="text-success me-2"),
+                                    html.Small(f"Jarak R: {abs(sr_resistance['low'] - current_price)/current_price*100:.1f}%", className="text-danger"),
                                 ], className="text-center small"),
-                            ] if (zones := get_zones(stock_code)) and
-                                 (support_zone := next((z for zn, z in sorted(zones.items(), reverse=True) if z['high'] < current_price), None)) and
-                                 (resistance_zone := next((z for zn, z in sorted(zones.items()) if z['low'] > current_price), None))
+                            ] if (sr_zones := get_zones(stock_code)) and
+                                 # V11b1: First check if price is IN a zone, then fallback to zone below
+                                 (sr_support := (next((z for zn, z in sorted(sr_zones.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None) or
+                                                 next((z for zn, z in sorted(sr_zones.items(), reverse=True) if z['high'] < current_price), None))) and
+                                 (sr_resistance := next((z for zn, z in sorted(sr_zones.items()) if z['low'] > current_price), None))
                               else [html.Small(f"Zona belum dikonfigurasi untuk {stock_code}", className="text-muted text-center d-block")]),
                         ]),
                         html.Hr(className="my-2"),
@@ -14605,13 +14830,17 @@ def create_analysis_page(stock_code='CDIA'):
                         ], className="mb-0 d-inline"),
                     ]),
                     dbc.CardBody([
-                        # Fase
+                        # Fase - harus konsisten dengan v6_action
                         html.Div([
                             html.Small("Fase", className="text-muted d-block"),
                             dbc.Badge(
-                                "RUNNING" if v10_position else ("SIAP ENTRY" if (lambda zs: any(z['low'] <= current_price <= z['high'] * 1.02 for z in zs.values()) if zs else False)(get_zones(stock_code)) else "WAIT"),
-                                color="warning" if v10_position else ("success" if (lambda zs: any(z['low'] <= current_price <= z['high'] * 1.02 for z in zs.values()) if zs else False)(get_zones(stock_code)) else "secondary"),
-                                className="text-dark" if v10_position else "",
+                                "RUNNING" if v6_action == 'RUNNING' else
+                                "SIAP ENTRY" if v6_action == 'ENTRY' else
+                                "TUNGGU KONFIRMASI" if v6_action == 'WATCH' else "WAIT",
+                                color="warning" if v6_action == 'RUNNING' else
+                                      "success" if v6_action == 'ENTRY' else
+                                      "info" if v6_action == 'WATCH' else "secondary",
+                                className="text-dark" if v6_action == 'RUNNING' else "",
                             ),
                         ], className="text-center mb-2"),
                         html.Hr(className="my-2"),
@@ -14679,7 +14908,9 @@ def create_analysis_page(stock_code='CDIA'):
                             ], className="mb-1"),
                         ]) if zones else html.Small("Zona belum dikonfigurasi", className="text-muted"))(
                             get_zones(stock_code),
-                            (lambda zs: next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price * 1.02), None) if zs else None)(get_zones(stock_code)),
+                            # V11b1: First check if price is IN zone, then fallback to zone below
+                            (lambda zs: (next((z for zn, z in sorted(zs.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None) or
+                                        next((z for zn, z in sorted(zs.items(), reverse=True) if z['high'] < current_price), None)) if zs else None)(get_zones(stock_code)),
                             v11b_vol_ratio,
                             'BREAKOUT' in v11_confirm_type,
                             breakout_days_above if 'breakout_days_above' in dir() else 0,
@@ -17278,9 +17509,10 @@ def create_app_layout():
         dcc.Store(id='superadmin-session', storage_type='local', data=None),  # Super admin persistent login
 
         # Hidden dummy components to prevent callback errors when page components don't exist
-        html.Div([
-            dbc.Button(id='upload-password-submit', n_clicks=0, style={'display': 'none'}),
-            dbc.Input(id='upload-password-input', value='', style={'display': 'none'}),
+        # Wrapped in visible container to ensure IDs are registered
+        html.Div(id='dummy-components-container', children=[
+            dbc.Button(id='upload-password-submit', n_clicks=0),
+            dbc.Input(id='upload-password-input', value=''),
             html.Div(id='upload-password-gate'),
             html.Div(id='upload-form-container'),
             html.Div(id='upload-password-error'),
@@ -17625,6 +17857,9 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     prevent_initial_call=True
 )
 def validate_upload_password(n_clicks, session_data, user_session, password):
+    # Safeguard for callback without valid trigger
+    if n_clicks is None:
+        n_clicks = 0
     ctx = dash.callback_context
     triggered = ctx.triggered[0]['prop_id'] if ctx.triggered else None
 
