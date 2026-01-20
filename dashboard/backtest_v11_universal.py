@@ -297,18 +297,27 @@ class ZoneHelper:
         Syarat:
         - close > zone_high (tembus ke atas)
         - Dalam 7 hari terakhir, pernah ada close < zone_low (pernah di BAWAH zona, bukan di dalam)
+        - Harga tidak terlalu jauh dari zona (max 10% di atas zone_high)
 
         Args:
             close: current close price
             recent_closes: list of recent close prices (last N days)
             lookback: berapa hari ke belakang untuk cek (default 7)
+
+        Returns zona TERTINGGI yang baru di-break (cek dari atas ke bawah)
         """
-        for znum in sorted(self.zones.keys()):
+        # Iterate from HIGHEST zone to LOWEST - return highest zone that was just broken
+        for znum in sorted(self.zones.keys(), reverse=True):
             z_high = self.zones[znum]['high']
             z_low = self.zones[znum]['low']
 
             # Current close harus > zone_high (tembus ke atas)
             if close > z_high:
+                # Not late check: harga tidak boleh terlalu jauh dari zona (max 10%)
+                max_distance_pct = 0.10
+                if close > z_high * (1 + max_distance_pct):
+                    continue  # Skip zona ini, harga sudah terlalu jauh
+
                 # Cek apakah dalam 7 hari terakhir pernah di BAWAH zona (close < zone_low)
                 was_below = False
                 for rc in recent_closes[-lookback:]:
@@ -621,7 +630,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     if verbose:
                         events_log.append(f"{date_str}: GATE_FAIL Z{locked_zone_num} (close < {locked_zone_low})")
 
-        # Breakout entry
+        # Breakout entry - entry langsung setelah 3 hari di atas zona (gate passed)
         if breakout_gate_passed and state == STATE_BREAKOUT_ARMED:
             locked_r_break = close > locked_zone_high
             locked_r_inside = resistance_inside(close, locked_zone_low, locked_zone_high, buffer)
@@ -629,60 +638,53 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
             if locked_r_inside and not pulled_back:
                 pulled_back = True
                 pullback_rebreak = False
-                post_gate_confirm_count = 0
 
+            # Entry langsung jika masih di atas zona atau sudah pullback dan break lagi
+            can_enter = False
             if locked_r_break:
-                can_enter = False
                 if pulled_back:
+                    # Setelah pullback, perlu break lagi untuk entry
                     if not pullback_rebreak:
                         pullback_rebreak = True
-                        post_gate_confirm_count = 1
                     else:
-                        post_gate_confirm_count += 1
-                        if post_gate_confirm_count >= 2:
-                            can_enter = True
+                        can_enter = True  # Pullback + rebreak confirmed
                 else:
-                    post_gate_confirm_count += 1
-                    if post_gate_confirm_count >= params['confirm_closes_breakout']:
-                        can_enter = True
+                    # Tidak ada pullback, langsung entry setelah gate passed
+                    can_enter = True
 
-                if can_enter and position is None:
-                    if pulled_back:
-                        pending_entry_type = 'BO_PULLBACK'
-                    else:
-                        pending_entry_type = 'BO_HOLD'
-                    pending_entry_zone_low = locked_zone_low
-                    pending_entry_zone_high = locked_zone_high
-                    pending_entry_zone_num = locked_zone_num
-                    pending_entry_idx = i
-                    # Save entry conditions for BREAKOUT (different from RETEST)
-                    pending_entry_conditions = {
-                        'trigger_date': date_str,
-                        'touch_support': True,  # Breakout counts as support confirmation
-                        'hold_above_slow': True,
-                        'within_35pct': True,
-                        'from_above': True,
-                        'prior_r_touch': True,
-                        'reclaim': True,  # Breakout is a form of reclaim
-                    }
-                    if verbose:
-                        events_log.append(f"{date_str}: TRIGGER {pending_entry_type} Z{locked_zone_num}")
+            if can_enter and position is None:
+                if pulled_back:
+                    pending_entry_type = 'BO_PULLBACK'
+                else:
+                    pending_entry_type = 'BO_HOLD'
+                pending_entry_zone_low = locked_zone_low
+                pending_entry_zone_high = locked_zone_high
+                pending_entry_zone_num = locked_zone_num
+                pending_entry_idx = i
+                # Save entry conditions for BREAKOUT (different from RETEST)
+                pending_entry_conditions = {
+                    'trigger_date': date_str,
+                    'touch_support': True,  # Breakout counts as support confirmation
+                    'hold_above_slow': True,
+                    'within_35pct': True,
+                    'from_above': True,
+                    'prior_r_touch': True,
+                    'reclaim': True,  # Breakout is a form of reclaim
+                }
+                if verbose:
+                    events_log.append(f"{date_str}: TRIGGER {pending_entry_type} Z{locked_zone_num}")
 
-                    prior_resistance_touched = False
-                    prior_resistance_zone = 0
-                    breakout_locked = False
-                    breakout_count = 0
-                    breakout_gate_passed = False
-                    pulled_back = False
-                    pullback_rebreak = False
-                    post_gate_confirm_count = 0
-                    locked_zone_low = None
-                    locked_zone_high = None
-                    locked_zone_num = 0
-                    state = STATE_IDLE
-            else:
-                if not locked_r_inside:
-                    post_gate_confirm_count = 0
+                prior_resistance_touched = False
+                prior_resistance_zone = 0
+                breakout_locked = False
+                breakout_count = 0
+                breakout_gate_passed = False
+                pulled_back = False
+                pullback_rebreak = False
+                locked_zone_low = None
+                locked_zone_high = None
+                locked_zone_num = 0
+                state = STATE_IDLE
 
         # Retest - V11b1 revised:
         # Harga harus dari RESISTANCE untuk retest support

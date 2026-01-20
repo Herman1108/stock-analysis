@@ -14104,9 +14104,16 @@ def create_analysis_page(stock_code='CDIA'):
                     v6_action = 'WATCH'
                     v6_action_reason = f"V11b1: Dalam zona tapi fase {phase} - pantau akumulasi"
             elif support_zone and resistance_zone:
-                # Price is between zones - WAIT for retest
-                v6_action = 'WAIT'
-                v6_action_reason = f"V11b1: Di antara zona S {support_zone['low']:,.0f}-{support_zone['high']:,.0f} dan R {resistance_zone['low']:,.0f}-{resistance_zone['high']:,.0f} - tunggu retest"
+                # Price is between zones - check if BREAKOUT confirmed
+                if v11_confirm_type == 'BREAKOUT_OK':
+                    v6_action = 'ENTRY'
+                    v6_action_reason = f"V11b1: BREAKOUT confirmed! 3+ hari di atas zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Vol OK"
+                elif 'BREAKOUT' in v11_confirm_type:
+                    v6_action = 'WATCH'
+                    v6_action_reason = f"V11b1: Breakout dalam proses ({v11_confirm_type}) - tunggu konfirmasi 3 hari"
+                else:
+                    v6_action = 'WAIT'
+                    v6_action_reason = f"V11b1: Di antara zona S {support_zone['low']:,.0f}-{support_zone['high']:,.0f} dan R {resistance_zone['low']:,.0f}-{resistance_zone['high']:,.0f} - tunggu retest"
             elif support_zone and not resistance_zone:
                 # Price is above all zones
                 v6_action = 'WATCH'
