@@ -4670,7 +4670,7 @@ def create_upload_page():
                                             ], md=6),
                                             dbc.Col([
                                                 dbc.Label("Jenis Data:", className="fw-bold"),
-                                                dbc.Checklist(
+                                                dcc.Checklist(
                                                     id='gdrive-data-type',
                                                     options=[
                                                         {'label': ' Price (OHLCV)', 'value': 'price'},
@@ -4678,7 +4678,8 @@ def create_upload_page():
                                                         {'label': ' Fundamental', 'value': 'fundamental'},
                                                     ],
                                                     value=['price', 'broker'],
-                                                    inline=False,
+                                                    labelStyle={'display': 'block', 'cursor': 'pointer', 'marginBottom': '8px'},
+                                                    inputStyle={'marginRight': '8px', 'cursor': 'pointer'},
                                                     className="mb-3"
                                                 ),
                                             ], md=6),
