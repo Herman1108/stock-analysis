@@ -4613,7 +4613,129 @@ def create_upload_page():
                     ])
                 ]),
 
-                # TAB 2: MEMBER MANAGEMENT
+                # TAB 2: SYNC GOOGLE DRIVE
+                dbc.Tab(label="[GD] Update Data", tab_id="tab-gdrive", children=[
+                    html.Div(className="pt-3", children=[
+                        dbc.Row([
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardHeader([
+                                        html.I(className="fab fa-google-drive me-2"),
+                                        html.H5("Sync dari Google Drive", className="mb-0 d-inline")
+                                    ]),
+                                    dbc.CardBody([
+                                        # Google Drive Link Info
+                                        dbc.Alert([
+                                            html.I(className="fas fa-folder-open me-2"),
+                                            "Folder Google Drive: ",
+                                            html.A("Stock Data Folder",
+                                                   href="https://drive.google.com/drive/folders/1vV0mSOZRxwK3L0NrzgwzZsghK4s0AiIQ",
+                                                   target="_blank", className="text-info")
+                                        ], color="dark", className="mb-3"),
+
+                                        # Stock Selection
+                                        dbc.Row([
+                                            dbc.Col([
+                                                dbc.Label("Pilih Emiten:", className="fw-bold"),
+                                                dcc.Dropdown(
+                                                    id='gdrive-stock-select',
+                                                    options=[
+                                                        {'label': 'SEMUA EMITEN', 'value': 'ALL'},
+                                                        {'label': '─────────────', 'value': '', 'disabled': True},
+                                                        {'label': 'ADMR', 'value': 'ADMR'},
+                                                        {'label': 'BBCA', 'value': 'BBCA'},
+                                                        {'label': 'BMRI', 'value': 'BMRI'},
+                                                        {'label': 'BREN', 'value': 'BREN'},
+                                                        {'label': 'BRPT', 'value': 'BRPT'},
+                                                        {'label': 'CBDK', 'value': 'CBDK'},
+                                                        {'label': 'CBRE', 'value': 'CBRE'},
+                                                        {'label': 'CDIA', 'value': 'CDIA'},
+                                                        {'label': 'CUAN', 'value': 'CUAN'},
+                                                        {'label': 'DSNG', 'value': 'DSNG'},
+                                                        {'label': 'FUTR', 'value': 'FUTR'},
+                                                        {'label': 'HRUM', 'value': 'HRUM'},
+                                                        {'label': 'MBMA', 'value': 'MBMA'},
+                                                        {'label': 'MDKA', 'value': 'MDKA'},
+                                                        {'label': 'NCKL', 'value': 'NCKL'},
+                                                        {'label': 'PANI', 'value': 'PANI'},
+                                                        {'label': 'PTRO', 'value': 'PTRO'},
+                                                        {'label': 'TINS', 'value': 'TINS'},
+                                                        {'label': 'WIFI', 'value': 'WIFI'},
+                                                    ],
+                                                    value='ALL',
+                                                    placeholder='Pilih emiten...',
+                                                    className="mb-3",
+                                                    multi=True
+                                                ),
+                                            ], md=6),
+                                            dbc.Col([
+                                                dbc.Label("Jenis Data:", className="fw-bold"),
+                                                dbc.Checklist(
+                                                    id='gdrive-data-type',
+                                                    options=[
+                                                        {'label': ' Price (OHLCV)', 'value': 'price'},
+                                                        {'label': ' Broker Summary', 'value': 'broker'},
+                                                        {'label': ' Fundamental', 'value': 'fundamental'},
+                                                    ],
+                                                    value=['price', 'broker'],
+                                                    inline=False,
+                                                    className="mb-3"
+                                                ),
+                                            ], md=6),
+                                        ]),
+
+                                        html.Hr(),
+
+                                        # Sync Button
+                                        dbc.Row([
+                                            dbc.Col([
+                                                dbc.Button([
+                                                    html.I(className="fas fa-sync-alt me-2"),
+                                                    "Update Data"
+                                                ], id='gdrive-sync-btn', color="success", size="lg", className="w-100"),
+                                            ], md=4),
+                                            dbc.Col([
+                                                html.Div(id='gdrive-sync-status', className="mt-2")
+                                            ], md=8),
+                                        ]),
+
+                                        # Progress & Log
+                                        html.Div([
+                                            dbc.Progress(id='gdrive-progress', value=0, striped=True, animated=True,
+                                                        className="mt-3", style={'display': 'none'}),
+                                            html.Div(id='gdrive-log', className="mt-3",
+                                                    style={'maxHeight': '300px', 'overflowY': 'auto'})
+                                        ])
+                                    ])
+                                ])
+                            ], md=8),
+
+                            dbc.Col([
+                                dbc.Card([
+                                    dbc.CardHeader("Info Sync"),
+                                    dbc.CardBody([
+                                        html.P([
+                                            html.I(className="fas fa-info-circle text-info me-2"),
+                                            "File yang akan di-sync:"
+                                        ], className="fw-bold"),
+                                        html.Ul([
+                                            html.Li("[KODE].xlsx - Data harga & broker"),
+                                            html.Li("fundamental_[KODE].xlsx - Data fundamental"),
+                                        ], className="small"),
+                                        html.Hr(),
+                                        html.P([
+                                            html.I(className="fas fa-clock text-warning me-2"),
+                                            "Last Sync:"
+                                        ], className="fw-bold"),
+                                        html.Div(id='gdrive-last-sync', className="small text-muted"),
+                                    ])
+                                ])
+                            ], md=4),
+                        ])
+                    ])
+                ]),
+
+                # TAB 3: MEMBER MANAGEMENT
                 dbc.Tab(label="[P] Member Management", tab_id="tab-members", children=[
                     html.Div(className="pt-3", children=[
                         # Member Stats Cards
@@ -17887,6 +18009,84 @@ def validate_upload_password(n_clicks, session_data, user_session, password):
 
     # Default - show password gate
     return {'display': 'block'}, {'display': 'none'}, "", session_data or {'logged_in': False}
+
+
+# ============================================================
+# GOOGLE DRIVE SYNC CALLBACKS
+# ============================================================
+
+@app.callback(
+    [Output('gdrive-sync-status', 'children'),
+     Output('gdrive-log', 'children'),
+     Output('gdrive-last-sync', 'children')],
+    [Input('gdrive-sync-btn', 'n_clicks')],
+    [State('gdrive-stock-select', 'value'),
+     State('gdrive-data-type', 'value')],
+    prevent_initial_call=True
+)
+def sync_from_gdrive(n_clicks, selected_stocks, data_types):
+    """Sync data from Google Drive folder"""
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    from datetime import datetime
+
+    # Determine which stocks to sync
+    all_stocks = ['ADMR', 'BBCA', 'BMRI', 'BREN', 'BRPT', 'CBDK', 'CBRE', 'CDIA',
+                  'CUAN', 'DSNG', 'FUTR', 'HRUM', 'MBMA', 'MDKA', 'NCKL', 'PANI',
+                  'PTRO', 'TINS', 'WIFI']
+
+    if not selected_stocks or 'ALL' in selected_stocks:
+        stocks_to_sync = all_stocks
+    else:
+        stocks_to_sync = [s for s in selected_stocks if s and s != 'ALL']
+
+    if not data_types:
+        return (
+            dbc.Alert("Pilih minimal satu jenis data!", color="warning"),
+            None,
+            f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+    # Log messages
+    log_items = []
+    success_count = 0
+    error_count = 0
+
+    log_items.append(html.Div([
+        html.I(className="fas fa-play text-info me-2"),
+        f"Memulai sync untuk {len(stocks_to_sync)} emiten..."
+    ], className="mb-1"))
+
+    # TODO: Implement actual Google Drive API integration
+    # For now, show placeholder message
+    for stock in stocks_to_sync:
+        log_items.append(html.Div([
+            html.I(className="fas fa-circle-notch fa-spin text-warning me-2"),
+            f"{stock}: Menunggu implementasi Google Drive API..."
+        ], className="mb-1 small text-muted"))
+
+    log_items.append(html.Hr())
+    log_items.append(dbc.Alert([
+        html.I(className="fas fa-info-circle me-2"),
+        html.Strong("Info: "),
+        "Google Drive API belum dikonfigurasi. ",
+        "Untuk mengaktifkan fitur ini, diperlukan: ",
+        html.Ol([
+            html.Li("Google Cloud Project dengan Drive API enabled"),
+            html.Li("Service Account credentials (JSON key)"),
+            html.Li("Share folder Google Drive ke service account email"),
+        ], className="mb-0 mt-2")
+    ], color="info"))
+
+    status = dbc.Alert([
+        html.I(className="fas fa-exclamation-triangle me-2"),
+        f"Sync belum aktif - Perlu konfigurasi Google Drive API"
+    ], color="warning")
+
+    last_sync = f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+    return status, html.Div(log_items), last_sync
 
 
 # ============================================================
