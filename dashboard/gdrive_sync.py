@@ -320,16 +320,25 @@ def sync_stock_data(
                                 result.stats['broker_records'] += count
                                 result.add_log(f"{stock}: Imported {count} broker records")
 
-                            # Also try IPO position and profile
-                            ipo_df, period_str = read_ipo_position_data(file_path)
-                            if not ipo_df.empty:
-                                count = import_ipo_position(ipo_df, stock, period_str)
-                                result.stats['ipo_records'] += count
+                            # Try IPO position (optional, don't fail if error)
+                            try:
+                                ipo_df, period_str = read_ipo_position_data(file_path)
+                                if not ipo_df.empty:
+                                    count = import_ipo_position(ipo_df, stock, period_str)
+                                    result.stats['ipo_records'] += count
+                                    result.add_log(f"{stock}: Imported {count} IPO position records")
+                            except Exception as e:
+                                result.add_log(f"{stock}: IPO position skipped ({str(e)[:50]})", 'warning')
 
-                            profile_data = read_profile_data(file_path)
-                            if profile_data:
-                                count = import_profile_data(profile_data, stock)
-                                result.stats['profile_records'] += count
+                            # Try profile data (optional, don't fail if error)
+                            try:
+                                profile_data = read_profile_data(file_path)
+                                if profile_data:
+                                    count = import_profile_data(profile_data, stock)
+                                    result.stats['profile_records'] += count
+                                    result.add_log(f"{stock}: Imported profile data")
+                            except Exception as e:
+                                result.add_log(f"{stock}: Profile skipped ({str(e)[:50]})", 'warning')
 
                 result.stocks_processed.append(stock)
                 result.add_log(f"{stock}: Completed successfully", 'success')
