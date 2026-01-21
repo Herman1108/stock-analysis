@@ -464,6 +464,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
     pullback_tp = None
     pullback_start_idx = 0
     pullback_entry_type = None
+    pullback_original_conditions = None  # Store original entry conditions when entering WAIT_PULLBACK
 
     position = None
     pending_entry_type = None
@@ -574,6 +575,8 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pullback_tp = tp
                     pullback_start_idx = i
                     pullback_entry_type = pending_entry_type + '_PB'  # Mark as pullback entry
+                    # Save original entry conditions for _PB entries
+                    pullback_original_conditions = pending_entry_conditions.copy() if pending_entry_conditions else {}
                     if verbose:
                         events_log.append(f"{date_str}: WAIT_PULLBACK Z{pending_entry_zone_num} - harga {entry_price:,.0f} > threshold {recommended_entry:,.0f}, tunggu pullback")
                 else:
@@ -858,6 +861,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pullback_tp = None
                     pullback_start_idx = 0
                     pullback_entry_type = None
+                    pullback_original_conditions = None
 
                 # Check if price reached TP without pullback (missed opportunity)
                 elif high >= pullback_tp:
@@ -873,6 +877,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pullback_tp = None
                     pullback_start_idx = 0
                     pullback_entry_type = None
+                    pullback_original_conditions = None
 
                 # Check if low touched or went below recommended entry (pullback achieved)
                 elif low <= pullback_recommended_entry:
@@ -885,13 +890,15 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pending_entry_zone_high = pullback_zone_high
                     pending_entry_zone_num = pullback_zone_num
                     pending_entry_idx = i
-                    pending_entry_conditions = {
-                        'trigger_date': date_str,
+                    # Use original conditions and add pullback-specific info
+                    pending_entry_conditions = pullback_original_conditions.copy() if pullback_original_conditions else {}
+                    pending_entry_conditions.update({
                         'pullback_entry': True,
+                        'pullback_trigger_date': date_str,
                         'recommended_price': pullback_recommended_entry,
                         'actual_low': low,
                         'vol_ratio': vol_ratio,
-                    }
+                    })
 
                     if verbose:
                         events_log.append(f"{date_str}: PULLBACK_TRIGGER Z{pullback_zone_num} - low {low:,.0f} <= rekom {pullback_recommended_entry:,.0f} (Vol:{vol_ratio:.1f}x)")
@@ -906,6 +913,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pullback_tp = None
                     pullback_start_idx = 0
                     pullback_entry_type = None
+                    pullback_original_conditions = None
 
                 # Check if max wait days exceeded
                 elif days_waiting >= max_wait:
@@ -921,6 +929,7 @@ def run_backtest(stock_code, params=None, v11_params=None, start_date='2024-01-0
                     pullback_tp = None
                     pullback_start_idx = 0
                     pullback_entry_type = None
+                    pullback_original_conditions = None
 
     # Close open position
     if position:
