@@ -9,3 +9,5 @@ gunicorn>=21.0.0
 flask-compress>=1.13
 python-dotenv>=1.0.0
 requests>=2.31.0
+google-api-python-client>=2.100.0
+google-auth>=2.23.0

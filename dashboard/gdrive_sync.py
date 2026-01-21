@@ -2,11 +2,16 @@
 """
 Google Drive Sync Module
 Sync data dari Google Drive ke database PostgreSQL
+
+Supports two credential methods:
+1. Environment Variable: GOOGLE_CREDENTIALS_JSON (JSON content as string)
+2. File: google_credentials.json in dashboard folder
 """
 
 import os
 import sys
 import io
+import json
 import tempfile
 from datetime import datetime
 from typing import List, Dict, Tuple, Optional
@@ -41,7 +46,11 @@ except ImportError as e:
 # URL: https://drive.google.com/drive/folders/1vV0mSOZRxwK3L0NrzgwzZsghK4s0AiIQ
 GDRIVE_FOLDER_ID = "1vV0mSOZRxwK3L0NrzgwzZsghK4s0AiIQ"
 
-# Path to service account credentials JSON file
+# Credentials can be provided via:
+# 1. GOOGLE_CREDENTIALS_JSON env var (JSON content as string) - for Railway/cloud
+# 2. GOOGLE_CREDENTIALS_PATH env var (path to JSON file)
+# 3. Default file: dashboard/google_credentials.json
+CREDENTIALS_JSON_ENV = os.environ.get('GOOGLE_CREDENTIALS_JSON', '')
 CREDENTIALS_PATH = os.environ.get('GOOGLE_CREDENTIALS_PATH',
                                    os.path.join(os.path.dirname(__file__), 'google_credentials.json'))
 
@@ -80,20 +89,66 @@ class GDriveSyncResult:
         self.add_log(f"{stock}: {error}", 'error')
 
 
+def get_credentials_info() -> Dict:
+    """Check which credentials method is available"""
+    info = {
+        'method': None,
+        'available': False,
+        'details': ''
+    }
+
+    # Check env var first (priority for cloud deployment)
+    if CREDENTIALS_JSON_ENV:
+        try:
+            json.loads(CREDENTIALS_JSON_ENV)
+            info['method'] = 'env_var'
+            info['available'] = True
+            info['details'] = 'GOOGLE_CREDENTIALS_JSON environment variable'
+            return info
+        except json.JSONDecodeError:
+            info['details'] = 'GOOGLE_CREDENTIALS_JSON is set but invalid JSON'
+
+    # Check file
+    if os.path.exists(CREDENTIALS_PATH):
+        info['method'] = 'file'
+        info['available'] = True
+        info['details'] = f'File: {CREDENTIALS_PATH}'
+        return info
+
+    info['details'] = 'No credentials found (env var or file)'
+    return info
+
+
 def get_gdrive_service():
     """Initialize Google Drive API service"""
     if not GOOGLE_API_AVAILABLE:
         raise Exception("Google API libraries not installed. Run: pip install google-api-python-client google-auth")
 
-    if not os.path.exists(CREDENTIALS_PATH):
-        raise Exception(f"Credentials file not found: {CREDENTIALS_PATH}\n"
-                       "Please download service account JSON from Google Cloud Console.")
-
     SCOPES = ['https://www.googleapis.com/auth/drive.readonly']
 
-    credentials = service_account.Credentials.from_service_account_file(
-        CREDENTIALS_PATH, scopes=SCOPES
-    )
+    # Try environment variable first (for Railway/cloud deployment)
+    if CREDENTIALS_JSON_ENV:
+        try:
+            creds_dict = json.loads(CREDENTIALS_JSON_ENV)
+            credentials = service_account.Credentials.from_service_account_info(
+                creds_dict, scopes=SCOPES
+            )
+            print("Using credentials from GOOGLE_CREDENTIALS_JSON environment variable")
+        except json.JSONDecodeError as e:
+            raise Exception(f"Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e}")
+    # Fall back to file
+    elif os.path.exists(CREDENTIALS_PATH):
+        credentials = service_account.Credentials.from_service_account_file(
+            CREDENTIALS_PATH, scopes=SCOPES
+        )
+        print(f"Using credentials from file: {CREDENTIALS_PATH}")
+    else:
+        raise Exception(
+            "Google credentials not found!\n"
+            "Please provide credentials via one of:\n"
+            "1. GOOGLE_CREDENTIALS_JSON env var (JSON content)\n"
+            f"2. File: {CREDENTIALS_PATH}"
+        )
 
     service = build('drive', 'v3', credentials=credentials)
     return service
@@ -293,11 +348,14 @@ def sync_stock_data(
 
 def check_setup_status() -> Dict:
     """Check if Google Drive sync is properly configured"""
+    creds_info = get_credentials_info()
+
     status = {
         'google_api_installed': GOOGLE_API_AVAILABLE,
         'parser_available': PARSER_AVAILABLE,
-        'credentials_exists': os.path.exists(CREDENTIALS_PATH),
-        'credentials_path': CREDENTIALS_PATH,
+        'credentials_available': creds_info['available'],
+        'credentials_method': creds_info['method'],
+        'credentials_details': creds_info['details'],
         'folder_id': GDRIVE_FOLDER_ID,
         'ready': False,
         'missing': []
@@ -309,8 +367,8 @@ def check_setup_status() -> Dict:
     if not status['parser_available']:
         status['missing'].append('Parser module')
 
-    if not status['credentials_exists']:
-        status['missing'].append(f'Credentials file ({CREDENTIALS_PATH})')
+    if not status['credentials_available']:
+        status['missing'].append('Google credentials (GOOGLE_CREDENTIALS_JSON env var atau file google_credentials.json)')
 
     status['ready'] = len(status['missing']) == 0
 
@@ -326,8 +384,9 @@ if __name__ == '__main__':
 
     print(f"\nGoogle API Installed: {'Yes' if status['google_api_installed'] else 'No'}")
     print(f"Parser Available: {'Yes' if status['parser_available'] else 'No'}")
-    print(f"Credentials File: {'Found' if status['credentials_exists'] else 'Not Found'}")
-    print(f"Credentials Path: {status['credentials_path']}")
+    print(f"Credentials Available: {'Yes' if status['credentials_available'] else 'No'}")
+    print(f"Credentials Method: {status['credentials_method'] or 'None'}")
+    print(f"Credentials Details: {status['credentials_details']}")
     print(f"Folder ID: {status['folder_id']}")
 
     if status['ready']:
@@ -366,11 +425,17 @@ if __name__ == '__main__':
    - Go to IAM & Admin > Service Accounts
    - Create new service account
    - Download JSON key file
-   - Save as 'google_credentials.json' in dashboard folder
 
-4. Share Google Drive folder:
+4. Set credentials (choose one):
+   OPTION A - Environment Variable (recommended for Railway):
+   - Set GOOGLE_CREDENTIALS_JSON with the entire JSON content
+
+   OPTION B - File:
+   - Save JSON as 'google_credentials.json' in dashboard folder
+
+5. Share Google Drive folder:
    - Open folder in Google Drive
    - Click Share
-   - Add service account email (from JSON file)
+   - Add service account email (client_email from JSON)
    - Give "Viewer" access
 """)
