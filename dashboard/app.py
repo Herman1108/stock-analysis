@@ -18032,16 +18032,74 @@ def sync_from_gdrive(n_clicks, selected_stocks, data_types):
 
     from datetime import datetime
 
-    # Determine which stocks to sync
-    all_stocks = ['ADMR', 'BBCA', 'BMRI', 'BREN', 'BRPT', 'CBDK', 'CBRE', 'CDIA',
-                  'CUAN', 'DSNG', 'FUTR', 'HRUM', 'MBMA', 'MDKA', 'NCKL', 'PANI',
-                  'PTRO', 'TINS', 'WIFI']
+    # Import gdrive_sync module
+    try:
+        from gdrive_sync import sync_stock_data, check_setup_status
+    except ImportError as e:
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Error: Could not import gdrive_sync module: {str(e)}"
+            ], color="danger"),
+            None,
+            f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
-    if not selected_stocks or 'ALL' in selected_stocks:
-        stocks_to_sync = all_stocks
-    else:
-        stocks_to_sync = [s for s in selected_stocks if s and s != 'ALL']
+    # Check setup status first
+    setup_status = check_setup_status()
 
+    if not setup_status['ready']:
+        # Show setup instructions
+        missing_items = []
+        for item in setup_status['missing']:
+            missing_items.append(html.Li(item))
+
+        log_items = [
+            dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                html.Strong("Google Drive API Setup Required"),
+                html.P("Untuk mengaktifkan fitur sync, ikuti langkah berikut:", className="mb-2 mt-2"),
+                html.Ol([
+                    html.Li([
+                        html.Strong("Install library: "),
+                        html.Code("pip install google-api-python-client google-auth")
+                    ]),
+                    html.Li([
+                        html.Strong("Buat Google Cloud Project: "),
+                        html.A("console.cloud.google.com", href="https://console.cloud.google.com", target="_blank"),
+                        " → Enable 'Google Drive API'"
+                    ]),
+                    html.Li([
+                        html.Strong("Buat Service Account: "),
+                        "IAM & Admin → Service Accounts → Create → Download JSON key"
+                    ]),
+                    html.Li([
+                        html.Strong("Simpan credentials: "),
+                        html.Code("dashboard/google_credentials.json")
+                    ]),
+                    html.Li([
+                        html.Strong("Share folder Google Drive: "),
+                        "Buka folder → Share → Add service account email → Viewer access"
+                    ]),
+                ], className="small"),
+                html.Hr(),
+                html.P([
+                    html.Strong("Yang belum tersedia: "),
+                ], className="mb-1"),
+                html.Ul(missing_items, className="text-danger small mb-0")
+            ], color="info")
+        ]
+
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-cog me-2"),
+                "Setup diperlukan - Lihat instruksi di bawah"
+            ], color="warning"),
+            html.Div(log_items),
+            f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+    # Validate data types
     if not data_types:
         return (
             dbc.Alert("Pilih minimal satu jenis data!", color="warning"),
@@ -18049,45 +18107,74 @@ def sync_from_gdrive(n_clicks, selected_stocks, data_types):
             f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
 
-    # Log messages
-    log_items = []
-    success_count = 0
-    error_count = 0
+    # Determine stocks to sync
+    if not selected_stocks or 'ALL' in selected_stocks:
+        stocks_to_sync = None  # Will use all stocks
+    else:
+        stocks_to_sync = [s for s in selected_stocks if s and s != 'ALL']
 
-    log_items.append(html.Div([
-        html.I(className="fas fa-play text-info me-2"),
-        f"Memulai sync untuk {len(stocks_to_sync)} emiten..."
-    ], className="mb-1"))
+    # Run the sync
+    try:
+        result = sync_stock_data(stocks=stocks_to_sync, data_types=data_types)
 
-    # TODO: Implement actual Google Drive API integration
-    # For now, show placeholder message
-    for stock in stocks_to_sync:
-        log_items.append(html.Div([
-            html.I(className="fas fa-circle-notch fa-spin text-warning me-2"),
-            f"{stock}: Menunggu implementasi Google Drive API..."
-        ], className="mb-1 small text-muted"))
+        # Build log display
+        log_items = []
+        for log in result.logs:
+            icon_class = "fas fa-info-circle text-info"
+            text_class = ""
+            if log['level'] == 'error':
+                icon_class = "fas fa-times-circle text-danger"
+                text_class = "text-danger"
+            elif log['level'] == 'warning':
+                icon_class = "fas fa-exclamation-triangle text-warning"
+                text_class = "text-warning"
+            elif log['level'] == 'success':
+                icon_class = "fas fa-check-circle text-success"
+                text_class = "text-success"
 
-    log_items.append(html.Hr())
-    log_items.append(dbc.Alert([
-        html.I(className="fas fa-info-circle me-2"),
-        html.Strong("Info: "),
-        "Google Drive API belum dikonfigurasi. ",
-        "Untuk mengaktifkan fitur ini, diperlukan: ",
-        html.Ol([
-            html.Li("Google Cloud Project dengan Drive API enabled"),
-            html.Li("Service Account credentials (JSON key)"),
-            html.Li("Share folder Google Drive ke service account email"),
-        ], className="mb-0 mt-2")
-    ], color="info"))
+            log_items.append(html.Div([
+                html.Span(f"[{log['time']}] ", className="text-muted small"),
+                html.I(className=f"{icon_class} me-2"),
+                html.Span(log['message'], className=text_class)
+            ], className="mb-1"))
 
-    status = dbc.Alert([
-        html.I(className="fas fa-exclamation-triangle me-2"),
-        f"Sync belum aktif - Perlu konfigurasi Google Drive API"
-    ], color="warning")
+        # Summary stats
+        log_items.append(html.Hr())
+        log_items.append(dbc.Alert([
+            html.I(className="fas fa-chart-bar me-2"),
+            html.Strong("Summary: "),
+            f"{result.stats['price_records']} price, ",
+            f"{result.stats['broker_records']} broker, ",
+            f"{result.stats['fundamental_records']} fundamental records imported"
+        ], color="info" if result.success else "warning"))
 
-    last_sync = f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        # Status
+        if result.success:
+            status = dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                f"Sync berhasil! {len(result.stocks_processed)} emiten diproses"
+            ], color="success")
+        else:
+            status = dbc.Alert([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Sync selesai dengan error. Cek log di bawah."
+            ], color="warning")
 
-    return status, html.Div(log_items), last_sync
+        return (
+            status,
+            html.Div(log_items, style={'maxHeight': '400px', 'overflowY': 'auto'}),
+            f"Last sync: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+
+    except Exception as e:
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-times-circle me-2"),
+                f"Error: {str(e)}"
+            ], color="danger"),
+            html.Pre(str(e), className="text-danger small"),
+            f"Last attempt: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
 
 # ============================================================
