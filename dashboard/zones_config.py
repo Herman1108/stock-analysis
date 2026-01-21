@@ -3,7 +3,7 @@
 Master Configuration - Support & Resistance Zones
 Formula Assignment per Stock
 
-Updated: 2026-01-20 (Added CUAN)
+Updated: 2026-01-22 (Added RATU)
 """
 
 # ============================================================================
@@ -13,7 +13,7 @@ Updated: 2026-01-20 (Added CUAN)
 # V11b2: V11b1 + MA30 > MA100 trend filter  - Lihat formula_v11b2_spec.py
 
 STOCK_FORMULA = {
-    # V11b1 Stocks (18 emiten) - Volume >= 1.0x
+    # V11b1 Stocks (19 emiten) - Volume >= 1.0x
     'ADMR': 'V11b1',
     'BMRI': 'V11b1',
     'BREN': 'V11b1',
@@ -30,6 +30,7 @@ STOCK_FORMULA = {
     'NCKL': 'V11b1',
     'PANI': 'V11b1',
     'PTRO': 'V11b1',
+    'RATU': 'V11b1',
     'TINS': 'V11b1',
     'WIFI': 'V11b1',   # Note: Low win rate - HINDARI
 
@@ -60,6 +61,12 @@ STOCK_ZONES = {
         3: {'low': 10150, 'high': 10525},
         4: {'low': 11825, 'high': 12200},
         5: {'low': 13650, 'high': 14050},
+    },
+    'RATU': {
+        1: {'low': 6325, 'high': 6575},
+        2: {'low': 7875, 'high': 8075},
+        3: {'low': 9800, 'high': 10025},
+        4: {'low': 11675, 'high': 11975},
     },
     'BREN': {
         1: {'low': 3400, 'high': 4200},
