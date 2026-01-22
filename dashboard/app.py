@@ -14250,6 +14250,10 @@ def create_analysis_page(stock_code='CDIA'):
                 else:
                     v11_confirm_type = 'WAIT'
 
+            # V11b1: If there's a RUNNING position, show HOLD instead of entry signals
+            if v10_position:
+                v11_confirm_type = 'HOLD'
+
             # Get phase from v6_entry
             phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
 
@@ -14693,6 +14697,7 @@ def create_analysis_page(stock_code='CDIA'):
                                         html.Strong(
                                             v11_confirm_type,
                                             className='text-' + (
+                                                'primary' if v11_confirm_type == 'HOLD' else
                                                 'success' if v11_confirm_type in ['RETEST_OK', 'BREAKOUT_OK'] else
                                                 'danger' if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                                 'info' if 'BREAKOUT' in str(v11_confirm_type) else
@@ -15027,7 +15032,7 @@ def create_analysis_page(stock_code='CDIA'):
                         ], className="text-center mb-2"),
                         html.Hr(className="my-2"),
                         # V10 Checklist - different for BREAKOUT vs RETEST
-                        html.Small(f"Checklist V11b1 ({'BREAKOUT' if 'BREAKOUT' in v11_confirm_type else 'PANTAU' if v11_confirm_type == 'PANTAU' else 'RETEST'}):", className="text-muted d-block mb-1"),
+                        html.Small(f"Checklist V11b1 ({'HOLD' if v11_confirm_type == 'HOLD' else 'BREAKOUT' if 'BREAKOUT' in v11_confirm_type else 'PANTAU' if v11_confirm_type == 'PANTAU' else 'RETEST'}):", className="text-muted d-block mb-1"),
                         (lambda ec, pos_vol: html.Div([
                             # Use stored entry conditions from position
                             html.Div([
