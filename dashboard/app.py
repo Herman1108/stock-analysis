@@ -100,6 +100,70 @@ def get_all_v10_running_stocks():
                 pass
     _v10_cache_time = datetime.now()
     return _v10_running_cache
+
+# Cache for 2026 trade stats
+_v11b1_2026_stats_cache = None
+_v11b1_2026_stats_time = None
+
+def get_v11b1_2026_stats():
+    """Get V11b1 trade statistics for 2026
+    Returns dict with profit_count, loss_count, running_count and percentages
+    """
+    global _v11b1_2026_stats_cache, _v11b1_2026_stats_time
+    from datetime import datetime, timedelta
+
+    # Check cache validity (5 minutes)
+    if _v11b1_2026_stats_time and datetime.now() - _v11b1_2026_stats_time < timedelta(minutes=5):
+        return _v11b1_2026_stats_cache
+
+    stats = {
+        'profit_count': 0,
+        'loss_count': 0,
+        'running_count': 0,
+        'total_trades': 0,
+        'profit_pct': 0,
+        'loss_pct': 0,
+        'running_pct': 0,
+        'total_profit_pct': 0,  # Sum of all profit %
+        'total_loss_pct': 0,    # Sum of all loss %
+    }
+
+    if not run_v11b1_backtest:
+        return stats
+
+    for stock_code in STOCK_ZONES.keys():
+        try:
+            result = run_v11b1_backtest(stock_code)
+            if result and result.get('trades'):
+                for trade in result['trades']:
+                    entry_date = trade.get('entry_date', '')
+                    # Filter for 2026 trades only
+                    if entry_date and entry_date.startswith('2026'):
+                        stats['total_trades'] += 1
+                        exit_reason = trade.get('exit_reason', '')
+                        pnl = trade.get('pnl', 0)
+
+                        if exit_reason == 'OPEN':
+                            stats['running_count'] += 1
+                        elif exit_reason in ['TP', 'PROFIT'] or pnl > 0:
+                            stats['profit_count'] += 1
+                            stats['total_profit_pct'] += pnl
+                        else:  # SL, MAX_HOLD, or any loss
+                            stats['loss_count'] += 1
+                            stats['total_loss_pct'] += pnl
+        except:
+            pass
+
+    # Calculate percentages
+    if stats['total_trades'] > 0:
+        stats['profit_pct'] = (stats['profit_count'] / stats['total_trades']) * 100
+        stats['loss_pct'] = (stats['loss_count'] / stats['total_trades']) * 100
+        stats['running_pct'] = (stats['running_count'] / stats['total_trades']) * 100
+
+    _v11b1_2026_stats_cache = stats
+    _v11b1_2026_stats_time = datetime.now()
+    return stats
+
 from analyzer import (
     get_price_data, get_broker_data, run_full_analysis,
     get_top_accumulators, get_top_distributors,
@@ -3118,7 +3182,23 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
                     html.Div([
                         dbc.Badge([html.I(className="fas fa-lock me-1"), "Data Premium"], color="info", className="me-1 small"),
                         dbc.Badge([html.I(className="fas fa-unlock me-1"), "Signup untuk akses"], color="warning", className="small"),
-                    ], className="d-inline-block")
+                    ], className="d-inline-block me-3"),
+                    # V11b1 2026 Stats
+                    (lambda stats: html.Div([
+                        html.Small("V11b1 2026: ", className="text-muted me-2"),
+                        dbc.Badge([
+                            html.I(className="fas fa-check me-1"),
+                            f"Profit {stats['profit_count']} ({stats['profit_pct']:.0f}%)"
+                        ], color="success", className="me-1 small"),
+                        dbc.Badge([
+                            html.I(className="fas fa-times me-1"),
+                            f"Loss {stats['loss_count']} ({stats['loss_pct']:.0f}%)"
+                        ], color="danger", className="me-1 small"),
+                        dbc.Badge([
+                            html.I(className="fas fa-play me-1"),
+                            f"Running {stats['running_count']} ({stats['running_pct']:.0f}%)"
+                        ], color="warning", className="small text-dark"),
+                    ], className="d-inline-flex align-items-center") if stats['total_trades'] > 0 else html.Div())(get_v11b1_2026_stats())
                 ], className="d-flex align-items-center flex-wrap gap-2"),
             ], className="mb-4"),
 
