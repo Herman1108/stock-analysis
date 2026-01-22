@@ -2730,7 +2730,8 @@ def create_navbar():
                     searchable=True,
                     placeholder="Emiten",
                     className="stock-dropdown me-2",
-                    persistence=False  # Don't persist value between page loads
+                    persistence=True,  # Persist value between page loads
+                    persistence_type='local'  # Use localStorage for persistence
                 ),
 
                 # Desktop content menus
@@ -17681,6 +17682,7 @@ def create_app_layout():
         dcc.Store(id='admin-session', storage_type='session', data={'logged_in': False}),  # Admin session - persists until browser close
         dcc.Store(id='user-session', storage_type='session', data=None),  # User login session
         dcc.Store(id='superadmin-session', storage_type='local', data=None),  # Super admin persistent login
+        dcc.Store(id='selected-stock-store', storage_type='local', data=None),  # Persist selected stock across pages
 
         # Hidden dummy components to prevent callback errors when page components don't exist
         # Wrapped in visible container to ensure IDs are registered
@@ -17821,11 +17823,56 @@ def refresh_stock_dropdown(pathname, user_session):
         # Return fallback on error
         return [{'label': 'CDIA', 'value': 'CDIA'}]
 
+# Clientside callback: Update URL when stock dropdown changes
+# This ensures stock selection persists across page navigation
+app.clientside_callback(
+    """
+    function(selectedStock, pathname, currentSearch) {
+        if (!selectedStock) {
+            return window.dash_clientside.no_update;
+        }
+
+        // Parse current search params
+        const params = new URLSearchParams(currentSearch || '');
+        const currentStock = params.get('stock');
+
+        // Only update if stock actually changed
+        if (currentStock === selectedStock) {
+            return window.dash_clientside.no_update;
+        }
+
+        // Update stock parameter
+        params.set('stock', selectedStock);
+
+        return '?' + params.toString();
+    }
+    """,
+    Output('url', 'search'),
+    [Input('stock-selector', 'value')],
+    [State('url', 'pathname'), State('url', 'search')],
+    prevent_initial_call=True
+)
+
+# Clientside callback: Save selected stock to store
+app.clientside_callback(
+    """
+    function(selectedStock) {
+        if (selectedStock) {
+            return selectedStock;
+        }
+        return window.dash_clientside.no_update;
+    }
+    """,
+    Output('selected-stock-store', 'data'),
+    [Input('stock-selector', 'value')],
+    prevent_initial_call=True
+)
+
 # Clientside callback for faster dropdown sync with URL
 app.clientside_callback(
     """
-    function(search, pathname, currentValue, options) {
-        // Parse stock from URL
+    function(search, pathname, currentValue, options, storedStock) {
+        // Priority 1: Stock from URL
         if (search) {
             const params = new URLSearchParams(search);
             const stockFromUrl = params.get('stock');
@@ -17834,12 +17881,17 @@ app.clientside_callback(
             }
         }
 
-        // No stock in URL - return current value or first option
+        // Priority 2: Keep current dropdown value if exists
         if (currentValue) {
             return currentValue;
         }
 
-        // Default to first available stock
+        // Priority 3: Use stored stock from localStorage
+        if (storedStock) {
+            return storedStock;
+        }
+
+        // Priority 4: Default to first available stock
         if (options && options.length > 0) {
             return options[0].value;
         }
@@ -17849,7 +17901,7 @@ app.clientside_callback(
     """,
     Output('stock-selector', 'value'),
     [Input('url', 'search'), Input('url', 'pathname')],
-    [State('stock-selector', 'value'), State('stock-selector', 'options')]
+    [State('stock-selector', 'value'), State('stock-selector', 'options'), State('selected-stock-store', 'data')]
 )
 
 @app.callback(
