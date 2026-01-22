@@ -14169,12 +14169,15 @@ def create_analysis_page(stock_code='CDIA'):
 
                 if current_price > support_zone['high']:
                     # Harga di atas zona - cek apakah BREAKOUT confirmed
-                    if breakout_days_above >= 3:
-                        # 3+ hari di atas zona = BREAKOUT confirmed
+                    if came_from_below and breakout_days_above >= 3:
+                        # V11b1: Dalam 7 hari ada close <= zone_high DAN 3+ hari di atas = BREAKOUT_OK
                         v11_confirm_type = 'BREAKOUT_OK'
-                    else:
+                    elif came_from_below:
                         # Belum 3 hari - masih dalam proses konfirmasi
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    else:
+                        # Tidak ada close <= zone_high dalam 7 hari - breakout window expired
+                        v11_confirm_type = 'BREAKOUT_EXPIRED'
                 elif v10_in_zone:
                     # Harga dalam zona - cek apakah dari bawah (BREAKOUT) atau dari atas (RETEST)
                     if came_from_below:
@@ -14643,6 +14646,7 @@ def create_analysis_page(stock_code='CDIA'):
                                             v11_confirm_type,
                                             className='text-' + (
                                                 'success' if v11_confirm_type in ['RETEST_OK', 'BREAKOUT_OK'] else
+                                                'danger' if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                                 'info' if 'BREAKOUT' in str(v11_confirm_type) else
                                                 'warning' if 'RETEST' in str(v11_confirm_type) else
                                                 'secondary'
@@ -14705,12 +14709,15 @@ def create_analysis_page(stock_code='CDIA'):
                                 html.Div([
                                     dbc.Badge(
                                         # Use v11_confirm_type for badge
-                                        "BREAKOUT ZONE" if 'BREAKOUT' in v11_confirm_type and v10_in_zone else
+                                        "BREAKOUT ZONE" if 'BREAKOUT' in v11_confirm_type and v10_in_zone and 'EXPIRED' not in v11_confirm_type else
+                                        "BREAKOUT EXPIRED" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                         "BREAKOUT" if 'BREAKOUT' in v11_confirm_type else
                                         "RETEST ZONE" if v10_in_zone else
                                         "DI ANTARA ZONA" if v11_confirm_type == 'PANTAU' else
                                         "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
-                                        color="info" if 'BREAKOUT' in v11_confirm_type else "success" if v10_in_zone else "secondary",
+                                        color="warning" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
+                                              "info" if 'BREAKOUT' in v11_confirm_type else
+                                              "success" if v10_in_zone else "secondary",
                                         className="mb-2"
                                     ),
                                     html.Div([
@@ -14720,6 +14727,7 @@ def create_analysis_page(stock_code='CDIA'):
                                             "Posisi aktif" if v6_action == 'RUNNING' else
                                             "TAMBAH POSISI 30% (avg)" if v10_has_position and v10_in_zone else
                                             "Siap entry" if v6_action == 'ENTRY' else
+                                            "Entry window expired" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                             "Tunggu volume >= 1.0x" if v6_action == 'WATCH' and 'Vol' in v6_action_reason else
                                             "Tunggu konfirmasi 3 hari" if v6_action == 'WATCH' and 'proses' in v6_action_reason else
                                             "Terlalu jauh (>40%)" if v6_action == 'WAIT' and 'terlalu jauh' in v6_action_reason else
@@ -14727,6 +14735,7 @@ def create_analysis_page(stock_code='CDIA'):
                                             "Pantau" if v6_action == 'WATCH' else "Pantau",
                                             className="text-success fw-bold" if v6_action == 'ENTRY' else
                                                       "text-primary fw-bold" if v6_action == 'RUNNING' else
+                                                      "text-danger" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                                       "text-warning" if v6_action == 'WATCH' else "text-muted"
                                         ),
                                     ]),
