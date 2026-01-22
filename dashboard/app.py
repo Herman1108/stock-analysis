@@ -14133,15 +14133,18 @@ def create_analysis_page(stock_code='CDIA'):
             resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
 
             # === V11b1 Price Direction Detection (REFACTORED - uses backtest functions) ===
-            # RETEST: Harga TURUN dari resistance ke support (s_from_above = True)
-            # BREAKOUT: Harga NAIK dari bawah menembus zona
+            # KEY LOGIC from V11b1 Spec:
+            # - If close < zone_low recently → zona = RESISTANCE → skenario = BREAKOUT
+            # - If price coming from above (prev > zone_high) → zona = SUPPORT → skenario = RETEST
             came_from_below = False
+            was_below_zone = False  # NEW: Check if price BROKE BELOW zone (close < zone_low)
             v11_confirm_type = 'WAIT'
             breakout_days_above = 0
             s_touch = False
             s_hold = False
             s_from_above = False
             s_not_late = False
+            s_break = False  # NEW: Did price break below zone?
 
             if not price_df.empty and len(price_df) >= 7 and support_zone and BACKTEST_FUNCTIONS_AVAILABLE:
                 price_df_check = price_df.sort_values('date', ascending=False).reset_index(drop=True)
@@ -14169,8 +14172,15 @@ def create_analysis_page(stock_code='CDIA'):
                 s_from_above = support_from_above(prev_close, s_high)  # prev_close > support_high
                 s_not_late = support_not_late(today_close, s_high, tp, DEFAULT_PARAMS)
 
-                # BREAKOUT detection (from backtest_v11_universal.py detect_breakout_zone)
-                # Check if in last 7 days there was close <= zone_high
+                # NEW: Check if price BROKE BELOW zone in last 7 days (close < zone_low)
+                # V11b1 Spec: "close < zone_low → CANCEL, zona jadi RESISTANCE"
+                for rc in recent_closes:
+                    if rc < s_low:
+                        was_below_zone = True
+                        s_break = True  # Price broke below support
+                        break
+
+                # BREAKOUT detection: Check if in last 7 days there was close <= zone_high
                 for rc in recent_closes:
                     if rc <= s_high:
                         came_from_below = True
@@ -14183,46 +14193,52 @@ def create_analysis_page(stock_code='CDIA'):
                     else:
                         break
 
-                # === Determine scenario using SAME logic as backtest ===
-                # Reference: backtest_v11_universal.py lines 779-817
+                # === Determine scenario ===
+                # RULE: If was_below_zone = True → zona = RESISTANCE → need BREAKOUT
+                # RULE: If was_below_zone = False AND s_from_above = True → zona = SUPPORT → RETEST
 
-                if current_price > s_high:
-                    # Price above zone
-                    if s_touch and s_hold and breakout_days_above >= 3:
-                        # BREAKOUT CONFIRMATION: 3+ days above, touching zone as support test
-                        v11_confirm_type = 'BREAKOUT_OK'
-                    elif came_from_below and breakout_days_above >= 3:
-                        # BREAKOUT OK: was at/below zone recently, 3+ days above
+                if was_below_zone:
+                    # Price BROKE BELOW zone recently - zona is now RESISTANCE
+                    # Need BREAKOUT above zone_high to enter
+                    if current_price > s_high:
+                        # Price above zone
+                        if breakout_days_above >= 3:
+                            v11_confirm_type = 'BREAKOUT_OK'
+                        else:
+                            v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    elif current_price >= s_low:
+                        # Price in or near zone - waiting for breakout above zone_high
+                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    else:
+                        # Still below zone
+                        v11_confirm_type = 'WAIT'
+                elif current_price > s_high:
+                    # Price above zone, not from below - check if RETEST or BREAKOUT
+                    if came_from_below and breakout_days_above >= 3:
                         v11_confirm_type = 'BREAKOUT_OK'
                     elif came_from_below:
-                        # BREAKOUT in progress: was at zone, but less than 3 days above
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     elif s_from_above:
-                        # Price came from ABOVE (prev_close > s_high) - RETEST scenario
-                        # Price dropped from higher, now slightly above zone
+                        # Price came from above - RETEST scenario
                         v11_confirm_type = 'RETEST'
                     else:
-                        # No recent zone contact and not from above - floating
                         v11_confirm_type = 'WAIT'
                 elif v10_in_zone:
-                    # Price IN zone
+                    # Price IN zone, no recent break below
                     if s_touch and s_hold and s_from_above and s_not_late:
-                        # RETEST conditions met (from backtest line 800)
                         v11_confirm_type = 'RETEST_OK'
-                    elif s_touch and s_hold:
+                    elif s_from_above:
                         v11_confirm_type = 'RETEST'
                     else:
                         v11_confirm_type = 'RETEST'
                 elif s_touch:
-                    # Low touched zone, close slightly above
+                    # Low touched zone
                     if s_from_above and s_hold and s_not_late:
                         v11_confirm_type = 'RETEST_OK'
                     elif s_from_above:
                         v11_confirm_type = 'RETEST'
-                    elif came_from_below:
-                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     else:
-                        v11_confirm_type = 'RETEST'
+                        v11_confirm_type = 'WAIT'
                 elif current_price < s_low:
                     # Price below zone
                     v11_confirm_type = 'WAIT'
@@ -15036,12 +15052,12 @@ def create_analysis_page(stock_code='CDIA'):
                             ], className="mb-1"),
                         ]))(v10_position.get('entry_conditions', {}), v10_position.get('vol_ratio', 0)) if v10_position and v10_position.get('entry_conditions') else (
                         # Calculate current conditions - different checklist for BREAKOUT vs RETEST
-                        # Using SAME variables from refactored detection (s_touch, s_hold, s_from_above, s_not_late)
-                        (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below, touch, hold, from_above, not_late: html.Div([
-                            # BREAKOUT checklist
+                        # Using SAME variables from refactored detection (s_touch, s_hold, s_from_above, s_not_late, s_break)
+                        (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below, touch, hold, from_above, not_late, break_support: html.Div([
+                            # BREAKOUT checklist (when s_break = True or came from below)
                             html.Div([
-                                html.I(className=f"fas fa-{'check' if from_below else 'times'} text-{'success' if from_below else 'danger'} me-1"),
-                                html.Small("Pernah di Zona (7 hari)", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if break_support or from_below else 'times'} text-{'success' if break_support or from_below else 'danger'} me-1"),
+                                html.Small("Break Support (close < S_low)" if break_support else "Pernah di Zona (7 hari)", className="text-muted"),
                             ], className="mb-1") if is_breakout else html.Div([
                                 html.I(className=f"fas fa-{'check' if touch else 'times'} text-{'success' if touch else 'danger'} me-1"),
                                 html.Small("Touch Support (low <= S_high)", className="text-muted"),
@@ -15089,7 +15105,8 @@ def create_analysis_page(stock_code='CDIA'):
                             s_touch if 's_touch' in dir() else False,
                             s_hold if 's_hold' in dir() else False,
                             s_from_above if 's_from_above' in dir() else False,
-                            s_not_late if 's_not_late' in dir() else False
+                            s_not_late if 's_not_late' in dir() else False,
+                            s_break if 's_break' in dir() else False
                         ))
                     ])
                 ], color="dark", outline=True, className="h-100")
