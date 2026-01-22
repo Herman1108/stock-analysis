@@ -580,15 +580,17 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 if verbose:
                     events_log.append(f"{date_str}: BO_ARMED Z{locked_zone_num} waiting (price {close:,.0f} > 40% to TP)")
 
-        # Handle BREAKOUT_ARMED state: cancel if price drops below zone_low
-        if state == STATE_BREAKOUT_ARMED and locked_zone_low is not None:
-            if close < locked_zone_low:
-                # Price dropped below zone_low → CANCEL breakout (spec: breakout gagal)
+        # Handle BREAKOUT_ARMED state: cancel if price drops back into or below zone
+        # This allows retest detection to take over when price returns to the zone
+        if state == STATE_BREAKOUT_ARMED and locked_zone_high is not None:
+            if close <= locked_zone_high:
+                # Price dropped back into zone (close <= zone_high) → CANCEL breakout
+                # This enables retest detection when price returns to support
                 if verbose:
                     if waiting_entry:
-                        events_log.append(f"{date_str}: WAIT_CANCEL {waiting_entry['type']} Z{locked_zone_num} (close < zone_low, breakout gagal)")
+                        events_log.append(f"{date_str}: WAIT_CANCEL {waiting_entry['type']} Z{locked_zone_num} (close <= zone_high, breakout failed)")
                     else:
-                        events_log.append(f"{date_str}: BO_CANCEL Z{locked_zone_num} (close < zone_low, breakout gagal)")
+                        events_log.append(f"{date_str}: BO_CANCEL Z{locked_zone_num} (close <= zone_high, price back in zone)")
                 waiting_entry = None
                 breakout_locked = False
                 breakout_count = 0
