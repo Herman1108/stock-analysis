@@ -24,11 +24,20 @@ import numpy as np
 from datetime import datetime, timedelta
 
 from database import execute_query, get_cursor, clear_cache, clear_stock_cache, get_cache_stats, preload_stock_data
-from zones_config import STOCK_ZONES, get_zones
+from zones_config import STOCK_ZONES, get_zones, DEFAULT_PARAMS
 try:
-    from backtest_v11_universal import run_backtest as run_v11b1_backtest
+    from backtest_v11_universal import (
+        run_backtest as run_v11b1_backtest,
+        ZoneHelper,
+        support_touch,
+        support_hold,
+        support_from_above,
+        support_not_late,
+    )
+    BACKTEST_FUNCTIONS_AVAILABLE = True
 except ImportError:
     run_v11b1_backtest = None
+    BACKTEST_FUNCTIONS_AVAILABLE = False
 
 def get_v10_open_position(stock_code):
     """Get current open V11b1 position if any"""
@@ -14122,90 +14131,99 @@ def create_analysis_page(stock_code='CDIA'):
             # Find resistance zone (nearest zone above current price)
             resistance_zone = next((z for zn, z in sorted(v10_zones.items()) if z['low'] > current_price), None)
 
-            # === V11b1 Price Direction Detection ===
-            # RETEST: Harga TURUN dari resistance ke support
+            # === V11b1 Price Direction Detection (REFACTORED - uses backtest functions) ===
+            # RETEST: Harga TURUN dari resistance ke support (s_from_above = True)
             # BREAKOUT: Harga NAIK dari bawah menembus zona
             came_from_below = False
-            price_trend_up = False
             v11_confirm_type = 'WAIT'
             breakout_days_above = 0
-            touch_support = False
+            s_touch = False
+            s_hold = False
+            s_from_above = False
+            s_not_late = False
 
-            if not price_df.empty and len(price_df) >= 7 and support_zone:
+            if not price_df.empty and len(price_df) >= 7 and support_zone and BACKTEST_FUNCTIONS_AVAILABLE:
                 price_df_check = price_df.sort_values('date', ascending=False).reset_index(drop=True)
-                lookback_days = min(14, len(price_df_check))
 
-                # V11b1 Spec: Check last 7 days for price <= zone_high (BREAKOUT candidate)
-                # "Dalam 7 hari sebelumnya, minimal ada 1 close <= zone_high"
-                # (bisa dari bawah zona, dalam zona, atau sempat di atas lalu turun)
-                for i in range(min(7, len(price_df_check))):
-                    if price_df_check['close_price'].iloc[i] <= support_zone['high']:
+                # Get price data for V11b1 functions
+                today_close = current_price
+                today_low = price_df_check['low_price'].iloc[0] if len(price_df_check) > 0 else current_price
+                prev_close = price_df_check['close_price'].iloc[1] if len(price_df_check) > 1 else current_price
+
+                # Get recent closes for breakout detection (last 7 days)
+                recent_closes = price_df_check['close_price'].iloc[:7].tolist()[::-1]  # Oldest to newest
+
+                # Get zone parameters
+                s_low = support_zone['low']
+                s_high = support_zone['high']
+
+                # Calculate TP for not_late check
+                zh = ZoneHelper(v10_zones)
+                tp = zh.get_tp_for_zone(0, s_high, DEFAULT_PARAMS)
+
+                # === Use SAME functions as backtest ===
+                # RETEST conditions (from backtest_v11_universal.py line 766-769)
+                s_touch = support_touch(today_low, s_high)      # LOW <= support_high
+                s_hold = support_hold(today_close, s_low)       # CLOSE >= support_low
+                s_from_above = support_from_above(prev_close, s_high)  # prev_close > support_high
+                s_not_late = support_not_late(today_close, s_high, tp, DEFAULT_PARAMS)
+
+                # BREAKOUT detection (from backtest_v11_universal.py detect_breakout_zone)
+                # Check if in last 7 days there was close <= zone_high
+                for rc in recent_closes:
+                    if rc <= s_high:
                         came_from_below = True
                         break
 
-                # Check price trend: compare current vs 7 days ago
-                if len(price_df_check) >= 7:
-                    price_7d_ago = price_df_check['close_price'].iloc[6]
-                    price_trend_up = current_price > price_7d_ago
-
-                # Check if price touched support zone (low <= zone_high)
-                today_low = price_df_check['low_price'].iloc[0] if len(price_df_check) > 0 else 0
-                if today_low <= support_zone['high']:
-                    touch_support = True
-
-                # Count consecutive days with close > zone_high (for BREAKOUT)
+                # Count consecutive days with close > zone_high (for BREAKOUT gate)
                 for i in range(min(7, len(price_df_check))):
-                    if price_df_check['close_price'].iloc[i] > support_zone['high']:
+                    if price_df_check['close_price'].iloc[i] > s_high:
                         breakout_days_above += 1
                     else:
                         break
 
-                # Determine confirmation type based on trend and position
-                # BREAKOUT: Harga datang dari BAWAH zona (zona = resistance)
-                # RETEST: Harga datang dari ATAS zona (zona = support)
+                # === Determine scenario using SAME logic as backtest ===
+                # Reference: backtest_v11_universal.py lines 779-817
 
-                # V11b1: Jika dalam 7 hari ada close < zone_low, zona menjadi RESISTANCE
-                # dan skenario adalah BREAKOUT (bukan RETEST)
-
-                if current_price > support_zone['high']:
-                    # Harga di atas zona - cek apakah BREAKOUT atau RETEST
-                    # BREAKOUT: harga NAIK dari bawah/dalam zona ke atas (price_trend_up = True)
-                    # RETEST: harga TURUN dari atas, menguji zona sebagai support (price_trend_up = False)
-
-                    if price_trend_up and came_from_below and breakout_days_above >= 3:
-                        # BREAKOUT confirmed: trend naik, pernah di zona, 3+ hari di atas
+                if current_price > s_high:
+                    # Price above zone
+                    if s_touch and s_hold and breakout_days_above >= 3:
+                        # BREAKOUT CONFIRMATION: 3+ days above, touching zone as support test
                         v11_confirm_type = 'BREAKOUT_OK'
-                    elif price_trend_up and came_from_below:
-                        # BREAKOUT dalam proses: trend naik, pernah di zona, belum 3 hari
+                    elif came_from_below and breakout_days_above >= 3:
+                        # BREAKOUT OK: was at/below zone recently, 3+ days above
+                        v11_confirm_type = 'BREAKOUT_OK'
+                    elif came_from_below:
+                        # BREAKOUT in progress: was at zone, but less than 3 days above
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
-                    elif not price_trend_up:
-                        # Trend TURUN - harga menguji zona dari atas (RETEST scenario)
-                        # Zona berfungsi sebagai SUPPORT
+                    elif s_from_above:
+                        # Price came from ABOVE (prev_close > s_high) - RETEST scenario
+                        # Price dropped from higher, now slightly above zone
                         v11_confirm_type = 'RETEST'
                     else:
-                        # Trend naik tapi tidak pernah di zona dalam 7 hari - expired
-                        v11_confirm_type = 'BREAKOUT_EXPIRED'
+                        # No recent zone contact and not from above - floating
+                        v11_confirm_type = 'WAIT'
                 elif v10_in_zone:
-                    # Harga dalam zona - cek arah trend
-                    if price_trend_up and came_from_below:
-                        # Trend NAIK dari bawah - zona = resistance, skenario BREAKOUT
-                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
-                    elif touch_support:
-                        # Menyentuh support
+                    # Price IN zone
+                    if s_touch and s_hold and s_from_above and s_not_late:
+                        # RETEST conditions met (from backtest line 800)
                         v11_confirm_type = 'RETEST_OK'
-                    else:
-                        # Default: zona = support, skenario RETEST
+                    elif s_touch and s_hold:
                         v11_confirm_type = 'RETEST'
-                elif touch_support:
-                    # Low menyentuh zona, close sedikit di atas
-                    if price_trend_up and came_from_below:
-                        # Trend naik dari bawah - BREAKOUT scenario
+                    else:
+                        v11_confirm_type = 'RETEST'
+                elif s_touch:
+                    # Low touched zone, close slightly above
+                    if s_from_above and s_hold and s_not_late:
+                        v11_confirm_type = 'RETEST_OK'
+                    elif s_from_above:
+                        v11_confirm_type = 'RETEST'
+                    elif came_from_below:
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     else:
-                        # Trend turun atau sideways - RETEST scenario
                         v11_confirm_type = 'RETEST'
-                elif current_price < support_zone['low']:
-                    # Harga di bawah zona
+                elif current_price < s_low:
+                    # Price below zone
                     v11_confirm_type = 'WAIT'
                 else:
                     v11_confirm_type = 'WAIT'
@@ -15017,37 +15035,47 @@ def create_analysis_page(stock_code='CDIA'):
                             ], className="mb-1"),
                         ]))(v10_position.get('entry_conditions', {}), v10_position.get('vol_ratio', 0)) if v10_position and v10_position.get('entry_conditions') else (
                         # Calculate current conditions - different checklist for BREAKOUT vs RETEST
-                        (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below: html.Div([
+                        # Using SAME variables from refactored detection (s_touch, s_hold, s_from_above, s_not_late)
+                        (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below, touch, hold, from_above, not_late: html.Div([
                             # BREAKOUT checklist
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if from_below else 'times'} text-{'success' if from_below else 'danger'} me-1"),
-                                html.Small("Dari Bawah Zona (7 hari)", className="text-muted"),
+                                html.Small("Pernah di Zona (7 hari)", className="text-muted"),
                             ], className="mb-1") if is_breakout else html.Div([
-                                html.I(className=f"fas fa-{'check' if support_zone and current_price <= support_zone['high'] * 1.02 else 'times'} text-{'success' if support_zone and current_price <= support_zone['high'] * 1.02 else 'danger'} me-1"),
-                                html.Small("Touch Support", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if touch else 'times'} text-{'success' if touch else 'danger'} me-1"),
+                                html.Small("Touch Support (low <= S_high)", className="text-muted"),
                             ], className="mb-1"),
 
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if support_zone and current_price > support_zone['high'] else 'times'} text-{'success' if support_zone and current_price > support_zone['high'] else 'danger'} me-1"),
                                 html.Small("Close > Zone High", className="text-muted"),
                             ], className="mb-1") if is_breakout else html.Div([
-                                html.I(className=f"fas fa-{'check' if support_zone and current_price >= support_zone['low'] else 'times'} text-{'success' if support_zone and current_price >= support_zone['low'] else 'danger'} me-1"),
-                                html.Small("Hold di Atas S_low", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if hold else 'times'} text-{'success' if hold else 'danger'} me-1"),
+                                html.Small("Hold (close >= S_low)", className="text-muted"),
                             ], className="mb-1"),
 
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if days_above >= 3 else 'times'} text-{'success' if days_above >= 3 else 'warning'} me-1"),
                                 html.Small(f"3 Hari di Atas Zona ({days_above}/3)", className="text-muted"),
                             ], className="mb-1") if is_breakout else html.Div([
-                                html.I(className=f"fas fa-{'check' if support_zone and (lambda tp: current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high']))(next((z['low'] * 0.98 for zn, z in sorted(zones.items()) if z['low'] > current_price), current_price * 1.2)) else 'times'} text-{'success' if support_zone and (lambda tp: current_price <= support_zone['high'] + 0.35 * (tp - support_zone['high']))(next((z['low'] * 0.98 for zn, z in sorted(zones.items()) if z['low'] > current_price), current_price * 1.2)) else 'danger'} me-1"),
-                                html.Small("Dalam 35% ke TP", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if from_above else 'times'} text-{'success' if from_above else 'danger'} me-1"),
+                                html.Small("Dari Atas (prev > S_high)", className="text-muted"),
                             ], className="mb-1"),
 
-                            # V11b1: Volume >= 1.0x (same for both)
+                            # V11b1: Volume >= 1.0x (same for both) OR not_late for RETEST
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if cur_vol_ratio >= 1.0 else 'times'} text-{'success' if cur_vol_ratio >= 1.0 else 'danger'} me-1"),
                                 html.Small(f"Volume >= 1.0x ({cur_vol_ratio:.2f}x)", className="text-muted"),
+                            ], className="mb-1") if is_breakout else html.Div([
+                                html.I(className=f"fas fa-{'check' if not_late else 'times'} text-{'success' if not_late else 'danger'} me-1"),
+                                html.Small("Dalam 40% ke TP", className="text-muted"),
                             ], className="mb-1"),
+
+                            # Volume for RETEST
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if cur_vol_ratio >= 1.0 else 'times'} text-{'success' if cur_vol_ratio >= 1.0 else 'danger'} me-1"),
+                                html.Small(f"Volume >= 1.0x ({cur_vol_ratio:.2f}x)", className="text-muted"),
+                            ], className="mb-1") if not is_breakout else None,
                         ]) if zones else html.Small("Zona belum dikonfigurasi", className="text-muted"))(
                             get_zones(stock_code),
                             # V11b1: First check if price is IN zone, then fallback to zone below
@@ -15056,7 +15084,11 @@ def create_analysis_page(stock_code='CDIA'):
                             v11b_vol_ratio,
                             'BREAKOUT' in v11_confirm_type,
                             breakout_days_above if 'breakout_days_above' in dir() else 0,
-                            came_from_below if 'came_from_below' in dir() else False
+                            came_from_below if 'came_from_below' in dir() else False,
+                            s_touch if 's_touch' in dir() else False,
+                            s_hold if 's_hold' in dir() else False,
+                            s_from_above if 's_from_above' in dir() else False,
+                            s_not_late if 's_not_late' in dir() else False
                         ))
                     ])
                 ], color="dark", outline=True, className="h-100")
