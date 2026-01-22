@@ -112,8 +112,8 @@ def get_v11b1_2026_stats():
     global _v11b1_2026_stats_cache, _v11b1_2026_stats_time
     from datetime import datetime, timedelta
 
-    # Check cache validity (5 minutes)
-    if _v11b1_2026_stats_time and datetime.now() - _v11b1_2026_stats_time < timedelta(minutes=5):
+    # Check cache validity (2 minutes for fresher data)
+    if _v11b1_2026_stats_time and datetime.now() - _v11b1_2026_stats_time < timedelta(minutes=2):
         return _v11b1_2026_stats_cache
 
     stats = {
