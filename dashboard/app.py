@@ -14214,14 +14214,19 @@ def create_analysis_page(stock_code='CDIA'):
                         v11_confirm_type = 'WAIT'
                 elif current_price > s_high:
                     # Price above zone, not from below - check if RETEST or BREAKOUT
-                    if came_from_below and breakout_days_above >= 3:
+                    # FIX: breakout_days_above >= 3 alone is enough for BREAKOUT_OK
+                    # Even if came_from_below is False (breakout was >7 days ago)
+                    if breakout_days_above >= 3:
+                        # Breakout confirmed - price above zone for 3+ days
                         v11_confirm_type = 'BREAKOUT_OK'
                     elif came_from_below:
+                        # Breakout in progress
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
-                    elif s_from_above:
-                        # Price came from above - RETEST scenario
+                    elif s_touch and s_from_above:
+                        # RETEST: Must actually touch zone (low <= zone_high)
                         v11_confirm_type = 'RETEST'
                     else:
+                        # Floating above zone, no entry signal
                         v11_confirm_type = 'WAIT'
                 elif v10_in_zone:
                     # Price IN zone, no recent break below
