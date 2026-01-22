@@ -121,11 +121,11 @@ def get_v11b1_2026_stats():
         'loss_count': 0,
         'running_count': 0,
         'total_trades': 0,
-        'profit_pct': 0,
-        'loss_pct': 0,
-        'running_pct': 0,
-        'total_profit_pct': 0,  # Sum of all profit %
-        'total_loss_pct': 0,    # Sum of all loss %
+        'total_profit_pnl': 0,    # Sum of closed profit P&L %
+        'total_loss_pnl': 0,      # Sum of closed loss P&L %
+        'floating_pnl': 0,        # Sum of running positions P&L %
+        'avg_profit_pnl': 0,      # Average profit per winning trade
+        'avg_loss_pnl': 0,        # Average loss per losing trade
     }
 
     if not run_v11b1_backtest:
@@ -145,20 +145,22 @@ def get_v11b1_2026_stats():
 
                         if exit_reason == 'OPEN':
                             stats['running_count'] += 1
-                        elif exit_reason in ['TP', 'PROFIT'] or pnl > 0:
+                            stats['floating_pnl'] += pnl
+                        elif pnl > 0:
                             stats['profit_count'] += 1
-                            stats['total_profit_pct'] += pnl
-                        else:  # SL, MAX_HOLD, or any loss
+                            stats['total_profit_pnl'] += pnl
+                        elif pnl < 0:
                             stats['loss_count'] += 1
-                            stats['total_loss_pct'] += pnl
+                            stats['total_loss_pnl'] += pnl
+                        # pnl == 0 is ignored (break-even)
         except:
             pass
 
-    # Calculate percentages
-    if stats['total_trades'] > 0:
-        stats['profit_pct'] = (stats['profit_count'] / stats['total_trades']) * 100
-        stats['loss_pct'] = (stats['loss_count'] / stats['total_trades']) * 100
-        stats['running_pct'] = (stats['running_count'] / stats['total_trades']) * 100
+    # Calculate averages
+    if stats['profit_count'] > 0:
+        stats['avg_profit_pnl'] = stats['total_profit_pnl'] / stats['profit_count']
+    if stats['loss_count'] > 0:
+        stats['avg_loss_pnl'] = stats['total_loss_pnl'] / stats['loss_count']
 
     _v11b1_2026_stats_cache = stats
     _v11b1_2026_stats_time = datetime.now()
@@ -3183,21 +3185,21 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
                         dbc.Badge([html.I(className="fas fa-lock me-1"), "Data Premium"], color="info", className="me-1 small"),
                         dbc.Badge([html.I(className="fas fa-unlock me-1"), "Signup untuk akses"], color="warning", className="small"),
                     ], className="d-inline-block me-3"),
-                    # V11b1 2026 Stats
+                    # V11b1 2026 Stats - Show actual P&L percentages
                     (lambda stats: html.Div([
                         html.Small("V11b1 2026: ", className="text-muted me-2"),
                         dbc.Badge([
                             html.I(className="fas fa-check me-1"),
-                            f"Profit {stats['profit_count']} ({stats['profit_pct']:.0f}%)"
-                        ], color="success", className="me-1 small"),
+                            f"Profit {stats['profit_count']} (+{stats['total_profit_pnl']:.1f}%)"
+                        ], color="success", className="me-1 small") if stats['profit_count'] > 0 else None,
                         dbc.Badge([
                             html.I(className="fas fa-times me-1"),
-                            f"Loss {stats['loss_count']} ({stats['loss_pct']:.0f}%)"
-                        ], color="danger", className="me-1 small"),
+                            f"Loss {stats['loss_count']} ({stats['total_loss_pnl']:.1f}%)"
+                        ], color="danger", className="me-1 small") if stats['loss_count'] > 0 else None,
                         dbc.Badge([
                             html.I(className="fas fa-play me-1"),
-                            f"Running {stats['running_count']} ({stats['running_pct']:.0f}%)"
-                        ], color="warning", className="small text-dark"),
+                            f"Running {stats['running_count']} ({'+' if stats['floating_pnl'] >= 0 else ''}{stats['floating_pnl']:.1f}%)"
+                        ], color="success" if stats['floating_pnl'] >= 0 else "danger", className="small"),
                     ], className="d-inline-flex align-items-center") if stats['total_trades'] > 0 else html.Div())(get_v11b1_2026_stats())
                 ], className="d-flex align-items-center flex-wrap gap-2"),
             ], className="mb-4"),
