@@ -14135,9 +14135,11 @@ def create_analysis_page(stock_code='CDIA'):
                 price_df_check = price_df.sort_values('date', ascending=False).reset_index(drop=True)
                 lookback_days = min(14, len(price_df_check))
 
-                # Check last 7 days for price below support zone_low (BREAKOUT candidate)
+                # V11b1 Spec: Check last 7 days for price <= zone_high (BREAKOUT candidate)
+                # "Dalam 7 hari sebelumnya, minimal ada 1 close <= zone_high"
+                # (bisa dari bawah zona, dalam zona, atau sempat di atas lalu turun)
                 for i in range(min(7, len(price_df_check))):
-                    if price_df_check['close_price'].iloc[i] < support_zone['low']:
+                    if price_df_check['close_price'].iloc[i] <= support_zone['high']:
                         came_from_below = True
                         break
 

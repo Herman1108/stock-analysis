@@ -15,10 +15,11 @@ SYARAT RETEST:
 6. Volume >= 1.0x (V11b1 filter)
 
 SYARAT BREAKOUT:
-1. Dalam 7 hari terakhir, pernah ada close < zona low (pernah di BAWAH zona, bukan di dalam)
+1. Dalam 7 hari terakhir, pernah ada close <= zone_high (bisa dari bawah zona, dalam zona, atau sempat di atas lalu turun)
 2. Close TEMBUS ke atas zona (close > zona high)
 3. Close di ATAS zona selama 3 hari berturut-turut
-4. Jika kembali ke dalam zona sebelum 3 hari -> GAGAL, tunggu 3 hari lagi di atas zona
+4. Jika kembali ke dalam zona sebelum 3 hari -> RESET count, mulai ulang
+   Jika turun di bawah zona (< zone_low) -> CANCEL, harus ada breakout BARU
 5. Setelah 3 hari confirmed -> jalankan konfirmasi V11b1
 6. Volume >= 1.0x (V11b1 filter)
 
@@ -294,10 +295,11 @@ class ZoneHelper:
 
     def detect_breakout_zone(self, close, recent_closes, lookback=7):
         """
-        Detect breakout: harga dari BAWAH zona naik ke atas zona high
-        Syarat:
+        Detect breakout: harga tembus ke atas zona high
+        V11b1 Spec Syarat:
         - close > zone_high (tembus ke atas)
-        - Dalam 7 hari terakhir, pernah ada close < zone_low (pernah di BAWAH zona, bukan di dalam)
+        - Dalam 7 hari terakhir, pernah ada close <= zone_high
+          (bisa dari bawah zona, dalam zona, atau sempat di atas lalu turun)
         - Harga tidak terlalu jauh dari zona (max 10% di atas zone_high)
 
         Args:
@@ -319,14 +321,16 @@ class ZoneHelper:
                 if close > z_high * (1 + max_distance_pct):
                     continue  # Skip zona ini, harga sudah terlalu jauh
 
-                # Cek apakah dalam 7 hari terakhir pernah di BAWAH zona (close < zone_low)
-                was_below = False
+                # Cek apakah dalam 7 hari terakhir pernah close <= zone_high
+                # (bisa dari bawah zona, dalam zona, atau sempat di atas lalu turun)
+                # V11b1 Spec: "minimal ada 1 close <= zone_high"
+                was_below_or_at_zone = False
                 for rc in recent_closes[-lookback:]:
-                    if rc < z_low:
-                        was_below = True
+                    if rc <= z_high:
+                        was_below_or_at_zone = True
                         break
 
-                if was_below:
+                if was_below_or_at_zone:
                     return z_low, z_high, znum
         return None, None, 0
 
