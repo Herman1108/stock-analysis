@@ -14116,6 +14116,7 @@ def create_analysis_page(stock_code='CDIA'):
     if v10_position:
         v6_action = 'RUNNING'
         v6_action_reason = f"Posisi {v10_position['type']} Z{v10_position['zone_num']} sejak {v10_position['entry_date']}"
+        v11_confirm_type = 'HOLD'  # V11b1: Show HOLD when position is RUNNING
     elif stock_code.upper() in STOCK_ZONES:
         # For V10 stocks, action is based on V10 status, not Strong S/R
         v10_zones = get_zones(stock_code)
@@ -14249,10 +14250,6 @@ def create_analysis_page(stock_code='CDIA'):
                     v11_confirm_type = 'WAIT'
                 else:
                     v11_confirm_type = 'WAIT'
-
-            # V11b1: If there's a RUNNING position, show HOLD instead of entry signals
-            if v10_position:
-                v11_confirm_type = 'HOLD'
 
             # Get phase from v6_entry
             phase = v6_entry.get('phase', 'NEUTRAL') if v6_entry else 'NEUTRAL'
