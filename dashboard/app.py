@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from database import execute_query, get_cursor, clear_cache, clear_stock_cache, get_cache_stats, preload_stock_data
 from zones_config import STOCK_ZONES, get_zones, DEFAULT_PARAMS
 try:
-    from backtest_v11_universal import (
+    from backtest_v11b1_universal import (
         run_backtest as run_v11b1_backtest,
         ZoneHelper,
         support_touch,
