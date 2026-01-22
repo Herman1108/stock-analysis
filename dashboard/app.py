@@ -40,18 +40,19 @@ except ImportError:
     BACKTEST_FUNCTIONS_AVAILABLE = False
 
 def get_v10_open_position(stock_code):
-    """Get current open V11b1 position if any"""
+    """Get current open V11b1 position if any (only 2026 trades)"""
     if not run_v11b1_backtest or not get_zones(stock_code):
         return None
     try:
         result = run_v11b1_backtest(stock_code)
         if result and result.get('trades'):
-            # Find open position
+            # Find open position - only for 2026 trades
             for trade in result['trades']:
-                if trade.get('exit_reason') == 'OPEN':
+                entry_date = trade.get('entry_date', '')
+                if trade.get('exit_reason') == 'OPEN' and entry_date.startswith('2026'):
                     return {
                         'type': trade.get('type', 'UNKNOWN'),
-                        'entry_date': trade.get('entry_date', ''),
+                        'entry_date': entry_date,
                         'entry_price': trade.get('entry_price', 0),
                         'sl': trade.get('sl', 0),
                         'tp': trade.get('tp', 0),
@@ -69,7 +70,7 @@ _v10_running_cache = {}
 _v10_cache_time = None
 
 def get_all_v10_running_stocks():
-    """Get all stocks with V10 running positions (cached for 5 minutes)
+    """Get all stocks with V11b1 running positions for 2026 only (cached for 5 minutes)
     Returns dict with stock_code -> position data (entry_price, current_pnl, etc.)
     """
     global _v10_running_cache, _v10_cache_time
@@ -79,7 +80,7 @@ def get_all_v10_running_stocks():
     if _v10_cache_time and datetime.now() - _v10_cache_time < timedelta(minutes=5):
         return _v10_running_cache
 
-    # Rebuild cache
+    # Rebuild cache - only 2026 trades
     _v10_running_cache = {}
     if run_v11b1_backtest:
         for stock_code in STOCK_ZONES.keys():
@@ -87,13 +88,14 @@ def get_all_v10_running_stocks():
                 result = run_v11b1_backtest(stock_code)
                 if result and result.get('trades'):
                     for trade in result['trades']:
-                        if trade.get('exit_reason') == 'OPEN':
+                        entry_date = trade.get('entry_date', '')
+                        if trade.get('exit_reason') == 'OPEN' and entry_date.startswith('2026'):
                             _v10_running_cache[stock_code] = {
                                 'entry_price': trade.get('entry_price', 0),
                                 'current_pnl': trade.get('pnl', 0),
                                 'type': trade.get('type', ''),
                                 'zone_num': trade.get('zone_num', 0),
-                                'entry_date': trade.get('entry_date', ''),
+                                'entry_date': entry_date,
                             }
                             break
             except:
