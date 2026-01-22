@@ -476,7 +476,7 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 if verbose:
                     events_log.append(f"{date_str}: BO_START Z{bo_zone_num}")
 
-        # Breakout gate (REVISED: reset instead of cancel)
+        # Breakout gate (REVISED: reset if dalam zona, CANCEL if di bawah zona)
         if breakout_locked and state == STATE_BREAKOUT_GATE and breakout_count < 3:
             days_since_start = i - breakout_start_idx
             if days_since_start > 0:
@@ -495,11 +495,16 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     if verbose:
                         events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num} (dalam zona)")
                 else:
-                    # Close di bawah zona (< zone_low) → RESET count (bukan cancel)
+                    # Close di bawah zona (< zone_low) → CANCEL breakout (spec: breakout gagal)
+                    breakout_locked = False
                     breakout_count = 0
-                    breakout_start_idx = i
+                    breakout_gate_passed = False
+                    state = STATE_IDLE
+                    locked_zone_low = None
+                    locked_zone_high = None
+                    locked_zone_num = 0
                     if verbose:
-                        events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num} (di bawah zona)")
+                        events_log.append(f"{date_str}: GATE_CANCEL Z{locked_zone_num} (close < zone_low, breakout gagal)")
 
         # Breakout entry (REVISED: simplified, langsung setelah GATE_PASSED)
         if breakout_gate_passed and state == STATE_BREAKOUT_ARMED and position is None and waiting_entry is None:
@@ -575,17 +580,23 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 if verbose:
                     events_log.append(f"{date_str}: BO_ARMED Z{locked_zone_num} waiting (price {close:,.0f} > 40% to TP)")
 
-        # Handle waiting entry during BREAKOUT_ARMED state
-        if waiting_entry and state == STATE_BREAKOUT_ARMED:
-            # If price drops below zone_low during waiting → RESET
+        # Handle BREAKOUT_ARMED state: cancel if price drops below zone_low
+        if state == STATE_BREAKOUT_ARMED and locked_zone_low is not None:
             if close < locked_zone_low:
+                # Price dropped below zone_low → CANCEL breakout (spec: breakout gagal)
                 if verbose:
-                    events_log.append(f"{date_str}: WAIT_RESET {waiting_entry['type']} Z{locked_zone_num} (close < zone_low)")
+                    if waiting_entry:
+                        events_log.append(f"{date_str}: WAIT_CANCEL {waiting_entry['type']} Z{locked_zone_num} (close < zone_low, breakout gagal)")
+                    else:
+                        events_log.append(f"{date_str}: BO_CANCEL Z{locked_zone_num} (close < zone_low, breakout gagal)")
                 waiting_entry = None
                 breakout_locked = False
                 breakout_count = 0
                 breakout_gate_passed = False
                 state = STATE_IDLE
+                locked_zone_low = None
+                locked_zone_high = None
+                locked_zone_num = 0
 
         # Retest detection
         if not frozen and position is None and waiting_entry is None:
