@@ -14168,33 +14168,41 @@ def create_analysis_page(stock_code='CDIA'):
                 # dan skenario adalah BREAKOUT (bukan RETEST)
 
                 if current_price > support_zone['high']:
-                    # Harga di atas zona - cek apakah BREAKOUT confirmed
-                    if came_from_below and breakout_days_above >= 3:
-                        # V11b1: Dalam 7 hari ada close <= zone_high DAN 3+ hari di atas = BREAKOUT_OK
+                    # Harga di atas zona - cek apakah BREAKOUT atau RETEST
+                    # BREAKOUT: harga NAIK dari bawah/dalam zona ke atas (price_trend_up = True)
+                    # RETEST: harga TURUN dari atas, menguji zona sebagai support (price_trend_up = False)
+
+                    if price_trend_up and came_from_below and breakout_days_above >= 3:
+                        # BREAKOUT confirmed: trend naik, pernah di zona, 3+ hari di atas
                         v11_confirm_type = 'BREAKOUT_OK'
-                    elif came_from_below:
-                        # Belum 3 hari - masih dalam proses konfirmasi
+                    elif price_trend_up and came_from_below:
+                        # BREAKOUT dalam proses: trend naik, pernah di zona, belum 3 hari
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    elif not price_trend_up:
+                        # Trend TURUN - harga menguji zona dari atas (RETEST scenario)
+                        # Zona berfungsi sebagai SUPPORT
+                        v11_confirm_type = 'RETEST'
                     else:
-                        # Tidak ada close <= zone_high dalam 7 hari - breakout window expired
+                        # Trend naik tapi tidak pernah di zona dalam 7 hari - expired
                         v11_confirm_type = 'BREAKOUT_EXPIRED'
                 elif v10_in_zone:
-                    # Harga dalam zona - cek apakah dari bawah (BREAKOUT) atau dari atas (RETEST)
-                    if came_from_below:
-                        # V11b1: Harga datang dari BAWAH zona (ada close < zone_low dalam 7 hari)
-                        # Zona sekarang menjadi RESISTANCE, skenario = BREAKOUT
-                        # Hitung hari dengan close > zone_high untuk gate validation
+                    # Harga dalam zona - cek arah trend
+                    if price_trend_up and came_from_below:
+                        # Trend NAIK dari bawah - zona = resistance, skenario BREAKOUT
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     elif touch_support:
-                        # Harga datang dari atas dan menyentuh support
+                        # Menyentuh support
                         v11_confirm_type = 'RETEST_OK'
                     else:
+                        # Default: zona = support, skenario RETEST
                         v11_confirm_type = 'RETEST'
                 elif touch_support:
                     # Low menyentuh zona, close sedikit di atas
-                    if came_from_below:
+                    if price_trend_up and came_from_below:
+                        # Trend naik dari bawah - BREAKOUT scenario
                         v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     else:
+                        # Trend turun atau sideways - RETEST scenario
                         v11_confirm_type = 'RETEST'
                 elif current_price < support_zone['low']:
                     # Harga di bawah zona
