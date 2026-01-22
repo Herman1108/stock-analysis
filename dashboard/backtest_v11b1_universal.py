@@ -218,7 +218,15 @@ def support_hold(close, s_low):
 def support_from_above(prev_close, s_high):
     return prev_close > s_high
 
-def support_not_late(close, s_high, tp, not_late_pct=0.35):
+def support_not_late(close, s_high, tp, params_or_pct=0.40):
+    """Check if price is not too late (within threshold % to TP)
+    params_or_pct can be either a dict with 'not_late_pct' key or a float value
+    V11b1 default: 40%
+    """
+    if isinstance(params_or_pct, dict):
+        not_late_pct = params_or_pct.get('not_late_pct', 0.40)
+    else:
+        not_late_pct = params_or_pct
     distance_to_tp = tp - s_high
     max_close = s_high + (not_late_pct * distance_to_tp)
     return close <= max_close
