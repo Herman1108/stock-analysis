@@ -25,7 +25,7 @@ except (AttributeError, OSError):
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
-from zones_config import STOCK_ZONES, DEFAULT_PARAMS
+from zones_config import STOCK_ZONES, DEFAULT_PARAMS, STOCK_FORMULA
 
 
 def get_db_connection():
@@ -50,6 +50,31 @@ V11B1_PARAMS = {
     'bo_accumulation_days': 7,    # Cek 7 hari sebelumnya untuk akumulasi breakout
     'gate_days': 3,               # Validasi 3 hari berturut-turut di atas resistance
 }
+
+# V11b2 Parameters (V11b1 + MA Trend Filter)
+V11B2_PARAMS = {
+    **V11B1_PARAMS,
+    'use_ma_filter': True,        # Enable MA trend filter
+    'ma_short': 30,               # MA short period (MA30)
+    'ma_long': 100,               # MA long period (MA100)
+}
+
+
+def calculate_ma(data, idx, period):
+    """Calculate Simple Moving Average"""
+    if idx < period - 1:
+        return None
+    closes = [float(data[i]['close']) for i in range(idx - period + 1, idx + 1)]
+    return sum(closes) / len(closes)
+
+
+def check_ma_uptrend(data, idx, ma_short=30, ma_long=100):
+    """Check if MA short > MA long (uptrend)"""
+    ma_s = calculate_ma(data, idx, ma_short)
+    ma_l = calculate_ma(data, idx, ma_long)
+    if ma_s is None or ma_l is None:
+        return True  # Allow entry if not enough data
+    return ma_s > ma_l
 
 # State machine constants
 STATE_IDLE = 0
@@ -268,6 +293,10 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
     if not zones:
         return None
 
+    # Check if stock uses V11b2 (MA filter)
+    stock_formula = STOCK_FORMULA.get(stock_code.upper(), 'V11b1')
+    use_ma_filter = stock_formula == 'V11b2'
+
     zh = ZoneHelper(zones)
 
     try:
@@ -388,50 +417,66 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     breakout_gate_passed = False
                     state = STATE_IDLE
             elif vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio'] and price_valid:
-                # VOLUME CONFIRMED dan harga masih valid (< 40% ke TP) → ENTRY!
-                entry_price = open_price
-                # SL selalu dari zone_low (unified)
-                sl = waiting_entry['zone_low'] * (1 - params['sl_pct'])
-                tp = zh.get_tp_for_zone(waiting_entry['zone_num'], entry_price, params)
+                # V11b2: Check MA filter before entry
+                ma_ok = True
+                if use_ma_filter:
+                    ma_ok = check_ma_uptrend(all_data, i, ma_short=30, ma_long=100)
+                    if not ma_ok and verbose:
+                        events_log.append(f"{date_str}: MA_FILTER_BLOCKED {waiting_entry['type']} (MA30 <= MA100 = downtrend)")
 
-                if tp > entry_price:
-                    position = {
-                        'type': waiting_entry['type'],
-                        'entry_date': date_str,
-                        'entry_price': entry_price,
-                        'entry_idx': i,
-                        'zone_num': waiting_entry['zone_num'],
-                        'zone_low': waiting_entry['zone_low'],
-                        'zone_high': waiting_entry['zone_high'],
-                        'sl': sl,
-                        'tp': tp,
-                        'vol_ratio': vol_ratio,
-                        'waited_days': days_waiting,
-                        'trigger_vol': waiting_entry['trigger_vol'],
-                        'entry_method': 'WAITED',
-                        'entry_conditions': waiting_entry.get('entry_conditions', {
-                            'vol_ok': vol_ratio >= v11b1_params['min_vol_ratio'],
-                            'within_40pct': price_valid,
-                        }),
-                    }
-                    waiting_entries.append({
-                        'stock': stock_code,
-                        'type': waiting_entry['type'],
-                        'trigger_date': waiting_entry['trigger_date'],
-                        'trigger_vol': waiting_entry['trigger_vol'],
-                        'entry_date': date_str,
-                        'entry_vol': vol_ratio,
-                        'waited_days': days_waiting,
-                    })
-                    if verbose:
-                        events_log.append(f"{date_str}: WAIT_ENTRY {waiting_entry['type']} Z{waiting_entry['zone_num']} @ {entry_price:,.0f} (waited {days_waiting}d, vol {vol_ratio:.2f}x)")
-
-                    # Reset breakout state after entry
+                if not ma_ok:
+                    # Downtrend - cancel waiting entry
+                    waiting_entry = None
                     if state == STATE_BREAKOUT_ARMED:
                         breakout_locked = False
                         breakout_count = 0
                         breakout_gate_passed = False
                         state = STATE_IDLE
+                else:
+                    # VOLUME CONFIRMED dan harga masih valid (< 40% ke TP) → ENTRY!
+                    entry_price = open_price
+                    # SL selalu dari zone_low (unified)
+                    sl = waiting_entry['zone_low'] * (1 - params['sl_pct'])
+                    tp = zh.get_tp_for_zone(waiting_entry['zone_num'], entry_price, params)
+
+                    if tp > entry_price:
+                        position = {
+                            'type': waiting_entry['type'],
+                            'entry_date': date_str,
+                            'entry_price': entry_price,
+                            'entry_idx': i,
+                            'zone_num': waiting_entry['zone_num'],
+                            'zone_low': waiting_entry['zone_low'],
+                            'zone_high': waiting_entry['zone_high'],
+                            'sl': sl,
+                            'tp': tp,
+                            'vol_ratio': vol_ratio,
+                            'waited_days': days_waiting,
+                            'trigger_vol': waiting_entry['trigger_vol'],
+                            'entry_method': 'WAITED',
+                            'entry_conditions': waiting_entry.get('entry_conditions', {
+                                'vol_ok': vol_ratio >= v11b1_params['min_vol_ratio'],
+                                'within_40pct': price_valid,
+                            }),
+                        }
+                        waiting_entries.append({
+                            'stock': stock_code,
+                            'type': waiting_entry['type'],
+                            'trigger_date': waiting_entry['trigger_date'],
+                            'trigger_vol': waiting_entry['trigger_vol'],
+                            'entry_date': date_str,
+                            'entry_vol': vol_ratio,
+                            'waited_days': days_waiting,
+                        })
+                        if verbose:
+                            events_log.append(f"{date_str}: WAIT_ENTRY {waiting_entry['type']} Z{waiting_entry['zone_num']} @ {entry_price:,.0f} (waited {days_waiting}d, vol {vol_ratio:.2f}x)")
+
+                        # Reset breakout state after entry
+                        if state == STATE_BREAKOUT_ARMED:
+                            breakout_locked = False
+                            breakout_count = 0
+                            breakout_gate_passed = False
+                            state = STATE_IDLE
 
                 waiting_entry = None
 
@@ -530,8 +575,15 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
             if price_valid:
                 entry_type = 'BREAKOUT'  # Unified type (no more BO_HOLD/BO_PULLBACK distinction)
 
+                # V11b2: Check MA filter before entry
+                ma_ok = True
+                if use_ma_filter:
+                    ma_ok = check_ma_uptrend(all_data, i, ma_short=30, ma_long=100)
+                    if not ma_ok and verbose:
+                        events_log.append(f"{date_str}: MA_FILTER_BLOCKED BREAKOUT Z{locked_zone_num} (MA30 <= MA100 = downtrend)")
+
                 # V11b1: Check volume
-                if vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
+                if ma_ok and vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
                     # Volume OK - direct entry
                     entry_price = open_price
                     # SL selalu dari zone_low (unified)
@@ -575,8 +627,8 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                         breakout_count = 0
                         breakout_gate_passed = False
                         state = STATE_IDLE
-                else:
-                    # Volume LOW - enter waiting mode
+                elif ma_ok:
+                    # Volume LOW but MA OK - enter waiting mode
                     waiting_entry = {
                         'type': entry_type,
                         'zone_low': locked_zone_low,
@@ -597,6 +649,7 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                         events_log.append(f"{date_str}: WAIT_START {entry_type} Z{locked_zone_num} (vol {vol_str} < {v11b1_params['min_vol_ratio']}x)")
 
                     # Keep breakout state during waiting (don't reset yet)
+                # else: MA filter blocked entry (already logged above)
             else:
                 # Price too far from zone, but stay in ARMED state
                 if verbose:
@@ -652,8 +705,15 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     if any_reclaim:
                         tp = zh.get_tp_for_zone(locked_zone_num, close, params)
 
+                        # V11b2: Check MA filter before entry
+                        ma_ok = True
+                        if use_ma_filter:
+                            ma_ok = check_ma_uptrend(all_data, i, ma_short=30, ma_long=100)
+                            if not ma_ok and verbose:
+                                events_log.append(f"{date_str}: MA_FILTER_BLOCKED RETEST Z{locked_zone_num} (MA30 <= MA100 = downtrend)")
+
                         # V11b1: Check volume
-                        if vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
+                        if ma_ok and vol_ratio and vol_ratio >= v11b1_params['min_vol_ratio']:
                             # Volume OK - direct entry
                             entry_price = open_price
                             # SL selalu dari zone_low (unified)
@@ -692,8 +752,8 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                                 })
                                 if verbose:
                                     events_log.append(f"{date_str}: DIRECT_ENTRY RETEST Z{locked_zone_num} (vol {vol_ratio:.2f}x)")
-                        else:
-                            # Volume LOW - enter waiting mode
+                        elif ma_ok:
+                            # Volume LOW but MA OK - enter waiting mode
                             waiting_entry = {
                                 'type': 'RETEST',
                                 'zone_low': locked_zone_low,
@@ -715,6 +775,7 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                             if verbose:
                                 vol_str = f"{vol_ratio:.2f}x" if vol_ratio else "N/A"
                                 events_log.append(f"{date_str}: WAIT_START RETEST Z{locked_zone_num} (vol {vol_str} < {v11b1_params['min_vol_ratio']}x)")
+                        # else: MA filter blocked entry (already logged above)
 
                         prior_resistance_touched = False
                         state = STATE_IDLE
