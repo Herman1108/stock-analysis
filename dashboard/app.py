@@ -57,16 +57,18 @@ def get_v10_open_position(stock_code):
                         open_trade = trade
                         break
 
+                # Convert Decimal to float for compatibility
+                # Use open_trade data for entry-time values (type, vol_ratio, entry_conditions)
                 return {
-                    'type': result.get('confirm_type', 'UNKNOWN'),
+                    'type': open_trade.get('type', 'UNKNOWN') if open_trade else 'UNKNOWN',
                     'entry_date': entry_date,
-                    'entry_price': result.get('position_entry_price', 0),
-                    'sl': result.get('position_sl', 0),
-                    'tp': result.get('position_tp', 0),
-                    'zone_num': result.get('support_zone_num', 0),
-                    'current_pnl': result.get('position_current_pnl', 0),
+                    'entry_price': float(result.get('position_entry_price') or 0),
+                    'sl': float(result.get('position_sl') or 0),
+                    'tp': float(result.get('position_tp') or 0),
+                    'zone_num': int(result.get('support_zone_num') or 0),
+                    'current_pnl': float(result.get('position_current_pnl') or 0),
                     'entry_conditions': open_trade.get('entry_conditions') if open_trade else None,
-                    'vol_ratio': result.get('vol_ratio', 0),
+                    'vol_ratio': float(open_trade.get('vol_ratio') or 0) if open_trade else 0,
                 }
     except Exception:
         pass
@@ -272,7 +274,7 @@ def get_v11b1_all_precomputed_stats():
                         if entry_date and entry_date.startswith('2026'):
                             stats['total_trades'] += 1
                             exit_reason = trade.get('exit_reason', '')
-                            pnl = trade.get('pnl', 0)
+                            pnl = float(trade.get('pnl') or 0)  # Convert to float
 
                             if exit_reason == 'OPEN':
                                 stats['running_count'] += 1
@@ -311,11 +313,12 @@ def get_v11b1_running_from_precomputed():
                 if entry_date:
                     entry_date_str = str(entry_date)
                     if entry_date_str.startswith('2026'):
+                        # Convert Decimal to float for compatibility
                         running_stocks[stock_code] = {
-                            'entry_price': result.get('position_entry_price', 0),
-                            'current_pnl': result.get('position_current_pnl', 0),
+                            'entry_price': float(result.get('position_entry_price') or 0),
+                            'current_pnl': float(result.get('position_current_pnl') or 0),
                             'type': result.get('confirm_type', ''),
-                            'zone_num': result.get('support_zone_num', 0),
+                            'zone_num': int(result.get('support_zone_num') or 0),
                             'entry_date': entry_date_str,
                         }
         except Exception:
@@ -14378,6 +14381,25 @@ def create_analysis_page(stock_code='CDIA'):
 
     # Check for V10 open position
     v10_position = get_v10_open_position(stock_code)
+
+    # V11b1 Zone Status - determine price position relative to V11b1 zones
+    v11b1_zone_status = None
+    if stock_code.upper() in STOCK_ZONES:
+        v11b1_zones = get_zones(stock_code)
+        if v11b1_zones:
+            # Find active support zone (nearest zone below or containing current price)
+            v11b1_support = next((z for zn, z in sorted(v11b1_zones.items(), reverse=True) if z['low'] <= current_price <= z['high'] * 1.02), None)
+            if not v11b1_support:
+                v11b1_support = next((z for zn, z in sorted(v11b1_zones.items(), reverse=True) if z['high'] < current_price), None)
+
+            if v11b1_support:
+                if current_price > v11b1_support['high']:
+                    v11b1_zone_status = 'ABOVE'  # Price above zone (breakout)
+                elif current_price >= v11b1_support['low']:
+                    v11b1_zone_status = 'IN_ZONE'  # Price inside zone
+                else:
+                    v11b1_zone_status = 'BELOW'  # Price below zone
+
     if v10_position:
         v6_action = 'RUNNING'
         v6_action_reason = f"Posisi {v10_position['type']} Z{v10_position['zone_num']} sejak {v10_position['entry_date']}"
@@ -14928,8 +14950,9 @@ def create_analysis_page(stock_code='CDIA'):
                             html.H2([
                                 html.Span(f"Rp {current_price:,.0f}", className="text-warning me-3"),
                                 dbc.Badge(
-                                    f"{accum.get('decision_rule', {}).get('current_vs_entry', 'N/A')}",
-                                    color="success" if accum.get('decision_rule', {}).get('current_vs_entry') == 'IN_ZONE' else "warning" if accum.get('decision_rule', {}).get('current_vs_entry') == 'ABOVE' else "danger"
+                                    # Use V11b1 zone status for V11b1 stocks, otherwise use accum logic
+                                    v11b1_zone_status if v11b1_zone_status else accum.get('decision_rule', {}).get('current_vs_entry', 'N/A'),
+                                    color="success" if (v11b1_zone_status or accum.get('decision_rule', {}).get('current_vs_entry')) == 'IN_ZONE' else "warning" if (v11b1_zone_status or accum.get('decision_rule', {}).get('current_vs_entry')) == 'ABOVE' else "danger"
                                 )
                             ], className="mb-2"),
                             # Price changes: Today, 1W, 1M
@@ -15295,34 +15318,43 @@ def create_analysis_page(stock_code='CDIA'):
                         html.Hr(className="my-2"),
                         # V10 Checklist - different for BREAKOUT vs RETEST
                         html.Small(f"Checklist V11b1 ({'HOLD' if v11_confirm_type == 'HOLD' else 'BREAKOUT' if 'BREAKOUT' in v11_confirm_type else 'PANTAU' if v11_confirm_type == 'PANTAU' else 'RETEST'}):", className="text-muted d-block mb-1"),
-                        (lambda ec, pos_vol: html.Div([
-                            # Use stored entry conditions from position
+                        (lambda ec, pos_vol, pos_type: html.Div([
+                            # BREAKOUT checklist (entry_conditions from backtest)
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('gate_passed') else 'times'} text-{'success' if ec.get('gate_passed') else 'danger'} me-1"),
+                                html.Small("Gate Passed (3 hari di atas zona)", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('within_40pct') else 'times'} text-{'success' if ec.get('within_40pct') else 'danger'} me-1"),
+                                html.Small("Dalam 40% ke TP", className="text-muted"),
+                            ], className="mb-1"),
+                            html.Div([
+                                html.I(className=f"fas fa-{'check' if ec.get('vol_ok') else 'times'} text-{'success' if ec.get('vol_ok') else 'danger'} me-1"),
+                                html.Small(f"Volume >= 1.0x ({pos_vol:.2f}x)", className="text-muted"),
+                            ], className="mb-1"),
+                        ]) if 'BREAKOUT' in pos_type else html.Div([
+                            # RETEST checklist (entry_conditions from backtest)
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if ec.get('touch_support') else 'times'} text-{'success' if ec.get('touch_support') else 'danger'} me-1"),
-                                html.Small("Touch Support", className="text-muted"),
+                                html.Small("Touch Support (low <= S_high)", className="text-muted"),
                             ], className="mb-1"),
                             html.Div([
                                 html.I(className=f"fas fa-{'check' if ec.get('hold_above_slow') else 'times'} text-{'success' if ec.get('hold_above_slow') else 'danger'} me-1"),
-                                html.Small("Hold di Atas S_low", className="text-muted"),
+                                html.Small("Hold (close >= S_low)", className="text-muted"),
                             ], className="mb-1"),
                             html.Div([
-                                html.I(className=f"fas fa-{'check' if ec.get('within_35pct') else 'times'} text-{'success' if ec.get('within_35pct') else 'danger'} me-1"),
-                                html.Small("Dalam 35% ke TP", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if ec.get('from_above') else 'times'} text-{'success' if ec.get('from_above') else 'danger'} me-1"),
+                                html.Small("Dari Atas (prev > S_high)", className="text-muted"),
                             ], className="mb-1"),
                             html.Div([
-                                html.I(className=f"fas fa-{'check' if ec.get('prior_r_touch') else 'times'} text-{'success' if ec.get('prior_r_touch') else 'danger'} me-1"),
-                                html.Small("Prior R Touch", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if ec.get('within_40pct') else 'times'} text-{'success' if ec.get('within_40pct') else 'danger'} me-1"),
+                                html.Small("Dalam 40% ke TP", className="text-muted"),
                             ], className="mb-1"),
                             html.Div([
-                                html.I(className=f"fas fa-{'check' if ec.get('reclaim') else 'times'} text-{'success' if ec.get('reclaim') else 'danger'} me-1"),
-                                html.Small("Konfirmasi Reclaim", className="text-muted"),
-                            ], className="mb-1"),
-                            # V11b1: Volume >= 1.0x (use vol_ratio from position directly)
-                            html.Div([
-                                html.I(className=f"fas fa-{'check' if pos_vol >= 1.0 else 'times'} text-{'success' if pos_vol >= 1.0 else 'danger'} me-1"),
+                                html.I(className=f"fas fa-{'check' if ec.get('vol_ok') else 'times'} text-{'success' if ec.get('vol_ok') else 'danger'} me-1"),
                                 html.Small(f"Volume >= 1.0x ({pos_vol:.2f}x)", className="text-muted"),
                             ], className="mb-1"),
-                        ]))(v10_position.get('entry_conditions', {}), v10_position.get('vol_ratio', 0)) if v10_position and v10_position.get('entry_conditions') else (
+                        ]))(v10_position.get('entry_conditions', {}), v10_position.get('vol_ratio', 0), v10_position.get('type', '')) if v10_position and v10_position.get('entry_conditions') else (
                         # Calculate current conditions - different checklist for BREAKOUT vs RETEST
                         # Using SAME variables from refactored detection (s_touch, s_hold, s_from_above, s_not_late, s_break)
                         (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below, touch, hold, from_above, not_late, break_support: html.Div([

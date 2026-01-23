@@ -409,6 +409,10 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                         'waited_days': days_waiting,
                         'trigger_vol': waiting_entry['trigger_vol'],
                         'entry_method': 'WAITED',
+                        'entry_conditions': waiting_entry.get('entry_conditions', {
+                            'vol_ok': vol_ratio >= v11b1_params['min_vol_ratio'],
+                            'within_40pct': price_valid,
+                        }),
                     }
                     waiting_entries.append({
                         'stock': stock_code,
@@ -549,6 +553,11 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                             'waited_days': 0,
                             'trigger_vol': vol_ratio,
                             'entry_method': 'DIRECT',
+                            'entry_conditions': {
+                                'gate_passed': True,  # 3 days above zone
+                                'within_40pct': price_valid,  # not_late check
+                                'vol_ok': vol_ratio >= v11b1_params['min_vol_ratio'],
+                            },
                         }
                         direct_entries.append({
                             'stock': stock_code,
@@ -577,6 +586,11 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                         'start_idx': i,
                         'trigger_date': date_str,
                         'trigger_vol': vol_ratio if vol_ratio else 0,
+                        'entry_conditions': {
+                            'gate_passed': True,  # 3 days above zone
+                            'within_40pct': price_valid,
+                            'vol_ok': False,  # Volume was low at trigger
+                        },
                     }
                     if verbose:
                         vol_str = f"{vol_ratio:.2f}x" if vol_ratio else "N/A"
@@ -661,6 +675,14 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                                     'waited_days': 0,
                                     'trigger_vol': vol_ratio,
                                     'entry_method': 'DIRECT',
+                                    'entry_conditions': {
+                                        'touch_support': True,  # s_touch was True at trigger
+                                        'hold_above_slow': True,  # s_hold was True at trigger
+                                        'from_above': True,  # s_from_above was True at trigger
+                                        'within_40pct': True,  # s_not_late was True at trigger
+                                        'vol_ok': vol_ratio >= v11b1_params['min_vol_ratio'],
+                                        'reclaim': True,  # any_reclaim was True
+                                    },
                                 }
                                 direct_entries.append({
                                     'stock': stock_code,
@@ -681,6 +703,14 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                                 'start_idx': i,
                                 'trigger_date': date_str,
                                 'trigger_vol': vol_ratio if vol_ratio else 0,
+                                'entry_conditions': {
+                                    'touch_support': True,
+                                    'hold_above_slow': True,
+                                    'from_above': True,
+                                    'within_40pct': True,
+                                    'reclaim': True,
+                                    'vol_ok': False,  # Volume was low at trigger
+                                },
                             }
                             if verbose:
                                 vol_str = f"{vol_ratio:.2f}x" if vol_ratio else "N/A"
