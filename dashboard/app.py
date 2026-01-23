@@ -40,7 +40,38 @@ except ImportError:
     BACKTEST_FUNCTIONS_AVAILABLE = False
 
 def get_v10_open_position(stock_code):
-    """Get current open V11b1 position if any (only 2026 trades)"""
+    """Get current open V11b1 position if any (only 2026 trades)
+    Uses pre-computed tables if available, otherwise falls back to on-the-fly calculation.
+    """
+    # Try pre-computed table first
+    try:
+        result = get_v11b1_precomputed_result(stock_code)
+        if result and result.get('has_open_position'):
+            entry_date = str(result.get('position_entry_date', ''))
+            if entry_date.startswith('2026'):
+                # Get trade details from trade_history
+                trade_history = result.get('trade_history', [])
+                open_trade = None
+                for trade in trade_history:
+                    if trade.get('exit_reason') == 'OPEN':
+                        open_trade = trade
+                        break
+
+                return {
+                    'type': result.get('confirm_type', 'UNKNOWN'),
+                    'entry_date': entry_date,
+                    'entry_price': result.get('position_entry_price', 0),
+                    'sl': result.get('position_sl', 0),
+                    'tp': result.get('position_tp', 0),
+                    'zone_num': result.get('support_zone_num', 0),
+                    'current_pnl': result.get('position_current_pnl', 0),
+                    'entry_conditions': open_trade.get('entry_conditions') if open_trade else None,
+                    'vol_ratio': result.get('vol_ratio', 0),
+                }
+    except Exception:
+        pass
+
+    # Fallback: Calculate from backtest
     if not run_v11b1_backtest or not get_zones(stock_code):
         return None
     try:
@@ -72,6 +103,7 @@ _v10_cache_time = None
 def get_all_v10_running_stocks():
     """Get all stocks with V11b1 running positions for 2026 only (cached for 5 minutes)
     Returns dict with stock_code -> position data (entry_price, current_pnl, etc.)
+    Uses pre-computed tables if available, otherwise falls back to on-the-fly calculation.
     """
     global _v10_running_cache, _v10_cache_time
     from datetime import datetime, timedelta
@@ -80,7 +112,17 @@ def get_all_v10_running_stocks():
     if _v10_cache_time and datetime.now() - _v10_cache_time < timedelta(minutes=5):
         return _v10_running_cache
 
-    # Rebuild cache - only 2026 trades
+    # Try pre-computed tables first (much faster)
+    try:
+        precomputed = get_v11b1_running_from_precomputed()
+        if precomputed:
+            _v10_running_cache = precomputed
+            _v10_cache_time = datetime.now()
+            return _v10_running_cache
+    except Exception:
+        pass
+
+    # Fallback: Rebuild cache from backtest - only 2026 trades
     _v10_running_cache = {}
     if run_v11b1_backtest:
         for stock_code in STOCK_ZONES.keys():
@@ -110,6 +152,7 @@ _v11b1_2026_stats_time = None
 def get_v11b1_2026_stats():
     """Get V11b1 trade statistics for 2026
     Returns dict with profit_count, loss_count, running_count and percentages
+    Uses pre-computed tables if available, otherwise falls back to on-the-fly calculation.
     """
     global _v11b1_2026_stats_cache, _v11b1_2026_stats_time
     from datetime import datetime, timedelta
@@ -118,6 +161,17 @@ def get_v11b1_2026_stats():
     if _v11b1_2026_stats_time and datetime.now() - _v11b1_2026_stats_time < timedelta(minutes=2):
         return _v11b1_2026_stats_cache
 
+    # Try pre-computed tables first (much faster)
+    try:
+        precomputed_stats = get_v11b1_all_precomputed_stats()
+        if precomputed_stats and precomputed_stats.get('total_trades', 0) > 0:
+            _v11b1_2026_stats_cache = precomputed_stats
+            _v11b1_2026_stats_time = datetime.now()
+            return _v11b1_2026_stats_cache
+    except Exception:
+        pass
+
+    # Fallback: Calculate from backtest
     stats = {
         'profit_count': 0,
         'loss_count': 0,
@@ -167,6 +221,133 @@ def get_v11b1_2026_stats():
     _v11b1_2026_stats_cache = stats
     _v11b1_2026_stats_time = datetime.now()
     return stats
+
+# ============================================================
+# PRE-COMPUTED V11B1 FUNCTIONS - Read from database tables
+# ============================================================
+
+def get_v11b1_precomputed_result(stock_code):
+    """Get latest pre-computed V11b1 result for a stock from database"""
+    table_name = f'v11b1_results_{stock_code.lower()}'
+    try:
+        query = f"""
+            SELECT * FROM {table_name}
+            WHERE has_error = FALSE
+            ORDER BY calc_date DESC
+            LIMIT 1
+        """
+        results = execute_query(query)
+        if results and len(results) > 0:
+            return dict(results[0])
+        return None
+    except Exception:
+        return None
+
+
+def get_v11b1_all_precomputed_stats():
+    """Get V11b1 stats from all pre-computed tables for 2026
+    Returns dict with profit_count, loss_count, running_count, etc.
+    Much faster than running backtests on-the-fly.
+    """
+    stats = {
+        'profit_count': 0,
+        'loss_count': 0,
+        'running_count': 0,
+        'total_trades': 0,
+        'total_profit_pnl': 0,
+        'total_loss_pnl': 0,
+        'floating_pnl': 0,
+        'avg_profit_pnl': 0,
+        'avg_loss_pnl': 0,
+    }
+
+    for stock_code in STOCK_ZONES.keys():
+        try:
+            result = get_v11b1_precomputed_result(stock_code)
+            if result:
+                trade_history = result.get('trade_history', [])
+                if trade_history:
+                    for trade in trade_history:
+                        entry_date = trade.get('entry_date', '')
+                        if entry_date and entry_date.startswith('2026'):
+                            stats['total_trades'] += 1
+                            exit_reason = trade.get('exit_reason', '')
+                            pnl = trade.get('pnl', 0)
+
+                            if exit_reason == 'OPEN':
+                                stats['running_count'] += 1
+                                stats['floating_pnl'] += pnl
+                            elif pnl > 0:
+                                stats['profit_count'] += 1
+                                stats['total_profit_pnl'] += pnl
+                            elif pnl < 0:
+                                stats['loss_count'] += 1
+                                stats['total_loss_pnl'] += pnl
+        except Exception:
+            pass
+
+    # Calculate averages
+    if stats['profit_count'] > 0:
+        stats['avg_profit_pnl'] = stats['total_profit_pnl'] / stats['profit_count']
+    if stats['loss_count'] > 0:
+        stats['avg_loss_pnl'] = stats['total_loss_pnl'] / stats['loss_count']
+
+    return stats
+
+
+def get_v11b1_running_from_precomputed():
+    """Get all running V11b1 positions from pre-computed tables (2026 only)
+    Returns dict with stock_code -> position data
+    Much faster than running backtests on-the-fly.
+    """
+    running_stocks = {}
+
+    for stock_code in STOCK_ZONES.keys():
+        try:
+            result = get_v11b1_precomputed_result(stock_code)
+            if result and result.get('has_open_position'):
+                # Verify it's 2026
+                entry_date = result.get('position_entry_date', '')
+                if entry_date:
+                    entry_date_str = str(entry_date)
+                    if entry_date_str.startswith('2026'):
+                        running_stocks[stock_code] = {
+                            'entry_price': result.get('position_entry_price', 0),
+                            'current_pnl': result.get('position_current_pnl', 0),
+                            'type': result.get('confirm_type', ''),
+                            'zone_num': result.get('support_zone_num', 0),
+                            'entry_date': entry_date_str,
+                        }
+        except Exception:
+            pass
+
+    return running_stocks
+
+
+def check_precomputed_tables_exist():
+    """Check if pre-computed tables exist in database"""
+    try:
+        query = """
+            SELECT table_name FROM information_schema.tables
+            WHERE table_name LIKE 'v11b1_results_%'
+            LIMIT 1
+        """
+        results = execute_query(query)
+        return results and len(results) > 0
+    except Exception:
+        return False
+
+
+# Flag to determine if we should use pre-computed tables
+USE_PRECOMPUTED_V11B1 = None  # Will be set on first check
+
+def should_use_precomputed():
+    """Check if we should use pre-computed tables (lazy initialization)"""
+    global USE_PRECOMPUTED_V11B1
+    if USE_PRECOMPUTED_V11B1 is None:
+        USE_PRECOMPUTED_V11B1 = check_precomputed_tables_exist()
+    return USE_PRECOMPUTED_V11B1
+
 
 from analyzer import (
     get_price_data, get_broker_data, run_full_analysis,
