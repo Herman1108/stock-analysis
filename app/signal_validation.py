@@ -1540,7 +1540,7 @@ def get_unified_analysis_summary(stock_code: str) -> dict:
             WHERE stock_code = %s
             ORDER BY report_date DESC LIMIT 1
         """
-        result = execute_query(query, (stock_code,))
+        result = execute_query(query, (stock_code,), use_cache=False)
         if result:
             row = result[0]
             per = row.get('per', 0) or 0
