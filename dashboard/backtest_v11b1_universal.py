@@ -506,6 +506,20 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                 })
                 if verbose:
                     events_log.append(f"{date_str}: EXIT {exit_reason} @ {exit_price:,.0f} ({pnl:+.1f}%)")
+
+                # Reset breakout state after exit to require new accumulation check
+                # This prevents re-entry without fresh came_from_below validation
+                if position.get('type') == 'BREAKOUT':
+                    breakout_locked = False
+                    breakout_count = 0
+                    breakout_gate_passed = False
+                    state = STATE_IDLE
+                    locked_zone_low = None
+                    locked_zone_high = None
+                    locked_zone_num = 0
+                    if verbose:
+                        events_log.append(f"{date_str}: BREAKOUT_STATE_RESET (exit)")
+
                 position = None
                 continue
 
@@ -553,6 +567,11 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                         events_log.append(f"{date_str}: GATE_RESET Z{locked_zone_num} (dalam zona)")
                 else:
                     # Close di bawah zona (< zone_low) → CANCEL breakout (spec: breakout gagal)
+                    # But record that resistance WAS touched (for potential RETEST later)
+                    prior_resistance_touched = True
+                    prior_resistance_zone = locked_zone_num
+                    if verbose:
+                        events_log.append(f"{date_str}: GATE_CANCEL Z{locked_zone_num} (close < zone_low, breakout gagal) - resistance recorded for RETEST")
                     breakout_locked = False
                     breakout_count = 0
                     breakout_gate_passed = False
@@ -560,11 +579,33 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     locked_zone_low = None
                     locked_zone_high = None
                     locked_zone_num = 0
-                    if verbose:
-                        events_log.append(f"{date_str}: GATE_CANCEL Z{locked_zone_num} (close < zone_low, breakout gagal)")
 
         # Breakout entry (REVISED: simplified, langsung setelah GATE_PASSED)
         if breakout_gate_passed and state == STATE_BREAKOUT_ARMED and position is None and waiting_entry is None:
+            # Re-check came_from_below before entry (V11b1 spec requirement)
+            # This prevents late entries when original accumulation is no longer valid
+            current_came_from_below = False
+            lookback = min(v11b1_params.get('bo_accumulation_days', 7), i)
+            for j in range(1, lookback + 1):
+                if i - j >= 0:
+                    prev_close = float(all_data[i - j]['close'])
+                    if prev_close <= locked_zone_high:
+                        current_came_from_below = True
+                        break
+
+            if not current_came_from_below:
+                # Accumulation no longer valid - reset breakout state
+                if verbose:
+                    events_log.append(f"{date_str}: BREAKOUT_INVALID Z{locked_zone_num} (came_from_below=False, reset)")
+                breakout_locked = False
+                breakout_count = 0
+                breakout_gate_passed = False
+                state = STATE_IDLE
+                locked_zone_low = None
+                locked_zone_high = None
+                locked_zone_num = 0
+                continue
+
             # Setelah GATE_PASSED (3 hari valid), langsung cek konfirmasi
             tp = zh.get_tp_for_zone(locked_zone_num, close, params)
             tp_for_check = tp

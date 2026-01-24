@@ -24,7 +24,7 @@ import numpy as np
 from datetime import datetime, timedelta
 
 from database import execute_query, get_cursor, clear_cache, clear_stock_cache, get_cache_stats, preload_stock_data
-from zones_config import STOCK_ZONES, get_zones, DEFAULT_PARAMS
+from zones_config import STOCK_ZONES, get_zones, DEFAULT_PARAMS, STOCK_FORMULA
 try:
     from backtest_v11b1_universal import (
         run_backtest as run_v11b1_backtest,
@@ -244,6 +244,32 @@ def get_v11b1_precomputed_result(stock_code):
         return None
     except Exception:
         return None
+
+
+def get_backtest_result_for_display(stock_code):
+    """Get backtest result for display - uses precomputed table for all V11b1 stocks.
+    This ensures consistency with the corrected V11b1 formula stored in tables.
+
+    Formula V11b1 (from formula_v11b1_spec.py & zones_config.py):
+    - RETEST Zn: TP = Z(n+1)_low * 0.98 (resistance terdekat di atas support zone)
+    - BREAKOUT Zn: TP = Z(n+1)_low * 0.98 (resistance terdekat di atas breakout zone)
+    - SL = zone_low * 0.95
+    """
+    # All V11b1 stocks use precomputed table (formula sudah diterapkan)
+    precomputed = get_v11b1_precomputed_result(stock_code)
+    if precomputed and precomputed.get('trade_history'):
+        return {
+            'trades': precomputed.get('trade_history', []),
+            'wins': precomputed.get('wins', 0),
+            'losses': precomputed.get('losses', 0),
+            'win_rate': precomputed.get('win_rate', 0),
+            'total_pnl': precomputed.get('total_pnl', 0),
+        }
+
+    # Fallback: run live backtest if no precomputed data
+    if run_v11b1_backtest and get_zones(stock_code):
+        return run_v11b1_backtest(stock_code)
+    return None
 
 
 def get_v11b1_all_precomputed_stats():
@@ -14445,6 +14471,21 @@ def create_analysis_page(stock_code='CDIA'):
                 # Get recent closes for breakout detection (last 7 days)
                 recent_closes = price_df_check['close_price'].iloc[:7].tolist()[::-1]  # Oldest to newest
 
+                # Calculate MA30 and MA100 for trend detection
+                ma_uptrend = True  # Default to uptrend if not enough data
+                ma30_value = None
+                ma100_value = None
+                if len(price_df_check) >= 100:
+                    closes_for_ma = price_df_check['close_price'].iloc[:100].tolist()[::-1]  # Oldest to newest
+                    ma30_value = sum([float(c) for c in closes_for_ma[-30:]]) / 30
+                    ma100_value = sum([float(c) for c in closes_for_ma]) / 100
+                    ma_uptrend = ma30_value > ma100_value
+                elif len(price_df_check) >= 30:
+                    closes_for_ma = price_df_check['close_price'].iloc[:30].tolist()[::-1]
+                    ma30_value = sum([float(c) for c in closes_for_ma]) / 30
+                    # If we don't have 100 days, assume uptrend if price > MA30
+                    ma_uptrend = current_price > ma30_value
+
                 # Get zone parameters
                 s_low = support_zone['low']
                 s_high = support_zone['high']
@@ -14501,21 +14542,29 @@ def create_analysis_page(stock_code='CDIA'):
                         # Still below zone
                         v11_confirm_type = 'WAIT'
                 elif current_price > s_high:
-                    # Price above zone, not from below - check if RETEST or BREAKOUT
-                    # FIX: breakout_days_above >= 3 alone is enough for BREAKOUT_OK
-                    # Even if came_from_below is False (breakout was >7 days ago)
-                    if breakout_days_above >= 3:
-                        # Breakout confirmed - price above zone for 3+ days
-                        v11_confirm_type = 'BREAKOUT_OK'
-                    elif came_from_below:
-                        # Breakout in progress
-                        v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
+                    # Price above zone - check formula type and conditions
+                    stock_formula = STOCK_FORMULA.get(stock_code.upper(), 'V11b1')
+
+                    # V11b1 Spec: BREAKOUT requires came_from_below = TRUE
+                    # "Dalam 7 hari sebelumnya, minimal ada 1 close <= zone_high"
+                    if came_from_below:
+                        # Valid breakout - price rose from below/within zone recently
+                        if breakout_days_above >= 3:
+                            v11_confirm_type = 'BREAKOUT_OK'
+                        else:
+                            v11_confirm_type = f'BREAKOUT ({breakout_days_above}/3)'
                     elif s_touch and s_from_above:
-                        # RETEST: Must actually touch zone (low <= zone_high)
+                        # RETEST: Price touched zone from above
                         v11_confirm_type = 'RETEST'
                     else:
-                        # Floating above zone, no entry signal
-                        v11_confirm_type = 'WAIT'
+                        # Price above zone but NEVER came from below - NOT a breakout
+                        # This means price has been above zone for >7 days without ever being in it
+                        if stock_formula == 'V11b2' and not ma_uptrend:
+                            # V11b2 + MA downtrend = FROM_RESISTANCE
+                            v11_confirm_type = 'FROM_RESISTANCE'
+                        else:
+                            # Just above zone, waiting for retest or new breakout
+                            v11_confirm_type = 'DI_ATAS_ZONA'
                 elif v10_in_zone:
                     # Price IN zone, no recent break below
                     if s_touch and s_hold and s_from_above and s_not_late:
@@ -14543,7 +14592,17 @@ def create_analysis_page(stock_code='CDIA'):
 
             if v10_in_zone:
                 # Price is in a support zone - check for entry conditions (V11b: + Volume >= 1.0x)
-                if phase in ['STRONG_ACCUMULATION', 'ACCUMULATION', 'WEAK_ACCUMULATION']:
+                # NEW: Check for RETEST_OK first (RETEST logic revised 2026-01-24)
+                if v11_confirm_type == 'RETEST_OK':
+                    if v11b_vol_ratio >= 1.0:
+                        # RETEST confirmed with volume - ENTRY
+                        v6_action = 'ENTRY'
+                        v6_action_reason = f"V11b1: RETEST confirmed! Zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Vol {v11b_vol_ratio:.2f}x OK"
+                    else:
+                        # RETEST valid but waiting for volume
+                        v6_action = 'WATCH'
+                        v6_action_reason = f"V11b1: RETEST valid, tunggu volume >= 1.0x (current: {v11b_vol_ratio:.2f}x)"
+                elif phase in ['STRONG_ACCUMULATION', 'ACCUMULATION', 'WEAK_ACCUMULATION']:
                     if v11b_vol_ratio >= 1.0:
                         # V11b: Volume confirmed - ENTRY
                         v6_action = 'ENTRY'
@@ -14576,14 +14635,21 @@ def create_analysis_page(stock_code='CDIA'):
                     v6_action = 'WATCH'
                     v6_action_reason = f"V11b1: Dalam zona tapi fase {phase} - pantau akumulasi"
             elif support_zone and resistance_zone:
-                # Price is between zones - check if BREAKOUT confirmed + Volume + Not Late
+                # Price is between zones - check if BREAKOUT/RETEST confirmed + Volume + Not Late
                 # Calculate not_late threshold (40% dari zone_high ke TP)
                 tp_price = resistance_zone['low'] * 0.98
                 distance_to_tp = tp_price - support_zone['high']
                 not_late_threshold = support_zone['high'] + distance_to_tp * 0.40
                 is_not_late = current_price <= not_late_threshold
 
-                if v11_confirm_type == 'BREAKOUT_OK' and v11b_vol_ratio >= 1.0 and is_not_late:
+                # NEW: Handle RETEST_OK when price is above zone (reclaimed)
+                if v11_confirm_type == 'RETEST_OK' and v11b_vol_ratio >= 1.0 and is_not_late:
+                    v6_action = 'ENTRY'
+                    v6_action_reason = f"V11b1: RETEST confirmed! Harga reclaim di atas zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Vol {v11b_vol_ratio:.2f}x OK"
+                elif v11_confirm_type == 'RETEST_OK' and v11b_vol_ratio < 1.0:
+                    v6_action = 'WATCH'
+                    v6_action_reason = f"V11b1: RETEST valid, tunggu volume >= 1.0x (current: {v11b_vol_ratio:.2f}x)"
+                elif v11_confirm_type == 'BREAKOUT_OK' and v11b_vol_ratio >= 1.0 and is_not_late:
                     v6_action = 'ENTRY'
                     v6_action_reason = f"V11b1: BREAKOUT confirmed! 3+ hari di atas zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} | Vol {v11b_vol_ratio:.2f}x OK"
                 elif v11_confirm_type == 'BREAKOUT_OK' and not is_not_late:
@@ -14597,6 +14663,15 @@ def create_analysis_page(stock_code='CDIA'):
                 elif 'BREAKOUT' in v11_confirm_type:
                     v6_action = 'WATCH'
                     v6_action_reason = f"V11b1: Breakout dalam proses ({v11_confirm_type}) - tunggu konfirmasi 3 hari"
+                elif v11_confirm_type == 'FROM_RESISTANCE':
+                    # V11b2: Price in downtrend (MA30 <= MA100) - entry blocked
+                    v6_action = 'WATCH'
+                    ma_info = f" (MA30 {ma30_value:,.0f} <= MA100 {ma100_value:,.0f})" if ma30_value and ma100_value else ""
+                    v6_action_reason = f"V11b2: Downtrend{ma_info} - entry diblokir. Support: {support_zone['low']:,.0f}-{support_zone['high']:,.0f}"
+                elif v11_confirm_type == 'DI_ATAS_ZONA':
+                    # Price above zone but no recent breakout signal (>7 days)
+                    v6_action = 'WATCH'
+                    v6_action_reason = f"Di atas zona {support_zone['low']:,.0f}-{support_zone['high']:,.0f} - tunggu retest atau breakout baru"
                 else:
                     v6_action = 'WAIT'
                     v6_action_reason = f"V11b1: Di antara zona S {support_zone['low']:,.0f}-{support_zone['high']:,.0f} dan R {resistance_zone['low']:,.0f}-{resistance_zone['high']:,.0f} - tunggu retest"
@@ -14984,7 +15059,7 @@ def create_analysis_page(stock_code='CDIA'):
                                             className='text-' + (
                                                 'primary' if v11_confirm_type == 'HOLD' else
                                                 'success' if v11_confirm_type in ['RETEST_OK', 'BREAKOUT_OK'] else
-                                                'danger' if v11_confirm_type == 'BREAKOUT_EXPIRED' else
+                                                'danger' if v11_confirm_type in ['BREAKOUT_EXPIRED', 'FROM_RESISTANCE'] else
                                                 'info' if 'BREAKOUT' in str(v11_confirm_type) else
                                                 'warning' if 'RETEST' in str(v11_confirm_type) else
                                                 'secondary'
@@ -15050,11 +15125,15 @@ def create_analysis_page(stock_code='CDIA'):
                                         "BREAKOUT ZONE" if 'BREAKOUT' in v11_confirm_type and v10_in_zone and 'EXPIRED' not in v11_confirm_type else
                                         "BREAKOUT EXPIRED" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                         "BREAKOUT" if 'BREAKOUT' in v11_confirm_type else
+                                        "DOWNTREND (V11b2)" if v11_confirm_type == 'FROM_RESISTANCE' else
+                                        "DI ATAS ZONA" if v11_confirm_type == 'DI_ATAS_ZONA' else
                                         "RETEST ZONE" if v10_in_zone else
                                         "DI ANTARA ZONA" if v11_confirm_type == 'PANTAU' else
                                         "DI ATAS ZONA" if v10_resistance == "-" else "DI ANTARA ZONA",
                                         color="warning" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
                                               "info" if 'BREAKOUT' in v11_confirm_type else
+                                              "danger" if v11_confirm_type == 'FROM_RESISTANCE' else
+                                              "secondary" if v11_confirm_type == 'DI_ATAS_ZONA' else
                                               "success" if v10_in_zone else "secondary",
                                         className="mb-2"
                                     ),
@@ -15066,6 +15145,8 @@ def create_analysis_page(stock_code='CDIA'):
                                             "TAMBAH POSISI 30% (avg)" if v10_has_position and v10_in_zone else
                                             "Siap entry" if v6_action == 'ENTRY' else
                                             "Entry window expired" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
+                                            "Downtrend - entry diblokir" if v11_confirm_type == 'FROM_RESISTANCE' else
+                                            "Tunggu retest/breakout baru" if v11_confirm_type == 'DI_ATAS_ZONA' else
                                             "Tunggu volume >= 1.0x" if v6_action == 'WATCH' and 'Vol' in v6_action_reason else
                                             "Tunggu konfirmasi 3 hari" if v6_action == 'WATCH' and 'proses' in v6_action_reason else
                                             "Terlalu jauh (>40%)" if v6_action == 'WAIT' and 'terlalu jauh' in v6_action_reason else
@@ -15073,7 +15154,8 @@ def create_analysis_page(stock_code='CDIA'):
                                             "Pantau" if v6_action == 'WATCH' else "Pantau",
                                             className="text-success fw-bold" if v6_action == 'ENTRY' else
                                                       "text-primary fw-bold" if v6_action == 'RUNNING' else
-                                                      "text-danger" if v11_confirm_type == 'BREAKOUT_EXPIRED' else
+                                                      "text-danger" if v11_confirm_type in ['BREAKOUT_EXPIRED', 'FROM_RESISTANCE'] else
+                                                      "text-muted" if v11_confirm_type == 'DI_ATAS_ZONA' else
                                                       "text-warning" if v6_action == 'WATCH' else "text-muted"
                                         ),
                                     ]),
@@ -15360,8 +15442,12 @@ def create_analysis_page(stock_code='CDIA'):
                         (lambda zones, support_zone, cur_vol_ratio, is_breakout, days_above, from_below, touch, hold, from_above, not_late, break_support: html.Div([
                             # BREAKOUT checklist (when s_break = True or came from below)
                             html.Div([
-                                html.I(className=f"fas fa-{'check' if break_support or from_below else 'times'} text-{'success' if break_support or from_below else 'danger'} me-1"),
-                                html.Small("Break Support (close < S_low)" if break_support else "Pernah di Zona (7 hari)", className="text-muted"),
+                                html.I(className=f"fas fa-{'check' if break_support or from_below or days_above >= 3 else 'times'} text-{'success' if break_support or from_below or days_above >= 3 else 'danger'} me-1"),
+                                html.Small(
+                                    "Break Support (close < S_low)" if break_support else
+                                    ("Breakout Valid (konfirmasi 3+ hari)" if days_above >= 3 else "Pernah di Zona (7 hari)"),
+                                    className="text-muted"
+                                ),
                             ], className="mb-1") if is_breakout else html.Div([
                                 html.I(className=f"fas fa-{'check' if touch else 'times'} text-{'success' if touch else 'danger'} me-1"),
                                 html.Small("Touch Support (low <= S_high)", className="text-muted"),
@@ -15405,6 +15491,7 @@ def create_analysis_page(stock_code='CDIA'):
                             v11b_vol_ratio,
                             'BREAKOUT' in v11_confirm_type,
                             breakout_days_above if 'breakout_days_above' in dir() else 0,
+                            # came_from_below must be TRUE for valid breakout (per V11b1 spec)
                             came_from_below if 'came_from_below' in dir() else False,
                             s_touch if 's_touch' in dir() else False,
                             s_hold if 's_hold' in dir() else False,
@@ -15527,7 +15614,7 @@ def create_analysis_page(stock_code='CDIA'):
                 ]) if bt_result and bt_result.get('trades') else None,
             ])
         ], color="dark", outline=True, className="mb-4") if get_zones(stock_code) else html.Div())(
-            run_v11b1_backtest(stock_code) if run_v11b1_backtest and get_zones(stock_code) else None
+            get_backtest_result_for_display(stock_code)
         ),
 
         # === 6. WEEKLY ACCUMULATION ANALYSIS (Key Point dari Accumulation) ===
@@ -19984,6 +20071,37 @@ def handle_upload(contents, filename, stock_code):
         clear_analysis_cache(stock_code)  # Clear analysis cache for this stock
         print(f"[UPLOAD] Cache cleared after import")
 
+        # Auto-update V11b1 calculation for this stock
+        v11b1_updated = False
+        try:
+            from zones_config import STOCK_ZONES
+            if stock_code.upper() in STOCK_ZONES:
+                print(f"[UPLOAD] Stock {stock_code} is V11b1 - running auto-update...")
+                import psycopg2
+                from psycopg2.extras import RealDictCursor
+                from calculate_daily_v11b1 import process_stock
+
+                v11b1_conn = psycopg2.connect(
+                    host='localhost',
+                    database='stock_analysis',
+                    user='postgres',
+                    password='postgres',
+                    cursor_factory=RealDictCursor
+                )
+                v11b1_result = process_stock(stock_code.upper(), v11b1_conn)
+                v11b1_conn.commit()
+                v11b1_conn.close()
+
+                if v11b1_result:
+                    v11b1_updated = True
+                    print(f"[UPLOAD] V11b1 calculation updated for {stock_code}")
+                else:
+                    print(f"[UPLOAD] V11b1 calculation failed for {stock_code}")
+            else:
+                print(f"[UPLOAD] Stock {stock_code} is not V11b1 - skipping auto-update")
+        except Exception as v11b1_error:
+            print(f"[UPLOAD] V11b1 auto-update failed (non-critical): {v11b1_error}")
+
         # Build status message
         status_items = [
             f"Stock: {stock_code}", html.Br(),
@@ -19995,6 +20113,8 @@ def handle_upload(contents, filename, stock_code):
             status_items.extend([html.Br(), "Company Profile: Imported"])
         if fundamental_imported:
             status_items.extend([html.Br(), "Fundamental Data: Imported"])
+        if v11b1_updated:
+            status_items.extend([html.Br(), html.Span("✅ V11b1 Backtest: Auto-updated", className="text-success fw-bold")])
 
         status = dbc.Alert([
             html.H5("Import Berhasil!", className="alert-heading"),
@@ -20006,13 +20126,15 @@ def handle_upload(contents, filename, stock_code):
             log_text += ", Profile: Yes"
         if fundamental_imported:
             log_text += ", Fundamental: Yes"
+        if v11b1_updated:
+            log_text += ", V11b1: Updated"
 
         log = html.Div([
             html.P(f"[{datetime.now().strftime('%H:%M:%S')}] Imported {filename} for {stock_code}"),
             html.P(log_text, className="text-muted small")
         ])
 
-        print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records, profile: {profile_imported}")
+        print(f"[UPLOAD] SUCCESS - {stock_code}: {price_count} price, {broker_count} broker records, profile: {profile_imported}, v11b1: {v11b1_updated}")
 
         # Auto backup to GitHub after successful import
         try:

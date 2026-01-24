@@ -23,7 +23,7 @@ import psycopg2
 from psycopg2.extras import RealDictCursor, Json
 
 # Import V11b1 components
-from zones_config import STOCK_ZONES, get_zones, DEFAULT_PARAMS
+from zones_config import STOCK_ZONES, get_zones, DEFAULT_PARAMS, STOCK_FORMULA
 from backtest_v11b1_universal import (
     run_backtest,
     ZoneHelper,
@@ -32,7 +32,9 @@ from backtest_v11b1_universal import (
     support_from_above,
     support_not_late,
     calculate_volume_ratio,
-    get_db_connection
+    get_db_connection,
+    calculate_ma,
+    check_ma_uptrend
 )
 
 # ============================================================
@@ -53,8 +55,8 @@ FORMULA_VERSION = 'V11b1'
 # HELPER FUNCTIONS
 # ============================================================
 
-def get_latest_price_data(conn, stock_code, days=30):
-    """Get latest price data for a stock"""
+def get_latest_price_data(conn, stock_code, days=120):
+    """Get latest price data for a stock (default 120 days for MA100 calculation)"""
     cur = conn.cursor(cursor_factory=RealDictCursor)
     cur.execute('''
         SELECT date, open_price as open, high_price as high,
@@ -92,8 +94,8 @@ def calculate_stock_status(stock_code, conn):
 
         zh = ZoneHelper(zones)
 
-        # Get price data
-        price_data = get_latest_price_data(conn, stock_code, days=30)
+        # Get price data (120 days for MA100 calculation)
+        price_data = get_latest_price_data(conn, stock_code, days=120)
         if not price_data or len(price_data) < 5:
             result['has_error'] = True
             result['error_message'] = f'Insufficient price data for {stock_code}'
@@ -150,6 +152,19 @@ def calculate_stock_status(stock_code, conn):
                     break
         result['came_from_below'] = came_from_below
 
+        # Check if came from above (previous close > zone_high) - for RETEST detection
+        came_from_above = False
+        if s_high and len(price_data) >= 2:
+            prev_close = float(price_data[-2]['close'])
+            if prev_close > s_high:
+                came_from_above = True
+            # Also check if recently came from above (within 7 days had close > zone_high)
+            for d in price_data[-7:]:
+                if float(d['close']) > s_high:
+                    came_from_above = True
+                    break
+        result['came_from_above'] = came_from_above
+
         # Determine status and confirm_type
         status = 'NEUTRAL'
         confirm_type = 'WAIT'
@@ -168,46 +183,95 @@ def calculate_stock_status(stock_code, conn):
                 below_resistance = True
 
             if above_zone:
-                if days_above >= 3:
-                    confirm_type = 'BREAKOUT_OK'
-                    status = 'BREAKOUT'
+                # V11b1 Spec: BREAKOUT requires came_from_below = TRUE
+                # "Dalam 7 hari sebelumnya, minimal ada 1 close <= zone_high"
+                if came_from_below:
+                    # Valid breakout - price rose from below/within zone recently
+                    if days_above >= 3:
+                        confirm_type = 'BREAKOUT_OK'
+                        status = 'BREAKOUT'
+                    else:
+                        confirm_type = f'BREAKOUT ({days_above}/3)'
+                        status = 'BREAKOUT'
+
+                    # Check not_late for entry
+                    tp = zh.get_tp_for_zone(s_zone_num, current_price, DEFAULT_PARAMS)
+                    if tp and s_high:
+                        distance_to_tp = tp - s_high
+                        threshold = s_high + (distance_to_tp * 0.40)
+                        is_not_late = current_price <= threshold
+
+                        if confirm_type == 'BREAKOUT_OK':
+                            if vol_ratio and vol_ratio >= 1.0 and is_not_late:
+                                action = 'ENTRY'
+                                action_reason = f'BREAKOUT confirmed! Vol {vol_ratio:.2f}x OK'
+                            elif not is_not_late:
+                                action = 'WAIT_PULLBACK'
+                                action_reason = f'Tunggu pullback ke Rp {threshold:,.0f}'
+                                result['pullback_entry_price'] = threshold
+                                result['pullback_sl'] = s_low * 0.95 if s_low else None
+                                result['pullback_tp'] = tp
+                                if result['pullback_sl'] and result['pullback_entry_price']:
+                                    risk = result['pullback_entry_price'] - result['pullback_sl']
+                                    reward = tp - result['pullback_entry_price']
+                                    result['pullback_rr_ratio'] = round(reward / risk, 2) if risk > 0 else None
+                            else:
+                                action = 'WATCH'
+                                action_reason = f'Vol {vol_ratio:.2f}x < 1.0x, tunggu volume'
+                        else:
+                            action = 'WATCH'
+                            action_reason = f'Tunggu {3 - days_above} hari lagi di atas zona'
                 else:
-                    confirm_type = f'BREAKOUT ({days_above}/3)'
-                    status = 'BREAKOUT'
+                    # Price above zone but NEVER came from below - NOT a breakout
+                    status = 'ABOVE_SUPPORT'
+                    confirm_type = 'DI_ATAS_ZONA'
+                    action = 'WATCH'
+                    action_reason = f'Di atas zona {s_low:,.0f}-{s_high:,.0f} - tunggu retest'
 
-                # Check not_late for entry
-                tp = zh.get_tp_for_zone(s_zone_num, current_price, DEFAULT_PARAMS)
-                if tp and s_high:
-                    distance_to_tp = tp - s_high
-                    threshold = s_high + (distance_to_tp * 0.40)
-                    is_not_late = current_price <= threshold
+            elif in_zone:
+                # Check for RETEST condition when price is IN_ZONE
+                # RETEST: price came from above and is now in/touching support zone
+                if came_from_above:
+                    # RETEST detected - price came from above and is now in support zone
+                    status = 'RETEST_ZONE'
 
-                    if confirm_type == 'BREAKOUT_OK':
+                    # Check if today's low touched support (for retest confirmation)
+                    today_low = float(latest['low'])
+                    touched_support = today_low <= s_high
+
+                    # Check not_late for entry
+                    tp = zh.get_tp_for_zone(s_zone_num, current_price, DEFAULT_PARAMS)
+                    is_not_late = True
+                    if tp and s_high:
+                        distance_to_tp = tp - s_high
+                        threshold = s_high + (distance_to_tp * 0.40)
+                        is_not_late = current_price <= threshold
+
+                    # RETEST is VALID if close >= support_low (still holding support)
+                    # RETEST is CANCELLED only if close < support_low
+                    if current_price >= s_low:
+                        confirm_type = 'RETEST_OK'
+
                         if vol_ratio and vol_ratio >= 1.0 and is_not_late:
                             action = 'ENTRY'
-                            action_reason = f'BREAKOUT confirmed! Vol {vol_ratio:.2f}x OK'
+                            action_reason = f'RETEST confirmed! Vol {vol_ratio:.2f}x OK, support hold'
                         elif not is_not_late:
                             action = 'WAIT_PULLBACK'
                             action_reason = f'Tunggu pullback ke Rp {threshold:,.0f}'
-                            result['pullback_entry_price'] = threshold
-                            result['pullback_sl'] = s_low * 0.95 if s_low else None
-                            result['pullback_tp'] = tp
-                            if result['pullback_sl'] and result['pullback_entry_price']:
-                                risk = result['pullback_entry_price'] - result['pullback_sl']
-                                reward = tp - result['pullback_entry_price']
-                                result['pullback_rr_ratio'] = round(reward / risk, 2) if risk > 0 else None
                         else:
                             action = 'WATCH'
-                            action_reason = f'Vol {vol_ratio:.2f}x < 1.0x, tunggu volume'
+                            action_reason = f'RETEST valid, tunggu volume >= 1.0x (current: {vol_ratio:.2f}x)'
                     else:
-                        action = 'WATCH'
-                        action_reason = f'Tunggu {3 - days_above} hari lagi di atas zona'
-
-            elif in_zone:
-                status = 'IN_ZONE'
-                confirm_type = 'WAIT'
-                action = 'WATCH'
-                action_reason = 'Harga dalam zona, pantau pergerakan'
+                        # This shouldn't happen if in_zone is True, but just in case
+                        confirm_type = 'BREAKDOWN'
+                        action = 'AVOID'
+                        action_reason = f'Support breakdown < {s_low:,.0f}'
+                else:
+                    # Price in zone but didn't come from above - neutral
+                    status = 'IN_ZONE'
+                    confirm_type = 'WAIT'
+                    action = 'WATCH'
+                    action_reason = 'Dalam zona, pantau akumulasi'
 
             elif below_zone:
                 status = 'BELOW_ZONE'
@@ -215,10 +279,37 @@ def calculate_stock_status(stock_code, conn):
                 action = 'AVOID'
                 action_reason = f'Harga di bawah support {s_low:,.0f}'
 
+        # V11b2 MA Filter: Block entry if MA30 <= MA100 (downtrend)
+        stock_formula = STOCK_FORMULA.get(stock_code.upper(), 'V11b1')
+        ma_uptrend = True
+        ma30 = None
+        ma100 = None
+        if stock_formula == 'V11b2' and len(price_data) >= 100:
+            ma_uptrend = check_ma_uptrend(price_data, len(price_data) - 1, ma_short=30, ma_long=100)
+            ma30 = calculate_ma(price_data, len(price_data) - 1, 30)
+            ma100 = calculate_ma(price_data, len(price_data) - 1, 100)
+            result['ma_uptrend'] = ma_uptrend
+            result['ma30'] = ma30
+            result['ma100'] = ma100
+
+            # V11b2: If MA downtrend, block entry or show FROM_RESISTANCE
+            if not ma_uptrend:
+                if action in ('ENTRY', 'WAIT_PULLBACK'):
+                    action = 'WATCH'
+                    action_reason = f'V11b2: MA30 ({ma30:,.0f}) <= MA100 ({ma100:,.0f}) - downtrend, entry blocked'
+                    confirm_type = 'FROM_RESISTANCE'
+                elif confirm_type in ('DI_ATAS_ZONA', 'BREAKOUT_OK') and not came_from_below:
+                    # V11b2: Price above zone but in downtrend - FROM_RESISTANCE
+                    status = 'ABOVE_SUPPORT'
+                    confirm_type = 'FROM_RESISTANCE'
+                    action = 'WATCH'
+                    action_reason = f'V11b2: MA30 ({ma30:,.0f}) <= MA100 ({ma100:,.0f}) - downtrend. Support: {s_low:,.0f}-{s_high:,.0f}'
+
         result['status'] = status
         result['confirm_type'] = confirm_type
         result['action'] = action
         result['action_reason'] = action_reason
+        result['formula_version'] = stock_formula
 
         # Build checklist
         checklist = {
@@ -245,12 +336,11 @@ def calculate_stock_status(stock_code, conn):
             result['win_rate'] = round(wins / len(closed_trades) * 100, 1) if closed_trades else 0
             result['total_pnl'] = round(sum(t.get('pnl', 0) for t in closed_trades), 1)
 
-            # Check for open position (2026 only)
+            # Check for open position (any year - trade is OPEN regardless of entry date)
             for trade in trades:
-                entry_date = trade.get('entry_date', '')
-                if trade.get('exit_reason') == 'OPEN' and entry_date.startswith('2026'):
+                if trade.get('exit_reason') == 'OPEN':
                     result['has_open_position'] = True
-                    result['position_entry_date'] = entry_date
+                    result['position_entry_date'] = trade.get('entry_date', '')
                     result['position_entry_price'] = trade.get('entry_price')
                     result['position_current_pnl'] = trade.get('pnl')
                     result['position_sl'] = trade.get('sl')
@@ -333,6 +423,7 @@ def save_result_to_db(conn, stock_code, result):
                 pullback_rr_ratio = EXCLUDED.pullback_rr_ratio,
                 has_error = EXCLUDED.has_error,
                 error_message = EXCLUDED.error_message,
+                formula_version = EXCLUDED.formula_version,
                 calc_timestamp = NOW()
         ''', (
             result.get('calc_date'),
@@ -371,7 +462,7 @@ def save_result_to_db(conn, stock_code, result):
             result.get('pullback_rr_ratio'),
             result.get('has_error', False),
             result.get('error_message'),
-            FORMULA_VERSION
+            result.get('formula_version', FORMULA_VERSION)
         ))
 
         conn.commit()

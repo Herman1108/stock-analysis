@@ -190,7 +190,7 @@ RINGKASAN STATUS ENTRY:
 """
 
 # ============================================================================
-# LOGIKA RETEST
+# LOGIKA RETEST (REVISED 2026-01-24)
 # ============================================================================
 """
 RETEST DETECTION:
@@ -200,20 +200,46 @@ Kondisi (semua harus TRUE):
 2. s_hold: CLOSE >= support_low (tidak breakdown)
 3. s_from_above: prev_close > support_high (datang dari atas)
 4. s_not_late: close <= support_high + 40% distance ke TP
-5. prior_resistance_touched: HIGH pernah touch resistance di atas
-6. prior_resistance_zone > s_zone_num (resistance di ATAS support)
+5. prior_resistance_touched: HIGH pernah touch resistance di atas (OPTIONAL)
+6. prior_resistance_zone > s_zone_num (resistance di ATAS support) (OPTIONAL)
 
-KONFIRMASI (dalam 3 bar):
--------------------------
-- any_reclaim: close >= support_high + buffer
-- Jika reclaim → cek volume → ENTRY atau WAITING
-- Jika close < support_low → RESET
-- Jika > 3 bar tanpa reclaim → RESET
+RETEST VALIDATION RULES (REVISED):
+----------------------------------
+| Kondisi Close              | Status       | Aksi                           |
+|----------------------------|--------------|--------------------------------|
+| close > support_high       | VALID        | Di atas zona, masih OK         |
+| support_low <= close <= support_high | VALID | Dalam zona, RETEST VALID    |
+| close < support_low        | CANCEL       | Di bawah zona, RETEST GAGAL    |
+
+PENTING: RETEST hanya di-CANCEL jika close < support_low (breakdown).
+         Selama close >= support_low, RETEST masih VALID.
+
+KONFIRMASI ENTRY RETEST:
+------------------------
+Kondisi entry (semua harus TRUE):
+1. RETEST terdeteksi (kondisi di atas)
+2. close >= support_low (masih hold support)
+3. volume >= 1.0x (volume confirmation)
+
+Jika semua kondisi terpenuhi → ENTRY signal
+Jika volume < 1.0x → WAIT (tunggu volume konfirmasi)
+
+CONTOH SKENARIO RETEST:
+-----------------------
+  Zone Z2: 7,875 - 8,075
+
+  Hari 1: close = 8,500 (di atas zona)
+  Hari 2: low = 8,050, close = 8,100 (touch zona, hold) → RETEST detected
+  Hari 3: close = 8,050 (DALAM zona) → RETEST masih VALID
+  Hari 4: close = 7,950 (DALAM zona) → RETEST masih VALID, cek volume
+          - Jika vol >= 1.0x → ENTRY signal
+          - Jika vol < 1.0x → WAIT, tunggu volume
+  Hari 5: close = 7,800 (DI BAWAH zona! < 7,875) → RETEST CANCEL
 
 SL/TP:
 ------
 - SL = zone_low * 0.95
-- TP = next_resistance_low * 0.98
+- TP = next_resistance_low * 0.98 (resistance terdekat di atas support)
 """
 
 # ============================================================================
@@ -281,6 +307,22 @@ WAIT_PULLBACK RULES:
 | close < zone_low       | CANCEL - breakout gagal                   |
 | high >= TP             | CANCEL - harga sudah capai target         |
 | > 6 hari               | TIMEOUT - cancel waiting                  |
+
+RETEST RULES (REVISED 2026-01-24):
+----------------------------------
+| Kondisi Close              | Status       | Aksi                           |
+|----------------------------|--------------|--------------------------------|
+| close > support_high       | VALID        | Di atas zona, lanjut monitor   |
+| support_low <= close <= support_high | VALID | Dalam zona, RETEST VALID    |
+| close < support_low        | CANCEL       | Di bawah zona, RETEST GAGAL    |
+
+RETEST ENTRY CONDITIONS:
+------------------------
+| Kondisi                         | Status          | Aksi                    |
+|---------------------------------|-----------------|-------------------------|
+| RETEST valid, Vol >= 1.0x       | ENTRY           | Langsung entry          |
+| RETEST valid, Vol < 1.0x        | WAIT_VOL        | Tunggu vol >= 1.0x      |
+| close < support_low             | CANCEL          | RETEST gagal            |
 """
 
 if __name__ == '__main__':

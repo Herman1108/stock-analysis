@@ -3,7 +3,7 @@
 Master Configuration - Support & Resistance Zones
 Formula Assignment per Stock
 
-Updated: 2026-01-22 (Added RATU)
+Updated: 2026-01-24 (Fixed RETEST logic)
 """
 
 # ============================================================================
@@ -11,6 +11,23 @@ Updated: 2026-01-22 (Added RATU)
 # ============================================================================
 # V11b1: Volume >= 1.0x (tunggu max 6 hari) - Lihat formula_v11b1_spec.py
 # V11b2: V11b1 + MA30 > MA100 trend filter  - Lihat formula_v11b2_spec.py
+#
+# ============================================================================
+# V11b1 ENTRY RULES (REVISED 2026-01-24)
+# ============================================================================
+# BREAKOUT Entry:
+#   - 3 hari berturut close > zone_high (gate passed)
+#   - Volume >= 1.0x
+#   - Harga dalam 40% jarak ke TP
+#   - SL = zone_low * 0.95, TP = next_resistance_low * 0.98
+#
+# RETEST Entry:
+#   - Harga datang dari atas (prev close > zone_high)
+#   - Harga menyentuh/dalam zona support
+#   - VALID selama close >= zone_low (dalam atau di atas zona)
+#   - CANCEL hanya jika close < zone_low (breakdown)
+#   - Volume >= 1.0x untuk entry signal
+#   - SL = zone_low * 0.95, TP = next_resistance_low * 0.98
 
 STOCK_FORMULA = {
     # V11b1 Stocks (19 emiten) - Volume >= 1.0x
@@ -111,10 +128,12 @@ STOCK_ZONES = {
         2: {'low': 2170, 'high': 2380},
         3: {'low': 2940, 'high': 3040},
         4: {'low': 3490, 'high': 3610},
+        5: {'low': 4060, 'high': 4190},
     },
     'WIFI': {
         1: {'low': 1140, 'high': 1245},
         2: {'low': 2360, 'high': 2510},
+        3: {'low': 4110, 'high': 4220},
     },
     'NCKL': {
         1: {'low': 595, 'high': 615},
