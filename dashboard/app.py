@@ -18575,13 +18575,12 @@ def recalc_v11b1(n_clicks, selected_stocks):
 
         for stock in stocks_to_process:
             try:
-                result = process_stock(stock, conn)
-                if result:
+                success = process_stock(stock, conn)
+                if success:
                     success_count += 1
-                    status = result.get('status', 'UNKNOWN')
                     results.append(html.Div([
                         html.I(className="fas fa-check text-success me-2"),
-                        f"{stock}: {status}"
+                        f"{stock}: OK"
                     ], className="small"))
                 else:
                     fail_count += 1
