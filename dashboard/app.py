@@ -3981,7 +3981,10 @@ def get_stock_data_summary():
             COUNT(*) as rows,
             COUNT(DISTINCT bs.broker_code) as brokers,
             MIN(bs.date) as first_date,
-            MAX(bs.date) as last_date,
+            GREATEST(
+                MAX(bs.date),
+                COALESCE((SELECT MAX(sd.date) FROM stock_daily sd WHERE sd.stock_code = bs.stock_code), MAX(bs.date))
+            ) as last_date,
             (SELECT uh.row_range FROM upload_history uh
              WHERE uh.stock_code = bs.stock_code
              ORDER BY uh.uploaded_at DESC LIMIT 1) as row_range
