@@ -4991,7 +4991,7 @@ def create_upload_page():
 
                                         html.Hr(),
 
-                                        # Sync Button
+                                        # Sync Button + Recalc V11b1 Button
                                         dbc.Row([
                                             dbc.Col([
                                                 dbc.Button([
@@ -5000,9 +5000,18 @@ def create_upload_page():
                                                 ], id='gdrive-sync-btn', color="success", size="lg", className="w-100"),
                                             ], md=4),
                                             dbc.Col([
+                                                dbc.Button([
+                                                    html.I(className="fas fa-calculator me-2"),
+                                                    "Recalc V11b1"
+                                                ], id='recalc-v11b1-btn', color="warning", size="lg", className="w-100"),
+                                            ], md=3),
+                                            dbc.Col([
                                                 html.Div(id='gdrive-sync-status', className="mt-2")
-                                            ], md=8),
+                                            ], md=5),
                                         ]),
+
+                                        # V11b1 Recalc Status
+                                        html.Div(id='v11b1-recalc-status', className="mt-2"),
 
                                         # Progress & Log
                                         html.Div([
@@ -18521,6 +18530,90 @@ def validate_upload_password(n_clicks, session_data, user_session, password):
 
     # Default - show password gate
     return {'display': 'block'}, {'display': 'none'}, "", session_data or {'logged_in': False}
+
+
+# ============================================================
+# V11B1 RECALC CALLBACK
+# ============================================================
+
+@app.callback(
+    Output('v11b1-recalc-status', 'children'),
+    [Input('recalc-v11b1-btn', 'n_clicks')],
+    [State('gdrive-stock-select', 'value')],
+    prevent_initial_call=True
+)
+def recalc_v11b1(n_clicks, selected_stocks):
+    """Recalculate V11b1 for selected stocks"""
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    from datetime import datetime
+    from zones_config import STOCK_ZONES
+
+    # Determine which stocks to process
+    if not selected_stocks or 'ALL' in selected_stocks:
+        stocks_to_process = list(STOCK_ZONES.keys())
+    else:
+        stocks_to_process = [s for s in selected_stocks if s in STOCK_ZONES]
+
+    if not stocks_to_process:
+        return dbc.Alert("Tidak ada emiten V11b1 yang dipilih", color="warning")
+
+    # Import calculate_daily_v11b1
+    try:
+        from calculate_daily_v11b1 import process_stock
+        from backtest_v11b1_universal import get_db_connection
+    except ImportError as e:
+        return dbc.Alert(f"Error import module: {e}", color="danger")
+
+    results = []
+    success_count = 0
+    fail_count = 0
+
+    try:
+        conn = get_db_connection()
+
+        for stock in stocks_to_process:
+            try:
+                result = process_stock(stock, conn)
+                if result:
+                    success_count += 1
+                    status = result.get('status', 'UNKNOWN')
+                    results.append(html.Div([
+                        html.I(className="fas fa-check text-success me-2"),
+                        f"{stock}: {status}"
+                    ], className="small"))
+                else:
+                    fail_count += 1
+                    results.append(html.Div([
+                        html.I(className="fas fa-times text-danger me-2"),
+                        f"{stock}: Failed"
+                    ], className="small"))
+            except Exception as e:
+                fail_count += 1
+                results.append(html.Div([
+                    html.I(className="fas fa-times text-danger me-2"),
+                    f"{stock}: {str(e)[:50]}"
+                ], className="small"))
+
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        return dbc.Alert(f"Database connection error: {e}", color="danger")
+
+    # Build result display
+    timestamp = datetime.now().strftime('%H:%M:%S')
+    color = "success" if fail_count == 0 else ("warning" if success_count > 0 else "danger")
+
+    return dbc.Alert([
+        html.H6([
+            html.I(className="fas fa-calculator me-2"),
+            f"V11b1 Recalc Complete - {timestamp}"
+        ]),
+        html.P(f"Success: {success_count}, Failed: {fail_count}", className="mb-2"),
+        html.Div(results, style={'maxHeight': '150px', 'overflowY': 'auto'})
+    ], color=color, dismissable=True)
 
 
 # ============================================================
