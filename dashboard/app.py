@@ -915,6 +915,27 @@ PWA_INDEX_STRING = '''
             body {
                 padding-top: 56px !important;
             }
+            /* Fix active tab contrast */
+            .nav-tabs .nav-link.active {
+                background-color: #17a2b8 !important;
+                color: #ffffff !important;
+                border-color: #17a2b8 !important;
+                font-weight: bold;
+            }
+            .nav-tabs .nav-link {
+                color: #adb5bd !important;
+            }
+            .nav-tabs .nav-link:hover {
+                color: #ffffff !important;
+                border-color: #495057 !important;
+            }
+            body.light-mode .nav-tabs .nav-link.active {
+                background-color: #17a2b8 !important;
+                color: #ffffff !important;
+            }
+            body.light-mode .nav-tabs .nav-link {
+                color: #495057 !important;
+            }
             body.light-mode .alert-secondary {
                 background-color: #e9ecef !important;
                 color: #212529 !important;
