@@ -843,6 +843,8 @@ PWA_INDEX_STRING = '''
             gtag('js', new Date());
             gtag('config', 'G-JJ1WVNZLZE');
         </script>
+        <!-- Google AdSense -->
+        <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2355793390768714" crossorigin="anonymous"></script>
         <!-- PWA Manifest -->
         <link rel="manifest" href="/assets/manifest.json">
         <!-- Apple Touch Icons -->
