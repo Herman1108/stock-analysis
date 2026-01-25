@@ -3092,7 +3092,9 @@ def create_navbar():
         color="dark",
         dark=True,
         className="mb-2 py-1",
-        id="main-navbar"
+        id="main-navbar",
+        sticky="top",
+        style={"zIndex": "1030"}
     )
 
 
