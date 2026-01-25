@@ -1045,6 +1045,28 @@ PWA_INDEX_STRING = '''
                 console.log('Running as PWA');
                 document.body.classList.add('pwa-mode');
             }
+
+            // Initialize Google AdSense ads
+            function initAds() {
+                // Header Ad
+                var headerAd = document.getElementById('header-ad-container');
+                if (headerAd && !headerAd.querySelector('.adsbygoogle')) {
+                    headerAd.innerHTML = '<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-2355793390768714" data-ad-slot="auto" data-ad-format="horizontal" data-full-width-responsive="true"></ins>';
+                    (adsbygoogle = window.adsbygoogle || []).push({});
+                }
+                // Footer Ad
+                var footerAd = document.getElementById('footer-ad-container');
+                if (footerAd && !footerAd.querySelector('.adsbygoogle')) {
+                    footerAd.innerHTML = '<ins class="adsbygoogle" style="display:block" data-ad-client="ca-pub-2355793390768714" data-ad-slot="auto" data-ad-format="horizontal" data-full-width-responsive="true"></ins>';
+                    (adsbygoogle = window.adsbygoogle || []).push({});
+                }
+            }
+            // Run after page load
+            if (document.readyState === 'complete') {
+                setTimeout(initAds, 1000);
+            } else {
+                window.addEventListener('load', function() { setTimeout(initAds, 1000); });
+            }
         </script>
     </body>
 </html>
@@ -18131,6 +18153,22 @@ def create_app_layout():
         ], style={'display': 'none'}),
 
         create_navbar(),
+
+        # Header Ad (below navbar) - Auto ads will fill this
+        html.Div(
+            id="header-ad-container",
+            className="text-center",
+            style={
+                "backgroundColor": "#16213e",
+                "minHeight": "100px",
+                "marginBottom": "10px",
+                "display": "flex",
+                "alignItems": "center",
+                "justifyContent": "center",
+                "borderBottom": "1px solid #333"
+            }
+        ),
+
         # Wrap page-content with Loading component for better UX
         dcc.Loading(
             id="page-loading",
@@ -18139,7 +18177,32 @@ def create_app_layout():
             children=dbc.Container(id='page-content', fluid=True),
             style={"minHeight": "400px"},
             color="#17a2b8"
-        )
+        ),
+
+        # Footer with Ad space
+        html.Footer([
+            html.Hr(style={"borderColor": "#333", "margin": "20px 0 0 0"}),
+            # Footer Ad - Auto ads will fill this
+            html.Div(
+                id="footer-ad-container",
+                style={
+                    "backgroundColor": "#16213e",
+                    "minHeight": "100px",
+                    "display": "flex",
+                    "alignItems": "center",
+                    "justifyContent": "center"
+                }
+            ),
+            # Footer text
+            html.Div([
+                html.P([
+                    "© 2025-2026 HermanStock. All rights reserved. | ",
+                    html.A("Disclaimer", href="#", className="text-info", style={"textDecoration": "none"}),
+                    " | Powered by Herman"
+                ], className="text-muted small text-center mb-0")
+            ], className="py-3", style={"backgroundColor": "#1a1a2e"})
+        ], style={"marginTop": "auto"})
+
     ], id='main-container')
 
 app.layout = create_app_layout()
