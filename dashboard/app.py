@@ -901,6 +901,12 @@ PWA_INDEX_STRING = '''
             body.light-mode .navbar {
                 background-color: #e9ecef !important;
             }
+            /* Sticky navbar */
+            #main-navbar {
+                position: sticky !important;
+                top: 0 !important;
+                z-index: 1030 !important;
+            }
             body.light-mode .alert-secondary {
                 background-color: #e9ecef !important;
                 color: #212529 !important;
