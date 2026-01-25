@@ -14181,27 +14181,27 @@ def create_fundamental_page(stock_code='CDIA'):
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.H3(f"{fund.get('per', 0):.1f}x", className="mb-0 text-primary"),
-                                    html.Small("PER", className="text-muted")
+                                    html.H3(f"{fund.get('per', 0):.1f}x", className="mb-0", style={'color': '#0066CC'}),
+                                    html.Small("PER", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.H3(f"{fund.get('pbvr', 0):.1f}x", className="mb-0 text-info"),
-                                    html.Small("PBV", className="text-muted")
+                                    html.H3(f"{fund.get('pbvr', 0):.1f}x", className="mb-0", style={'color': '#0088AA'}),
+                                    html.Small("PBV", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=4),
                             dbc.Col([
                                 html.Div([
-                                    html.H3(f"{fund.get('psr', 0):.1f}x", className="mb-0 text-secondary"),
-                                    html.Small("PSR", className="text-muted")
+                                    html.H3(f"{fund.get('psr', 0):.1f}x", className="mb-0", style={'color': '#666'}),
+                                    html.Small("PSR", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=4),
                         ], className="mb-3"),
                         html.Hr(),
                         html.Div([
-                            html.Span("Dividend Yield: ", className="fw-bold"),
-                            html.Span(f"{fund.get('dividend_yield', 0)*100:.2f}%", className="text-success")
+                            html.Span("Dividend Yield: ", className="fw-bold", style={'color': '#333'}),
+                            html.Span(f"{fund.get('dividend_yield', 0)*100:.2f}%", style={'color': '#28a745'})
                         ])
                     ], style={'backgroundColor': '#E0F7FA'})
                 ], className="mb-3"),
@@ -14215,22 +14215,22 @@ def create_fundamental_page(stock_code='CDIA'):
                     dbc.CardBody([
                         html.Div([
                             html.Div([
-                                html.Span("Margin Laba Kotor (GPM)", className="small"),
-                                html.Span(f"{fund.get('gpm', 0)*100:.1f}%", className="fw-bold float-end")
+                                html.Span("Margin Laba Kotor (GPM)", className="small", style={'color': '#333'}),
+                                html.Span(f"{fund.get('gpm', 0)*100:.1f}%", className="fw-bold float-end", style={'color': '#333'})
                             ]),
                             dbc.Progress(value=min(fund.get('gpm', 0)*100, 100), color="success", className="mb-2", style={'height': '8px'})
                         ]),
                         html.Div([
                             html.Div([
-                                html.Span("Margin Laba Operasi (OPM)", className="small"),
-                                html.Span(f"{fund.get('opm', 0)*100:.1f}%", className="fw-bold float-end")
+                                html.Span("Margin Laba Operasi (OPM)", className="small", style={'color': '#333'}),
+                                html.Span(f"{fund.get('opm', 0)*100:.1f}%", className="fw-bold float-end", style={'color': '#333'})
                             ]),
                             dbc.Progress(value=min(fund.get('opm', 0)*100, 100), color="info", className="mb-2", style={'height': '8px'})
                         ]),
                         html.Div([
                             html.Div([
-                                html.Span("Margin Laba Bersih (NPM)", className="small"),
-                                html.Span(f"{fund.get('npm', 0)*100:.1f}%", className="fw-bold float-end")
+                                html.Span("Margin Laba Bersih (NPM)", className="small", style={'color': '#333'}),
+                                html.Span(f"{fund.get('npm', 0)*100:.1f}%", className="fw-bold float-end", style={'color': '#333'})
                             ]),
                             dbc.Progress(value=min(fund.get('npm', 0)*100, 100), color="primary", className="mb-2", style={'height': '8px'})
                         ]),
@@ -14238,14 +14238,14 @@ def create_fundamental_page(stock_code='CDIA'):
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.H4(f"{fund.get('roe', 0)*100:.1f}%", className="mb-0 text-success"),
-                                    html.Small("ROE", className="text-muted")
+                                    html.H4(f"{fund.get('roe', 0)*100:.1f}%", className="mb-0", style={'color': '#28a745'}),
+                                    html.Small("ROE", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=6),
                             dbc.Col([
                                 html.Div([
-                                    html.H4(f"{fund.get('roa', 0)*100:.1f}%", className="mb-0 text-info"),
-                                    html.Small("ROA", className="text-muted")
+                                    html.H4(f"{fund.get('roa', 0)*100:.1f}%", className="mb-0", style={'color': '#17a2b8'}),
+                                    html.Small("ROA", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=6),
                         ])
@@ -14262,22 +14262,22 @@ def create_fundamental_page(stock_code='CDIA'):
                         dbc.Row([
                             dbc.Col([
                                 html.Div([
-                                    html.H4(f"{fund.get('current_ratio', 0)*100:.0f}%", className="mb-0"),
-                                    html.Small("Current Ratio", className="text-muted")
+                                    html.H4(f"{fund.get('current_ratio', 0)*100:.0f}%", className="mb-0", style={'color': '#333'}),
+                                    html.Small("Current Ratio", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=6),
                             dbc.Col([
                                 html.Div([
-                                    html.H4(f"{fund.get('quick_ratio', 0)*100:.0f}%", className="mb-0"),
-                                    html.Small("Quick Ratio", className="text-muted")
+                                    html.H4(f"{fund.get('quick_ratio', 0)*100:.0f}%", className="mb-0", style={'color': '#333'}),
+                                    html.Small("Quick Ratio", style={'color': '#555'})
                                 ], className="text-center")
                             ], width=6),
                         ], className="mb-3"),
                         html.Hr(),
                         html.Div([
                             html.Div([
-                                html.Span("Debt to Equity Ratio (DER)", className="small"),
-                                html.Span(f"{fund.get('der', 0)*100:.1f}%", className="fw-bold float-end")
+                                html.Span("Debt to Equity Ratio (DER)", className="small", style={'color': '#333'}),
+                                html.Span(f"{fund.get('der', 0)*100:.1f}%", className="fw-bold float-end", style={'color': '#333'})
                             ]),
                             dbc.Progress(value=min(fund.get('der', 0)*100, 100),
                                         color="danger" if fund.get('der', 0) > 1 else "success",
@@ -14285,8 +14285,8 @@ def create_fundamental_page(stock_code='CDIA'):
                         ]),
                         html.Div([
                             html.Div([
-                                html.Span("Cash Ratio", className="small"),
-                                html.Span(f"{fund.get('cash_ratio', 0)*100:.1f}%", className="fw-bold float-end")
+                                html.Span("Cash Ratio", className="small", style={'color': '#333'}),
+                                html.Span(f"{fund.get('cash_ratio', 0)*100:.1f}%", className="fw-bold float-end", style={'color': '#333'})
                             ]),
                             dbc.Progress(value=min(fund.get('cash_ratio', 0)*100, 100), color="info", className="mb-2", style={'height': '8px'})
                         ])
