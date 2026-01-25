@@ -901,11 +901,17 @@ PWA_INDEX_STRING = '''
             body.light-mode .navbar {
                 background-color: #e9ecef !important;
             }
-            /* Sticky navbar */
+            /* Fixed navbar */
             #main-navbar {
-                position: sticky !important;
+                position: fixed !important;
                 top: 0 !important;
+                left: 0 !important;
+                right: 0 !important;
                 z-index: 1030 !important;
+            }
+            /* Add padding to body to compensate for fixed navbar */
+            body {
+                padding-top: 56px !important;
             }
             body.light-mode .alert-secondary {
                 background-color: #e9ecef !important;
