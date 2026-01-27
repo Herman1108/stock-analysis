@@ -19801,19 +19801,21 @@ def load_pending_upgrade_requests(active_tab, refresh_clicks, approve_clicks, re
 )
 def load_account_list(active_tab, refresh_clicks, filter_value, user_session):
     """Load account list table for List Member tab with filter"""
+    from datetime import datetime
+
+    # Only load when tab is active
     if active_tab != 'tab-list-member':
         raise dash.exceptions.PreventUpdate
+
+    # Handle None filter value
+    if filter_value is None:
+        filter_value = 'all'
 
     # Only admin herman.irawan1108@gmail.com can see passwords
     current_email = user_session.get('email', '') if user_session else ''
     can_see_passwords = (current_email.lower() == 'herman.irawan1108@gmail.com')
 
-    # Default filter
-    filter_value = filter_value or 'all'
-
     try:
-        from datetime import datetime
-
         accounts = get_all_accounts()
 
         if not accounts:
