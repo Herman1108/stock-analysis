@@ -3101,6 +3101,15 @@ def create_navbar():
                     dcc.Link(dbc.Button([html.I(className="fas fa-user-plus me-1"), "Sign Up"], color="light", size="sm", className="fw-bold text-dark px-2 py-1"), href="/signup"),
                 ], id="auth-buttons-desktop", className="d-lg-flex", style={"gap": "3px", "display": "none"}),
 
+                # Upgrade button (shown for trial users) - visibility controlled by callback
+                html.Div([
+                    dcc.Link(
+                        dbc.Button([html.I(className="fas fa-crown me-1"), "Upgrade"],
+                                  color="warning", size="sm", className="fw-bold px-2 py-1"),
+                        href="/upgrade"
+                    ),
+                ], id="upgrade-btn-desktop", className="me-2", style={"display": "none"}),
+
                 # Logout section desktop (shown when logged in) - visibility controlled by callback
                 html.Div([
                     html.Span(id="user-display-desktop", className="text-light me-2 small"),
@@ -4027,6 +4036,68 @@ def delete_account(user_id: int):
     """Delete user account"""
     query = "DELETE FROM users WHERE id = %s RETURNING id"
     return execute_query(query, (user_id,), use_cache=False)
+
+
+# ============================================================
+# TRIAL USAGE TRACKING
+# ============================================================
+
+def ensure_trial_usage_table():
+    """Create trial_usage table if not exists"""
+    query = """
+        CREATE TABLE IF NOT EXISTS trial_usage (
+            id SERIAL PRIMARY KEY,
+            email VARCHAR(255) UNIQUE NOT NULL,
+            used_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            ip_address VARCHAR(45)
+        )
+    """
+    try:
+        execute_query(query, fetch=False, use_cache=False)
+        return True
+    except Exception as e:
+        print(f"Error creating trial_usage table: {e}")
+        return False
+
+
+def check_email_trial_status(email: str) -> dict:
+    """Check if email has already used trial period"""
+    ensure_trial_usage_table()
+
+    # Check in trial_usage table
+    query = "SELECT id, used_at FROM trial_usage WHERE LOWER(email) = LOWER(%s)"
+    result = execute_query(query, (email,), use_cache=False)
+
+    if result:
+        return {'has_used_trial': True, 'used_at': result[0]['used_at']}
+
+    # Also check if email exists in users table (existing user who registered)
+    query2 = "SELECT id, member_type, member_start FROM users WHERE LOWER(email) = LOWER(%s)"
+    result2 = execute_query(query2, (email,), use_cache=False)
+
+    if result2:
+        # User exists - they've already registered (whether trial or not)
+        return {'has_used_trial': True, 'used_at': result2[0].get('member_start')}
+
+    return {'has_used_trial': False}
+
+
+def mark_email_trial_used(email: str, ip_address: str = None):
+    """Mark email as having used trial period"""
+    ensure_trial_usage_table()
+
+    query = """
+        INSERT INTO trial_usage (email, ip_address)
+        VALUES (LOWER(%s), %s)
+        ON CONFLICT (email) DO NOTHING
+    """
+    try:
+        execute_query(query, (email, ip_address), fetch=False, use_cache=False)
+        return True
+    except Exception as e:
+        print(f"Error marking trial used: {e}")
+        return False
+
 
 # ============================================================
 # DATA MANAGEMENT FUNCTIONS
@@ -5204,6 +5275,26 @@ def create_upload_page():
                             ])
                         ], className="mb-4"),
 
+                        # Pending Upgrade Requests
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H5([
+                                    html.I(className="fas fa-arrow-up me-2 text-warning"),
+                                    "Pending Upgrade Requests"
+                                ], className="mb-0 d-inline"),
+                                dbc.Button([
+                                    html.I(className="fas fa-sync me-1"),
+                                    "Refresh"
+                                ], id="refresh-upgrade-requests-btn", color="secondary", size="sm", className="float-end"),
+                            ]),
+                            dbc.CardBody([
+                                html.Div(id="pending-upgrade-requests-container", children=[
+                                    dbc.Spinner(color="primary", size="sm"),
+                                    " Loading..."
+                                ])
+                            ])
+                        ], className="mb-4"),
+
                         # Member Graph
                         dbc.Row([
                             dbc.Col([
@@ -5246,21 +5337,36 @@ def create_upload_page():
                 # TAB 3: LIST MEMBER (Account Management)
                 dbc.Tab(label="[LIST] List Member", tab_id="tab-list-member", children=[
                     html.Div(className="pt-3", children=[
-                        # Header with refresh button
+                        # Header with refresh button and filter
                         dbc.Row([
                             dbc.Col([
                                 html.H5([
                                     html.I(className="fas fa-users-cog me-2"),
                                     "Daftar Akun Member"
                                 ], className="mb-0"),
-                            ], md=8),
+                            ], md=4),
+                            dbc.Col([
+                                dbc.Select(
+                                    id="account-filter-select",
+                                    options=[
+                                        {"label": "Semua Member", "value": "all"},
+                                        {"label": "Aktif (Belum Expired)", "value": "active"},
+                                        {"label": "Expired (Perlu Perpanjang)", "value": "expired"},
+                                        {"label": "Trial Only", "value": "trial"},
+                                        {"label": "Subscribe Only", "value": "subscribe"},
+                                    ],
+                                    value="all",
+                                    className="",
+                                    style={"maxWidth": "220px"}
+                                ),
+                            ], md=4, className="d-flex justify-content-center"),
                             dbc.Col([
                                 dbc.Button([
                                     html.I(className="fas fa-sync me-2"),
                                     "Refresh"
                                 ], id="refresh-account-list-btn", color="primary", size="sm", className="float-end"),
                             ], md=4),
-                        ], className="mb-3"),
+                        ], className="mb-3 align-items-center"),
 
                         # Feedback div
                         html.Div(id="account-action-feedback", className="mb-3"),
@@ -5458,7 +5564,7 @@ def create_upload_page():
 # ============================================================
 
 def create_signup_page():
-    """Create sign up page"""
+    """Create sign up page with Trial/Subscribe choice"""
     return html.Div([
         dbc.Container([
             dbc.Row([
@@ -5509,6 +5615,41 @@ def create_signup_page():
                                 className="mb-3"
                             ),
 
+                            # Subscription Type Selection
+                            html.Hr(),
+                            dbc.Label("Pilih Paket Membership", className="fw-bold"),
+                            dbc.RadioItems(
+                                id="signup-membership-type",
+                                options=[
+                                    {
+                                        "label": html.Div([
+                                            html.Span("Trial 7 Hari ", className="fw-bold text-success"),
+                                            html.Span("(Gratis)", className="text-muted small"),
+                                            html.Br(),
+                                            html.Small("Coba semua fitur selama 7 hari tanpa biaya", className="text-muted")
+                                        ]),
+                                        "value": "trial"
+                                    },
+                                    {
+                                        "label": html.Div([
+                                            html.Span("Subscribe ", className="fw-bold text-warning"),
+                                            html.Span("Rp 99.000/bulan", className="text-muted small"),
+                                            html.Br(),
+                                            html.Small("Akses penuh tanpa batas waktu trial", className="text-muted")
+                                        ]),
+                                        "value": "subscribe"
+                                    },
+                                ],
+                                value="trial",
+                                className="mb-3",
+                                inputClassName="me-2",
+                                labelClassName="mb-2"
+                            ),
+                            html.Small([
+                                html.I(className="fas fa-info-circle me-1 text-info"),
+                                "Trial hanya bisa digunakan 1x per email"
+                            ], className="text-muted d-block mb-3"),
+
                             # Submit button
                             dbc.Button([
                                 html.I(className="fas fa-paper-plane me-2"),
@@ -5527,7 +5668,7 @@ def create_signup_page():
                             ], className="text-center mb-0")
                         ])
                     ], className="shadow")
-                ], md=6, lg=4, className="mx-auto")
+                ], md=6, lg=5, className="mx-auto")
             ], className="min-vh-75 align-items-center justify-content-center")
         ], className="py-5")
     ])
@@ -5658,6 +5799,249 @@ def create_verify_page(token: str = None):
                 ], className="shadow")
             ], className="py-5", style={"maxWidth": "500px", "margin": "0 auto"})
         ])
+
+
+# ============================================================
+# PAGE: UPGRADE TO PREMIUM
+# ============================================================
+
+# Pricing Configuration
+SUBSCRIPTION_CONFIG = {
+    'price': 99000,
+    'price_display': 'Rp 99.000',
+    'duration_days': 30,
+    'payment_link': 'https://herman-irawan.myr.id/m/hermanstock-premium',
+    'payment_method': 'QRIS',
+}
+
+def create_upgrade_page(user_info: dict = None):
+    """Create upgrade page for trial members to subscribe"""
+
+    # Check if user is logged in
+    if not user_info:
+        return html.Div([
+            dbc.Container([
+                dbc.Alert([
+                    html.I(className="fas fa-lock me-2"),
+                    "Silakan login terlebih dahulu untuk upgrade ke Premium."
+                ], color="warning", className="text-center"),
+                html.Div([
+                    dbc.Button("Login", href="/login", color="primary", className="me-2"),
+                    dbc.Button("Daftar Gratis", href="/signup", color="success"),
+                ], className="text-center mt-3")
+            ], className="py-5")
+        ])
+
+    member_type = user_info.get('member_type', 'trial')
+    username = user_info.get('username', 'User')
+    member_end = user_info.get('member_end')
+
+    # Check if already subscribed
+    if member_type in ['subscribe', 'admin', 'superuser']:
+        return html.Div([
+            dbc.Container([
+                dbc.Card([
+                    dbc.CardBody([
+                        html.Div([
+                            html.I(className="fas fa-crown fa-4x text-warning mb-3"),
+                        ], className="text-center"),
+                        html.H3("Anda Sudah Premium!", className="text-center text-success"),
+                        html.P(f"Halo {username}, akun Anda sudah berstatus Premium.",
+                              className="text-center text-muted"),
+                        html.P([
+                            "Masa aktif sampai: ",
+                            html.Strong(member_end.strftime('%d %B %Y') if member_end else "Unlimited")
+                        ], className="text-center"),
+                        html.Div([
+                            dbc.Button([
+                                html.I(className="fas fa-home me-2"),
+                                "Kembali ke Home"
+                            ], href="/", color="primary"),
+                        ], className="text-center mt-4")
+                    ])
+                ], className="shadow")
+            ], className="py-5", style={"maxWidth": "600px", "margin": "0 auto"})
+        ])
+
+    # Calculate remaining trial days
+    import datetime
+    remaining_days = 0
+    if member_end:
+        remaining = member_end - datetime.datetime.now()
+        remaining_days = max(0, remaining.days)
+
+    # Upgrade page for trial users
+    return html.Div([
+        dbc.Container([
+            # Header
+            html.Div([
+                html.I(className="fas fa-rocket fa-3x text-info mb-3"),
+                html.H2("Upgrade ke Premium", className="text-center"),
+                html.P("Dapatkan akses penuh ke semua fitur analisis saham",
+                      className="text-center text-muted"),
+            ], className="text-center mb-4"),
+
+            dbc.Row([
+                # Left: Current Status
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.I(className="fas fa-user me-2"),
+                            "Status Akun Anda"
+                        ], className="bg-secondary"),
+                        dbc.CardBody([
+                            html.Div([
+                                html.Span("Username: ", className="text-muted"),
+                                html.Strong(username)
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Span("Member Type: ", className="text-muted"),
+                                dbc.Badge("TRIAL", color="warning", className="ms-1")
+                            ], className="mb-2"),
+                            html.Div([
+                                html.Span("Sisa Trial: ", className="text-muted"),
+                                html.Strong(f"{remaining_days} hari",
+                                           className="text-danger" if remaining_days <= 2 else "text-warning")
+                            ], className="mb-2"),
+                            html.Hr(),
+                            html.P([
+                                html.I(className="fas fa-exclamation-circle text-warning me-2"),
+                                "Upgrade sekarang untuk akses tanpa batas!"
+                            ], className="small text-muted mb-0")
+                        ])
+                    ], className="mb-3")
+                ], md=4),
+
+                # Right: Premium Features & Payment
+                dbc.Col([
+                    dbc.Card([
+                        dbc.CardHeader([
+                            html.I(className="fas fa-crown text-warning me-2"),
+                            "HermanStock Premium"
+                        ], className="bg-success text-white"),
+                        dbc.CardBody([
+                            # Price
+                            html.Div([
+                                html.H2([
+                                    SUBSCRIPTION_CONFIG['price_display'],
+                                    html.Small("/bulan", className="text-muted fs-6")
+                                ], className="text-center text-success mb-3"),
+                            ]),
+
+                            # Features
+                            html.H6("Fitur Premium:", className="fw-bold mb-2"),
+                            html.Ul([
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Akses semua emiten (20+)"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Sinyal Trading Real-time"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Support & Resistance Analysis"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Broker Flow & Accumulation"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Formula V11b1 Backtest"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Entry & Exit Recommendations"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Fundamental Analysis"]),
+                                html.Li([html.I(className="fas fa-check text-success me-2"), "Priority Support"]),
+                            ], className="list-unstyled mb-3"),
+
+                            html.Hr(),
+
+                            # Payment Method
+                            html.H6([
+                                html.I(className="fas fa-qrcode me-2"),
+                                "Pembayaran via QRIS"
+                            ], className="fw-bold mb-3"),
+
+                            html.P([
+                                "Klik tombol di bawah untuk melakukan pembayaran:",
+                            ], className="text-muted small"),
+
+                            # Payment Button
+                            html.Div([
+                                html.A([
+                                    dbc.Button([
+                                        html.I(className="fas fa-credit-card me-2"),
+                                        f"Bayar {SUBSCRIPTION_CONFIG['price_display']}"
+                                    ], color="success", size="lg", className="w-100 mb-2")
+                                ], href=SUBSCRIPTION_CONFIG['payment_link'], target="_blank"),
+                            ]),
+
+                            html.P([
+                                html.I(className="fas fa-info-circle me-2"),
+                                "Setelah pembayaran berhasil, akun akan otomatis di-upgrade dalam 1x24 jam."
+                            ], className="small text-muted mt-2 mb-0"),
+
+                            html.Hr(),
+
+                            # Confirmation Form
+                            html.H6([
+                                html.I(className="fas fa-paper-plane me-2"),
+                                "Konfirmasi Pembayaran"
+                            ], className="fw-bold mb-2"),
+
+                            html.P("Setelah transfer, isi form konfirmasi:", className="text-muted small"),
+
+                            dbc.InputGroup([
+                                dbc.Input(
+                                    id="upgrade-payment-name",
+                                    placeholder="Nama pengirim (sesuai rekening)",
+                                    type="text"
+                                ),
+                            ], className="mb-2"),
+
+                            dbc.InputGroup([
+                                dbc.Input(
+                                    id="upgrade-payment-amount",
+                                    placeholder="Nominal transfer (contoh: 99000)",
+                                    type="number"
+                                ),
+                            ], className="mb-2"),
+
+                            dbc.InputGroup([
+                                dbc.Input(
+                                    id="upgrade-payment-date",
+                                    placeholder="Tanggal transfer",
+                                    type="date"
+                                ),
+                            ], className="mb-2"),
+
+                            dbc.Button([
+                                html.I(className="fas fa-paper-plane me-2"),
+                                "Kirim Konfirmasi"
+                            ], id="upgrade-submit-btn", color="primary", className="w-100"),
+
+                            html.Div(id="upgrade-submit-result", className="mt-2"),
+                        ])
+                    ])
+                ], md=8),
+            ]),
+
+            # FAQ
+            dbc.Card([
+                dbc.CardHeader([
+                    html.I(className="fas fa-question-circle me-2"),
+                    "FAQ"
+                ]),
+                dbc.CardBody([
+                    dbc.Accordion([
+                        dbc.AccordionItem([
+                            html.P("Ya, pembayaran dilakukan melalui QRIS yang aman dan terenkripsi. "
+                                  "Anda bisa menggunakan aplikasi e-wallet atau mobile banking apapun.")
+                        ], title="Apakah pembayaran aman?"),
+                        dbc.AccordionItem([
+                            html.P("Setelah pembayaran terverifikasi, akun Anda akan otomatis di-upgrade "
+                                  "ke Premium dalam waktu maksimal 1x24 jam.")
+                        ], title="Berapa lama proses upgrade?"),
+                        dbc.AccordionItem([
+                            html.P("Langganan berlaku selama 30 hari sejak tanggal aktivasi. "
+                                  "Anda akan mendapat notifikasi sebelum masa aktif berakhir.")
+                        ], title="Berapa lama masa aktif Premium?"),
+                        dbc.AccordionItem([
+                            html.P("Hubungi admin melalui email atau Discussion forum untuk bantuan.")
+                        ], title="Bagaimana jika ada masalah?"),
+                    ], start_collapsed=True)
+                ])
+            ], className="mt-4"),
+
+        ], className="py-4", style={"maxWidth": "900px", "margin": "0 auto"})
+    ])
 
 
 # ============================================================
@@ -18116,21 +18500,49 @@ def create_trial_expired_content():
                             html.H3("Masa Trial Berakhir", className="text-center mb-3"),
                             html.P([
                                 "Masa trial 7 hari Anda telah berakhir. ",
-                                "Upgrade ke akun Subscribe untuk melanjutkan akses ke semua fitur."
+                                "Upgrade ke akun Subscribe untuk melanjutkan akses ke semua fitur premium."
                             ], className="text-center text-muted mb-4"),
+
+                            # Pricing highlight
                             html.Div([
+                                html.Span("Hanya ", className="text-muted"),
+                                html.Span("Rp 99.000", className="text-success fw-bold", style={"fontSize": "1.5rem"}),
+                                html.Span(" /bulan", className="text-muted"),
+                            ], className="text-center mb-4"),
+
+                            html.Div([
+                                dcc.Link(
+                                    dbc.Button([
+                                        html.I(className="fas fa-crown me-2"),
+                                        "Upgrade Sekarang"
+                                    ], color="warning", size="lg", className="me-2 fw-bold"),
+                                    href="/upgrade"
+                                ),
                                 dcc.Link(
                                     dbc.Button([
                                         html.I(className="fas fa-home me-2"),
                                         "Kembali ke Home"
-                                    ], color="primary", size="lg", className="me-2"),
+                                    ], color="secondary", size="lg", outline=True),
                                     href="/"
                                 ),
                             ], className="text-center mb-4"),
+
                             html.Hr(),
+
+                            # Benefits reminder
+                            html.Div([
+                                html.P("Fitur Premium:", className="text-center fw-bold mb-2", style={"color": "#17a2b8"}),
+                                html.Ul([
+                                    html.Li("Analisis saham dengan zona support/resistance", className="small"),
+                                    html.Li("Data broker terupdate setiap hari", className="small"),
+                                    html.Li("Sinyal entry BREAKOUT dan RETEST", className="small"),
+                                    html.Li("Dashboard fundamental lengkap", className="small"),
+                                ], className="text-start", style={"color": "#6c757d", "display": "inline-block"}),
+                            ], className="text-center mb-3"),
+
                             html.P([
                                 html.I(className="fas fa-envelope me-2 text-info"),
-                                "Hubungi admin untuk upgrade akun: ",
+                                "Pertanyaan? Email: ",
                                 html.A("herman.irawan1108@gmail.com", href="mailto:herman.irawan1108@gmail.com")
                             ], className="text-center text-muted small mb-0")
                         ], className="py-5")
@@ -18472,19 +18884,25 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
             is_admin = True  # superuser has same access as admin
         elif member_type in ['trial', 'subscribe']:
             # Check if trial/subscribe is expired - use database value for real-time check
-            from datetime import datetime
+            from datetime import datetime, date
             if db_status and db_status.get('member_end'):
                 member_end = db_status['member_end']
                 try:
+                    # Convert member_end to date for comparison
                     if isinstance(member_end, datetime):
+                        end_date = member_end.date()
+                    elif isinstance(member_end, date):
                         end_date = member_end
                     else:
-                        end_date = datetime.fromisoformat(str(member_end).replace('Z', '+00:00'))
-                    # Compare with timezone-naive datetime
-                    end_date_naive = end_date.replace(tzinfo=None) if hasattr(end_date, 'tzinfo') and end_date.tzinfo else end_date
-                    if datetime.now() > end_date_naive:
+                        # Try to parse string
+                        end_date = datetime.fromisoformat(str(member_end).replace('Z', '+00:00')).date()
+
+                    # Compare dates (today > end_date means expired)
+                    today = date.today()
+                    if today > end_date:
                         is_trial_expired = True
-                except:
+                except Exception as e:
+                    print(f"Error checking member expiry: {e}")
                     pass
     elif superadmin_session and superadmin_session.get('email'):
         is_logged_in = True
@@ -18497,12 +18915,15 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     # Admin-only pages (only admin can access)
     admin_pages = ['/upload']
 
+    # Pages accessible even when trial expired
+    trial_expired_allowed = ['/', '/login', '/signup', '/verify', '/upgrade']
+
     # Protected pages require login
-    if pathname not in public_pages and not is_logged_in:
+    if pathname not in public_pages and pathname != '/upgrade' and not is_logged_in:
         return create_login_required_content()
 
-    # Trial expired - can only access landing page
-    if is_trial_expired and pathname != '/' and pathname not in ['/login', '/signup', '/verify']:
+    # Trial expired - can only access landing page and upgrade
+    if is_trial_expired and pathname not in trial_expired_allowed:
         return create_trial_expired_content()
 
     # Admin pages require admin role
@@ -18587,6 +19008,18 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
         return create_login_page()  # No banner for auth pages
     elif pathname == '/verify':
         return create_verify_page(token)  # No banner for auth pages
+    elif pathname == '/upgrade':
+        # Build user_info for upgrade page
+        user_info = None
+        if is_logged_in and user_session:
+            db_status = get_user_membership_status(user_session.get('email'))
+            user_info = {
+                'username': user_session.get('username'),
+                'email': user_session.get('email'),
+                'member_type': db_status.get('member_type') if db_status else member_type,
+                'member_end': db_status.get('member_end') if db_status else None
+            }
+        return create_upgrade_page(user_info)  # No banner for auth pages
     else:
         return wrap_with_banner(create_landing_page(is_admin, is_logged_in, is_trial_expired))
 
@@ -19231,6 +19664,129 @@ def deactivate_member_callback(n_clicks_list):
 
 
 # ============================================================
+# UPGRADE REQUESTS CALLBACKS
+# ============================================================
+
+# Load pending upgrade requests
+@app.callback(
+    Output('pending-upgrade-requests-container', 'children'),
+    [Input('admin-tabs', 'active_tab'),
+     Input('refresh-upgrade-requests-btn', 'n_clicks'),
+     Input({'type': 'approve-upgrade-btn', 'index': ALL}, 'n_clicks'),
+     Input({'type': 'reject-upgrade-btn', 'index': ALL}, 'n_clicks')],
+    prevent_initial_call=False
+)
+def load_pending_upgrade_requests(active_tab, refresh_clicks, approve_clicks, reject_clicks):
+    """Load pending upgrade requests"""
+    if active_tab != 'tab-members':
+        raise dash.exceptions.PreventUpdate
+
+    ctx = dash.callback_context
+    triggered_id = ctx.triggered[0]['prop_id'] if ctx.triggered else None
+
+    # Handle approve/reject actions
+    if triggered_id and 'approve-upgrade-btn' in triggered_id:
+        import json
+        try:
+            button_info = json.loads(triggered_id.replace('.n_clicks', ''))
+            request_id = button_info['index']
+
+            # Get request details
+            request = execute_query(
+                "SELECT user_email FROM upgrade_requests WHERE id = %s",
+                (request_id,), use_cache=False
+            )
+            if request:
+                user_email = request[0]['user_email']
+                # Upgrade user to subscribe (30 days)
+                from datetime import datetime, timedelta
+                new_end = datetime.now() + timedelta(days=30)
+                execute_query("""
+                    UPDATE users SET member_type = 'subscribe', member_end = %s
+                    WHERE email = %s
+                """, (new_end, user_email), fetch=False, use_cache=False)
+
+                # Mark request as approved
+                execute_query("""
+                    UPDATE upgrade_requests SET status = 'approved', processed_at = CURRENT_TIMESTAMP
+                    WHERE id = %s
+                """, (request_id,), fetch=False, use_cache=False)
+        except Exception as e:
+            print(f"Error approving upgrade: {e}")
+
+    if triggered_id and 'reject-upgrade-btn' in triggered_id:
+        import json
+        try:
+            button_info = json.loads(triggered_id.replace('.n_clicks', ''))
+            request_id = button_info['index']
+            execute_query("""
+                UPDATE upgrade_requests SET status = 'rejected', processed_at = CURRENT_TIMESTAMP
+                WHERE id = %s
+            """, (request_id,), fetch=False, use_cache=False)
+        except Exception as e:
+            print(f"Error rejecting upgrade: {e}")
+
+    # Load pending requests
+    try:
+        requests = execute_query("""
+            SELECT id, user_email, username, sender_name, amount, payment_date, created_at
+            FROM upgrade_requests
+            WHERE status = 'pending'
+            ORDER BY created_at DESC
+        """, use_cache=False)
+
+        if not requests:
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                "Tidak ada pending upgrade request."
+            ], color="secondary")
+
+        # Build table
+        rows = []
+        for req in requests:
+            rows.append(html.Tr([
+                html.Td(req['id']),
+                html.Td([
+                    html.Strong(req['username'] or '-'),
+                    html.Br(),
+                    html.Small(req['user_email'], className="text-muted")
+                ]),
+                html.Td(req['sender_name']),
+                html.Td(f"Rp {req['amount']:,}" if req['amount'] else '-'),
+                html.Td(str(req['payment_date']) if req['payment_date'] else '-'),
+                html.Td(req['created_at'].strftime('%Y-%m-%d %H:%M') if req['created_at'] else '-'),
+                html.Td([
+                    dbc.Button([html.I(className="fas fa-check")], id={'type': 'approve-upgrade-btn', 'index': req['id']},
+                              color="success", size="sm", className="me-1", title="Approve"),
+                    dbc.Button([html.I(className="fas fa-times")], id={'type': 'reject-upgrade-btn', 'index': req['id']},
+                              color="danger", size="sm", title="Reject"),
+                ])
+            ]))
+
+        table = dbc.Table([
+            html.Thead(html.Tr([
+                html.Th("#", style={"width": "40px"}),
+                html.Th("User"),
+                html.Th("Nama Pengirim"),
+                html.Th("Nominal"),
+                html.Th("Tgl Transfer"),
+                html.Th("Request Time"),
+                html.Th("Aksi", style={"width": "100px"})
+            ])),
+            html.Tbody(rows)
+        ], bordered=True, hover=True, responsive=True, size="sm")
+
+        return table
+
+    except Exception as e:
+        # Table might not exist
+        return dbc.Alert([
+            html.I(className="fas fa-info-circle me-2"),
+            "Belum ada upgrade request. Table akan dibuat otomatis saat ada request pertama."
+        ], color="info")
+
+
+# ============================================================
 # ACCOUNT LIST MANAGEMENT CALLBACKS
 # ============================================================
 
@@ -19238,25 +19794,58 @@ def deactivate_member_callback(n_clicks_list):
 @app.callback(
     Output('account-list-container', 'children'),
     [Input('admin-tabs', 'active_tab'),
-     Input('refresh-account-list-btn', 'n_clicks')],
+     Input('refresh-account-list-btn', 'n_clicks'),
+     Input('account-filter-select', 'value')],
     [State('user-session', 'data')],
     prevent_initial_call=False
 )
-def load_account_list(active_tab, refresh_clicks, user_session):
-    """Load account list table for List Member tab"""
+def load_account_list(active_tab, refresh_clicks, filter_value, user_session):
+    """Load account list table for List Member tab with filter"""
     if active_tab != 'tab-list-member':
         raise dash.exceptions.PreventUpdate
 
-    # Check if current user is superuser (can't see passwords)
-    is_superuser = False
-    if user_session and user_session.get('member_type') == 'superuser':
-        is_superuser = True
+    # Only admin herman.irawan1108@gmail.com can see passwords
+    current_email = user_session.get('email', '') if user_session else ''
+    can_see_passwords = (current_email.lower() == 'herman.irawan1108@gmail.com')
+
+    # Default filter
+    filter_value = filter_value or 'all'
 
     try:
+        from datetime import datetime
+
         accounts = get_all_accounts()
 
         if not accounts:
             return dbc.Alert("Belum ada akun member terdaftar.", color="secondary")
+
+        # Apply filter
+        filtered_accounts = []
+        for acc in accounts:
+            member_end = acc.get('member_end')
+            is_expired = datetime.now() > member_end if member_end else False
+            member_type = acc.get('member_type', 'trial')
+
+            if filter_value == 'all':
+                filtered_accounts.append(acc)
+            elif filter_value == 'active' and not is_expired:
+                filtered_accounts.append(acc)
+            elif filter_value == 'expired' and is_expired and member_type not in ['admin', 'superuser']:
+                filtered_accounts.append(acc)
+            elif filter_value == 'trial' and member_type == 'trial':
+                filtered_accounts.append(acc)
+            elif filter_value == 'subscribe' and member_type == 'subscribe':
+                filtered_accounts.append(acc)
+
+        if not filtered_accounts:
+            filter_label = {
+                'all': 'semua',
+                'active': 'aktif',
+                'expired': 'expired',
+                'trial': 'trial',
+                'subscribe': 'subscribe'
+            }.get(filter_value, filter_value)
+            return dbc.Alert(f"Tidak ada akun dengan filter '{filter_label}'.", color="secondary")
 
         # Build table
         table_header = html.Thead(html.Tr([
@@ -19271,7 +19860,7 @@ def load_account_list(active_tab, refresh_clicks, user_session):
         ]))
 
         table_rows = []
-        for idx, acc in enumerate(accounts, 1):
+        for idx, acc in enumerate(filtered_accounts, 1):
             # Type badge
             type_badge = {
                 'admin': dbc.Badge("[i] Admin", color="warning", className="me-1"),
@@ -19283,16 +19872,13 @@ def load_account_list(active_tab, refresh_clicks, user_session):
             # Status badge
             status_badge = dbc.Badge("[OK] Aktif", color="success") if acc['is_verified'] else dbc.Badge("[X] Nonaktif", color="danger")
 
-            # Password display - superuser can't see ANY passwords, admin can only see non-admin passwords
-            if is_superuser:
-                password_display = "********"  # Superuser can't see any passwords
-            elif acc['member_type'] in ['admin', 'superuser']:
-                password_display = "********"  # Hide admin/superuser passwords from everyone
-            else:
+            # Password display - ONLY admin herman.irawan1108@gmail.com can see passwords
+            if can_see_passwords and acc['member_type'] not in ['admin', 'superuser']:
                 password_display = acc.get('plain_password') or "********"
+            else:
+                password_display = "********"
 
             # Expired date with color indication
-            from datetime import datetime
             member_end = acc.get('member_end')
             if member_end:
                 expired_date = member_end.strftime('%Y-%m-%d')
@@ -19827,17 +20413,18 @@ def handle_maintenance_toggle(n_clicks, current_state, user_session):
 # USER AUTHENTICATION CALLBACKS
 # ============================================================
 
-# Sign Up callback
+# Sign Up callback with membership type selection
 @app.callback(
     Output('signup-feedback', 'children'),
     [Input('signup-submit', 'n_clicks')],
     [State('signup-email', 'value'),
      State('signup-username', 'value'),
      State('signup-password', 'value'),
-     State('signup-confirm', 'value')],
+     State('signup-confirm', 'value'),
+     State('signup-membership-type', 'value')],
     prevent_initial_call=True
 )
-def handle_signup(n_clicks, email, username, password, confirm):
+def handle_signup(n_clicks, email, username, password, confirm, membership_type):
     if not n_clicks:
         raise dash.exceptions.PreventUpdate
 
@@ -19848,10 +20435,99 @@ def handle_signup(n_clicks, email, username, password, confirm):
     if password != confirm:
         return dbc.Alert("Password dan konfirmasi tidak cocok!", color="danger")
 
-    # Create user
+    membership_type = membership_type or 'trial'
+
+    # If user selects trial, check if email has already used trial before
+    if membership_type == 'trial':
+        trial_check = check_email_trial_status(email)
+        if trial_check.get('has_used_trial'):
+            # Email already used trial - must subscribe
+            return dbc.Alert([
+                html.Div([
+                    html.I(className="fas fa-exclamation-triangle fa-3x text-warning mb-3"),
+                ], className="text-center"),
+                html.H5("Trial Sudah Digunakan", className="text-center"),
+                html.P([
+                    "Email ",
+                    html.Strong(email),
+                    " sudah pernah menggunakan masa trial."
+                ], className="text-center mb-2"),
+                html.P("Silakan pilih paket Subscribe untuk melanjutkan.", className="text-center text-muted mb-3"),
+                html.Div([
+                    html.A(
+                        dbc.Button([
+                            html.I(className="fas fa-crown me-2"),
+                            "Subscribe Sekarang - Rp 99.000/bulan"
+                        ], color="warning", size="lg"),
+                        href=SUBSCRIPTION_CONFIG['payment_link'],
+                        target="_blank"
+                    )
+                ], className="text-center")
+            ], color="warning")
+
+    # If user selects subscribe, redirect to payment first (don't create account yet)
+    if membership_type == 'subscribe':
+        # Validate email format first
+        if not validate_email(email):
+            return dbc.Alert("Format email tidak valid!", color="danger")
+
+        is_valid, msg = validate_password(password)
+        if not is_valid:
+            return dbc.Alert(msg, color="danger")
+
+        # Check if email/username already exists
+        check_query = "SELECT id FROM users WHERE email = %s OR username = %s"
+        existing = execute_query(check_query, (email.lower(), username.lower()), use_cache=False)
+        if existing:
+            return dbc.Alert("Email atau username sudah terdaftar!", color="danger")
+
+        # Show payment instructions - user must pay first then contact admin
+        return dbc.Alert([
+            html.Div([
+                html.I(className="fas fa-credit-card fa-3x text-warning mb-3"),
+            ], className="text-center"),
+            html.H5("Lakukan Pembayaran", className="text-center"),
+            html.P([
+                "Silakan lakukan pembayaran terlebih dahulu via link berikut:"
+            ], className="text-center mb-3"),
+            html.Div([
+                html.A(
+                    dbc.Button([
+                        html.I(className="fas fa-external-link-alt me-2"),
+                        "Bayar Rp 99.000 via QRIS"
+                    ], color="warning", size="lg"),
+                    href=SUBSCRIPTION_CONFIG['payment_link'],
+                    target="_blank"
+                )
+            ], className="text-center mb-3"),
+            html.Hr(),
+            html.P([
+                html.Strong("Setelah pembayaran:"),
+            ], className="text-center mb-2"),
+            html.Ol([
+                html.Li("Screenshot bukti pembayaran"),
+                html.Li([
+                    "Kirim ke WhatsApp: ",
+                    html.A("0812-8888-1108", href="https://wa.me/6281288881108", target="_blank", className="text-success fw-bold")
+                ]),
+                html.Li("Sertakan email dan username yang ingin didaftarkan"),
+                html.Li("Admin akan mengaktifkan akun Anda dalam 1x24 jam"),
+            ], className="text-start small", style={"display": "inline-block"}),
+            html.Hr(),
+            html.P([
+                html.Small([
+                    "Email: ", html.Strong(email), " | Username: ", html.Strong(username)
+                ], className="text-muted")
+            ], className="text-center mb-0")
+        ], color="info")
+
+    # Create user with trial
     result = create_user(email, username, password)
 
     if result['success']:
+        # Mark email as has_used_trial in database
+        mark_email_trial_used(email)
+
         # Send verification email
         email_result = send_verification_email(result['email'], result['token'], username)
 
@@ -19861,13 +20537,17 @@ def handle_signup(n_clicks, email, username, password, confirm):
                 html.Div([
                     html.I(className="fas fa-envelope fa-3x text-success mb-3"),
                 ], className="text-center"),
-                html.H5("Pendaftaran Berhasil!", className="text-center"),
+                html.H5("Pendaftaran Trial Berhasil!", className="text-center"),
                 html.P([
                     "Email verifikasi telah dikirim ke ",
                     html.Strong(email),
                     ". Silakan cek inbox (dan folder spam) untuk memverifikasi akun Anda."
                 ], className="text-center mb-0"),
-                html.P("Link verifikasi berlaku selama 24 jam.", className="text-center text-muted small mt-2")
+                html.P([
+                    "Masa trial: ",
+                    html.Strong("7 hari"),
+                    " mulai dari verifikasi email."
+                ], className="text-center text-muted small mt-2")
             ], color="success")
         else:
             # Email not configured - show verification link directly
@@ -19875,7 +20555,7 @@ def handle_signup(n_clicks, email, username, password, confirm):
                 html.Div([
                     html.I(className="fas fa-check-circle fa-3x text-success mb-3"),
                 ], className="text-center"),
-                html.H5("Pendaftaran Berhasil!", className="text-center"),
+                html.H5("Pendaftaran Trial Berhasil!", className="text-center"),
                 html.P([
                     "Akun Anda berhasil dibuat. Silakan klik tombol di bawah untuk memverifikasi email:"
                 ], className="text-center mb-2"),
@@ -19890,11 +20570,10 @@ def handle_signup(n_clicks, email, username, password, confirm):
                     )
                 ], className="text-center mb-3"),
                 html.P([
-                    "Atau copy link berikut:"
-                ], className="text-center text-muted small mb-1"),
-                html.Div([
-                    html.Code(email_result['url'], style={"fontSize": "10px", "wordBreak": "break-all"})
-                ], className="text-center p-2 bg-light rounded", style={"maxWidth": "100%", "overflow": "auto"})
+                    "Masa trial: ",
+                    html.Strong("7 hari"),
+                    " mulai dari verifikasi email."
+                ], className="text-center text-muted small")
             ], color="success")
     else:
         return dbc.Alert([
@@ -20021,7 +20700,8 @@ def auto_login_superadmin(pathname, superadmin_data):
      Output('user-display-desktop', 'children'),
      Output('auth-buttons-mobile', 'style'),
      Output('logout-section-mobile', 'style'),
-     Output('user-display-mobile', 'children')],
+     Output('user-display-mobile', 'children'),
+     Output('upgrade-btn-desktop', 'style')],
     [Input('user-session', 'data')],
     prevent_initial_call=False
 )
@@ -20032,6 +20712,10 @@ def toggle_auth_buttons(user_session):
         member_type = user_session.get('member_type', '')
         badge = "[i] " if member_type == 'admin' else ""
         display_text = f"{badge}{username}"
+
+        # Show upgrade button only for trial users
+        show_upgrade = {"display": "block"} if member_type == 'trial' else {"display": "none"}
+
         # Hide login buttons, show logout
         return (
             {"display": "none"},  # Hide auth-buttons-desktop
@@ -20039,7 +20723,8 @@ def toggle_auth_buttons(user_session):
             display_text,
             {"display": "none"},  # Hide auth-buttons-mobile
             {"display": "block"},  # Show logout-section-mobile
-            display_text
+            display_text,
+            show_upgrade  # Show upgrade button for trial users
         )
     else:
         # Show login buttons, hide logout
@@ -20049,7 +20734,8 @@ def toggle_auth_buttons(user_session):
             "",
             {"display": "block"},  # Show auth-buttons-mobile
             {"display": "none"},  # Hide logout-section-mobile
-            ""
+            "",
+            {"display": "none"}  # Hide upgrade button
         )
 
 
@@ -20069,6 +20755,96 @@ def handle_logout(desktop_clicks, mobile_clicks):
 
     # Clear sessions and redirect to home
     return None, None, "/"
+
+
+# Upgrade payment confirmation callback
+@app.callback(
+    Output('upgrade-submit-result', 'children'),
+    [Input('upgrade-submit-btn', 'n_clicks')],
+    [State('upgrade-payment-name', 'value'),
+     State('upgrade-payment-amount', 'value'),
+     State('upgrade-payment-date', 'value'),
+     State('user-session', 'data')],
+    prevent_initial_call=True
+)
+def handle_upgrade_confirmation(n_clicks, sender_name, amount, payment_date, user_session):
+    """Handle upgrade payment confirmation submission"""
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    # Validate inputs
+    if not sender_name or not sender_name.strip():
+        return dbc.Alert("Nama pengirim harus diisi!", color="danger", className="small")
+
+    if not amount or int(amount) < 99000:
+        return dbc.Alert("Nominal transfer minimal Rp 99.000!", color="danger", className="small")
+
+    if not payment_date:
+        return dbc.Alert("Tanggal transfer harus diisi!", color="danger", className="small")
+
+    if not user_session or not user_session.get('email'):
+        return dbc.Alert("Silakan login terlebih dahulu!", color="danger", className="small")
+
+    # Store upgrade request in database
+    try:
+        user_email = user_session.get('email')
+        username = user_session.get('username', '')
+
+        # Check if there's already a pending request
+        existing = execute_query("""
+            SELECT id FROM upgrade_requests
+            WHERE user_email = %s AND status = 'pending'
+        """, (user_email,), use_cache=False)
+
+        if existing:
+            return dbc.Alert([
+                html.I(className="fas fa-info-circle me-2"),
+                "Anda sudah memiliki request upgrade yang pending. Mohon tunggu verifikasi admin."
+            ], color="info", className="small")
+
+        # Insert new upgrade request
+        execute_query("""
+            INSERT INTO upgrade_requests (user_email, username, sender_name, amount, payment_date, status, created_at)
+            VALUES (%s, %s, %s, %s, %s, 'pending', CURRENT_TIMESTAMP)
+        """, (user_email, username, sender_name.strip(), int(amount), payment_date), fetch=False, use_cache=False)
+
+        return dbc.Alert([
+            html.I(className="fas fa-check-circle me-2"),
+            html.Strong("Konfirmasi terkirim! "),
+            "Admin akan memverifikasi pembayaran Anda dalam 1x24 jam."
+        ], color="success", className="small")
+
+    except Exception as e:
+        # Table might not exist, create it
+        try:
+            execute_query("""
+                CREATE TABLE IF NOT EXISTS upgrade_requests (
+                    id SERIAL PRIMARY KEY,
+                    user_email VARCHAR(255) NOT NULL,
+                    username VARCHAR(100),
+                    sender_name VARCHAR(255),
+                    amount INTEGER,
+                    payment_date DATE,
+                    status VARCHAR(50) DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    processed_at TIMESTAMP,
+                    processed_by VARCHAR(100)
+                )
+            """, fetch=False, use_cache=False)
+
+            # Retry insert
+            execute_query("""
+                INSERT INTO upgrade_requests (user_email, username, sender_name, amount, payment_date, status, created_at)
+                VALUES (%s, %s, %s, %s, %s, 'pending', CURRENT_TIMESTAMP)
+            """, (user_session.get('email'), user_session.get('username', ''), sender_name.strip(), int(amount), payment_date), fetch=False, use_cache=False)
+
+            return dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                html.Strong("Konfirmasi terkirim! "),
+                "Admin akan memverifikasi pembayaran Anda dalam 1x24 jam."
+            ], color="success", className="small")
+        except Exception as e2:
+            return dbc.Alert(f"Error: {str(e2)}", color="danger", className="small")
 
 
 @app.callback(Output('broker-select', 'options'), [Input('url', 'pathname'), Input('stock-selector', 'value')])
