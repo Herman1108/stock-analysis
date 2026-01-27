@@ -19807,15 +19807,17 @@ def load_account_list(active_tab, refresh_clicks, filter_value, user_session):
     if active_tab != 'tab-list-member':
         raise dash.exceptions.PreventUpdate
 
-    # Handle None filter value
-    if filter_value is None:
-        filter_value = 'all'
-
-    # Only admin herman.irawan1108@gmail.com can see passwords
-    current_email = user_session.get('email', '') if user_session else ''
-    can_see_passwords = (current_email.lower() == 'herman.irawan1108@gmail.com')
-
     try:
+        # Handle None filter value
+        if filter_value is None:
+            filter_value = 'all'
+
+        # Only admin herman.irawan1108@gmail.com can see passwords
+        current_email = ''
+        if user_session and isinstance(user_session, dict):
+            current_email = user_session.get('email', '')
+        can_see_passwords = (current_email.lower() == 'herman.irawan1108@gmail.com')
+
         accounts = get_all_accounts()
 
         if not accounts:
@@ -19825,7 +19827,12 @@ def load_account_list(active_tab, refresh_clicks, filter_value, user_session):
         filtered_accounts = []
         for acc in accounts:
             member_end = acc.get('member_end')
-            is_expired = datetime.now() > member_end if member_end else False
+            is_expired = False
+            if member_end:
+                try:
+                    is_expired = datetime.now() > member_end
+                except:
+                    is_expired = False
             member_type = acc.get('member_type', 'trial')
 
             if filter_value == 'all':
