@@ -14965,10 +14965,26 @@ def create_analysis_page(stock_code='CDIA'):
                         break
 
                 # BREAKOUT detection: Check if in last 7 days there was close <= zone_high
+                # AND determine DIRECTION: came from above (RETEST) or from below (BREAKOUT)
+                came_from_above_then_dipped = False  # Price was above zone, then dipped into/below zone
                 for rc in recent_closes:
                     if rc <= s_high:
                         came_from_below = True
                         break
+
+                # Check price DIRECTION in last 7 days (chronological: oldest→newest)
+                # If price was above zone_high BEFORE it dipped to/below zone_high → RETEST pattern
+                if came_from_below and len(recent_closes) >= 2:
+                    found_above_first = False
+                    found_dip_after = False
+                    for rc in recent_closes:  # oldest to newest
+                        if rc > s_high:
+                            found_above_first = True
+                        elif found_above_first and rc <= s_high:
+                            found_dip_after = True
+                            break
+                    if found_above_first and found_dip_after:
+                        came_from_above_then_dipped = True
 
                 # Count consecutive days with close > zone_high (for BREAKOUT gate)
                 for i in range(min(7, len(price_df_check))):
@@ -14980,6 +14996,7 @@ def create_analysis_page(stock_code='CDIA'):
                 # === Determine scenario ===
                 # RULE: If was_below_zone = True → zona = RESISTANCE → need BREAKOUT
                 # RULE: If was_below_zone = False AND s_from_above = True → zona = SUPPORT → RETEST
+                # RULE: If came_from_above_then_dipped = True → RETEST (price dropped from above into zone)
 
                 if was_below_zone:
                     # Price BROKE BELOW zone recently - zona is now RESISTANCE
@@ -15000,10 +15017,16 @@ def create_analysis_page(stock_code='CDIA'):
                     # Price above zone - check formula type and conditions
                     stock_formula = STOCK_FORMULA.get(stock_code.upper(), 'V11b1')
 
-                    # V11b1 Spec: BREAKOUT requires came_from_below = TRUE
-                    # "Dalam 7 hari sebelumnya, minimal ada 1 close <= zone_high"
-                    if came_from_below:
-                        # Valid breakout - price rose from below/within zone recently
+                    # Check if this is a RETEST pattern (came from above, dipped, bounced back)
+                    if came_from_above_then_dipped:
+                        # Price was above zone → dropped to/into zone → bounced back above
+                        # This is RETEST, NOT BREAKOUT
+                        if s_not_late:
+                            v11_confirm_type = 'RETEST'
+                        else:
+                            v11_confirm_type = 'RETEST'
+                    elif came_from_below and not came_from_above_then_dipped:
+                        # Valid breakout - price genuinely rose from below/within zone
                         if breakout_days_above >= 3:
                             v11_confirm_type = 'BREAKOUT_OK'
                         else:
