@@ -439,7 +439,8 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     sl = waiting_entry['zone_low'] * (1 - params['sl_pct'])
                     tp = zh.get_tp_for_zone(waiting_entry['zone_num'], entry_price, params)
 
-                    if tp > entry_price:
+                    # Validate: entry must be at or above zone_low
+                    if tp > entry_price and entry_price >= waiting_entry['zone_low']:
                         position = {
                             'type': waiting_entry['type'],
                             'entry_date': date_str,
@@ -741,7 +742,9 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                     # Price dropped below zone → RESET
                     state = STATE_IDLE
                     retest_touch_idx = 0
-                elif bars_from_touch <= params['confirm_bars_retest']:
+                elif 1 <= bars_from_touch <= params['confirm_bars_retest']:
+                    # Note: bars_from_touch >= 1 to prevent same-bar trigger+entry
+                    # (can't know close at time of open)
                     any_reclaim = close >= locked_zone_high + buffer
                     if any_reclaim:
                         tp = zh.get_tp_for_zone(locked_zone_num, close, params)
@@ -761,7 +764,9 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                             sl = locked_zone_low * (1 - params['sl_pct'])
                             tp = zh.get_tp_for_zone(locked_zone_num, entry_price, params)
 
-                            if tp > entry_price:
+                            # Validate: entry must be at or above zone_low
+                            # (prevents entry on gap-down through zone)
+                            if tp > entry_price and entry_price >= locked_zone_low:
                                 position = {
                                     'type': 'RETEST',
                                     'entry_date': date_str,
@@ -793,6 +798,8 @@ def run_backtest(stock_code, params=None, v11b1_params=None, start_date='2024-01
                                 })
                                 if verbose:
                                     events_log.append(f"{date_str}: DIRECT_ENTRY RETEST Z{locked_zone_num} (vol {vol_ratio:.2f}x)")
+                            elif entry_price < locked_zone_low and verbose:
+                                events_log.append(f"{date_str}: RETEST_SKIP Z{locked_zone_num} (open {entry_price:,.0f} < zone_low {locked_zone_low:,.0f} - gap down)")
                         elif ma_ok:
                             # Volume LOW but MA OK - enter waiting mode
                             waiting_entry = {
