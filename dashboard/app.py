@@ -353,6 +353,63 @@ def get_v11b1_running_from_precomputed():
     return running_stocks
 
 
+def get_v11b1_per_stock_backtest_summary():
+    """Get backtest summary per stock: profit, loss, nett, open positions
+    Returns list of dicts sorted by stock_code.
+    """
+    results = []
+    for stock_code in sorted(STOCK_ZONES.keys()):
+        try:
+            precomputed = get_v11b1_precomputed_result(stock_code)
+            if not precomputed:
+                continue
+
+            trade_history = precomputed.get('trade_history', [])
+            if not trade_history:
+                continue
+
+            profit_count = 0
+            loss_count = 0
+            profit_pnl = 0.0
+            loss_pnl = 0.0
+            open_count = 0
+            floating_pnl = 0.0
+
+            for trade in trade_history:
+                exit_reason = trade.get('exit_reason', '')
+                pnl = float(trade.get('pnl') or 0)
+
+                if exit_reason == 'OPEN':
+                    open_count += 1
+                    floating_pnl += pnl
+                elif pnl > 0:
+                    profit_count += 1
+                    profit_pnl += pnl
+                elif pnl < 0:
+                    loss_count += 1
+                    loss_pnl += pnl
+
+            nett_pnl = profit_pnl + loss_pnl
+            total_trades = profit_count + loss_count + open_count
+
+            if total_trades > 0:
+                results.append({
+                    'stock_code': stock_code,
+                    'profit_count': profit_count,
+                    'loss_count': loss_count,
+                    'profit_pnl': profit_pnl,
+                    'loss_pnl': loss_pnl,
+                    'nett_pnl': nett_pnl,
+                    'open_count': open_count,
+                    'floating_pnl': floating_pnl,
+                    'total_trades': total_trades,
+                })
+        except Exception:
+            pass
+
+    return results
+
+
 def check_precomputed_tables_exist():
     """Check if pre-computed tables exist in database"""
     try:
@@ -3168,6 +3225,110 @@ def create_navbar():
 # PAGE: LANDING / HOME
 # ============================================================
 
+def _build_backtest_summary_table():
+    """Build backtest summary table for Home page - 20 emiten with colors and links"""
+    try:
+        stock_stats = get_v11b1_per_stock_backtest_summary()
+        if not stock_stats:
+            return html.Div("Data backtest belum tersedia.", className="text-muted p-3")
+
+        # Calculate totals
+        total_profit = sum(s['profit_count'] for s in stock_stats)
+        total_loss = sum(s['loss_count'] for s in stock_stats)
+        total_profit_pnl = sum(s['profit_pnl'] for s in stock_stats)
+        total_loss_pnl = sum(s['loss_pnl'] for s in stock_stats)
+        total_nett = sum(s['nett_pnl'] for s in stock_stats)
+        total_open = sum(s['open_count'] for s in stock_stats)
+        total_floating = sum(s['floating_pnl'] for s in stock_stats)
+
+        # Build table header with colored columns
+        header = html.Thead(html.Tr([
+            html.Th("#", style={"width": "35px", "backgroundColor": "#1a1a2e", "color": "#fff"}),
+            html.Th("Emiten", style={"width": "80px", "backgroundColor": "#1a1a2e", "color": "#fff"}),
+            html.Th([html.I(className="fas fa-check me-1"), "Profit"],
+                     className="text-center",
+                     style={"width": "110px", "backgroundColor": "#0d6832", "color": "#fff"}),
+            html.Th([html.I(className="fas fa-times me-1"), "Loss"],
+                     className="text-center",
+                     style={"width": "110px", "backgroundColor": "#842029", "color": "#fff"}),
+            html.Th([html.I(className="fas fa-balance-scale me-1"), "Nett P&L"],
+                     className="text-center",
+                     style={"width": "110px", "backgroundColor": "#1a1a2e", "color": "#fff"}),
+            html.Th([html.I(className="fas fa-play me-1"), "Open Pos"],
+                     className="text-center",
+                     style={"width": "100px", "backgroundColor": "#0a58ca", "color": "#fff"}),
+        ]))
+
+        # Build table rows
+        rows = []
+        for idx, s in enumerate(stock_stats, 1):
+            nett = s['nett_pnl']
+            nett_bg = "#d1e7dd" if nett >= 0 else "#f8d7da"
+            nett_color = "#0a3622" if nett >= 0 else "#58151c"
+            nett_prefix = "+" if nett >= 0 else ""
+
+            profit_text = f"{s['profit_count']} (+{s['profit_pnl']:.1f}%)" if s['profit_count'] > 0 else "-"
+            loss_text = f"{s['loss_count']} ({s['loss_pnl']:.1f}%)" if s['loss_count'] > 0 else "-"
+            open_text = f"{s['open_count']} ({'+' if s['floating_pnl'] >= 0 else ''}{s['floating_pnl']:.1f}%)" if s['open_count'] > 0 else "-"
+
+            # Profit cell styling
+            profit_style = {"backgroundColor": "#d1e7dd", "color": "#0a3622"} if s['profit_count'] > 0 else {}
+            # Loss cell styling
+            loss_style = {"backgroundColor": "#f8d7da", "color": "#58151c"} if s['loss_count'] > 0 else {}
+            # Open cell styling
+            open_style = {"backgroundColor": "#cfe2ff", "color": "#052c65"} if s['open_count'] > 0 else {}
+
+            rows.append(html.Tr([
+                html.Td(idx, className="text-muted text-center"),
+                html.Td(
+                    dcc.Link(
+                        html.Strong(s['stock_code']),
+                        href=f"/analysis?stock={s['stock_code']}",
+                        className="text-decoration-none",
+                        style={"color": "#0d6efd"}
+                    ),
+                    className="fw-bold"
+                ),
+                html.Td(profit_text, className="text-center fw-bold", style=profit_style),
+                html.Td(loss_text, className="text-center fw-bold", style=loss_style),
+                html.Td(f"{nett_prefix}{nett:.1f}%", className="text-center fw-bold",
+                         style={"backgroundColor": nett_bg, "color": nett_color}),
+                html.Td(open_text, className="text-center", style=open_style),
+            ]))
+
+        # Total row
+        total_nett_bg = "#198754" if total_nett >= 0 else "#dc3545"
+        total_nett_prefix = "+" if total_nett >= 0 else ""
+        rows.append(html.Tr([
+            html.Td(""),
+            html.Td("TOTAL", className="fw-bold", style={"color": "#1a1a2e"}),
+            html.Td(f"{total_profit} (+{total_profit_pnl:.1f}%)",
+                     className="text-center fw-bold",
+                     style={"backgroundColor": "#198754", "color": "#fff"}),
+            html.Td(f"{total_loss} ({total_loss_pnl:.1f}%)",
+                     className="text-center fw-bold",
+                     style={"backgroundColor": "#dc3545", "color": "#fff"}),
+            html.Td(f"{total_nett_prefix}{total_nett:.1f}%",
+                     className="text-center fw-bold",
+                     style={"backgroundColor": total_nett_bg, "color": "#fff"}),
+            html.Td(f"{total_open} ({'+' if total_floating >= 0 else ''}{total_floating:.1f}%)",
+                     className="text-center fw-bold",
+                     style={"backgroundColor": "#0d6efd", "color": "#fff"}),
+        ], style={"borderTop": "3px solid #1a1a2e"}))
+
+        body = html.Tbody(rows)
+
+        return dbc.Table(
+            [header, body],
+            bordered=True, hover=True, responsive=True,
+            className="table-sm mb-0",
+            style={"fontSize": "13px"}
+        )
+
+    except Exception as e:
+        return html.Div(f"Error loading backtest data: {e}", className="text-danger small p-3")
+
+
 def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_expired: bool = False):
     """Create landing page with stock selection and overview using unified analysis data from 3 submenus.
     During maintenance, regular users only see stocks from snapshot."""
@@ -3485,6 +3646,20 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
             ], className="mb-4"),
 
             dbc.Row(stock_cards),
+
+            # Backtest Summary Table - Per Stock
+            html.Hr(className="my-4"),
+            dbc.Card([
+                dbc.CardHeader([
+                    html.H5([
+                        html.I(className="fas fa-chart-line me-2"),
+                        "Ringkasan Backtest V11b1 - 20 Emiten"
+                    ], className="text-start mb-0 fw-bold text-white"),
+                ], style={"background": "linear-gradient(135deg, #1a1a2e 0%, #16213e 100%)"}),
+                dbc.CardBody([
+                    _build_backtest_summary_table(),
+                ], className="p-0"),
+            ], className="shadow-sm border-0"),
 
             # CTA Section - Why Sign Up
             html.Hr(className="my-4"),
@@ -20097,7 +20272,7 @@ def open_delete_modal(delete_clicks, cancel_click, is_open):
 # Confirm delete account
 @app.callback(
     [Output('delete-account-modal', 'is_open', allow_duplicate=True),
-     Output('account-action-feedback', 'children')],
+     Output('account-action-feedback', 'children', allow_duplicate=True)],
     [Input('confirm-delete-account-btn', 'n_clicks')],
     [State('delete-account-id', 'data')],
     prevent_initial_call=True
