@@ -5658,6 +5658,89 @@ def create_upload_page():
                             ], md=4),
                         ], className="mb-3"),
 
+                        # Upload Data & Recalc V11b1 Card
+                        dbc.Card([
+                            dbc.CardHeader([
+                                html.H6([
+                                    html.I(className="fas fa-cloud-upload-alt me-2"),
+                                    "Upload Data & Recalculate"
+                                ], className="mb-0")
+                            ]),
+                            dbc.CardBody([
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Label("Pilih Emiten:", className="fw-bold"),
+                                        dcc.Dropdown(
+                                            id='dm-stock-select',
+                                            options=[
+                                                {'label': 'SEMUA EMITEN', 'value': 'ALL'},
+                                                {'label': '─────────────', 'value': '', 'disabled': True},
+                                                {'label': 'ADMR', 'value': 'ADMR'},
+                                                {'label': 'BBCA', 'value': 'BBCA'},
+                                                {'label': 'BMRI', 'value': 'BMRI'},
+                                                {'label': 'BREN', 'value': 'BREN'},
+                                                {'label': 'BRPT', 'value': 'BRPT'},
+                                                {'label': 'CBDK', 'value': 'CBDK'},
+                                                {'label': 'CBRE', 'value': 'CBRE'},
+                                                {'label': 'CDIA', 'value': 'CDIA'},
+                                                {'label': 'CUAN', 'value': 'CUAN'},
+                                                {'label': 'DSNG', 'value': 'DSNG'},
+                                                {'label': 'FUTR', 'value': 'FUTR'},
+                                                {'label': 'HRUM', 'value': 'HRUM'},
+                                                {'label': 'MBMA', 'value': 'MBMA'},
+                                                {'label': 'MDKA', 'value': 'MDKA'},
+                                                {'label': 'NCKL', 'value': 'NCKL'},
+                                                {'label': 'PANI', 'value': 'PANI'},
+                                                {'label': 'PTRO', 'value': 'PTRO'},
+                                                {'label': 'TINS', 'value': 'TINS'},
+                                                {'label': 'WIFI', 'value': 'WIFI'},
+                                            ],
+                                            value='ALL',
+                                            placeholder='Pilih emiten...',
+                                            className="mb-3",
+                                            multi=True
+                                        ),
+                                    ], md=6),
+                                    dbc.Col([
+                                        dbc.Label("Jenis Data:", className="fw-bold"),
+                                        dcc.Checklist(
+                                            id='dm-data-type',
+                                            options=[
+                                                {'label': ' Price (OHLCV)', 'value': 'price'},
+                                                {'label': ' Broker Summary', 'value': 'broker'},
+                                                {'label': ' Fundamental', 'value': 'fundamental'},
+                                            ],
+                                            value=['price', 'broker'],
+                                            labelStyle={'display': 'block', 'cursor': 'pointer', 'marginBottom': '8px'},
+                                            inputStyle={'marginRight': '8px', 'cursor': 'pointer'},
+                                            className="mb-3"
+                                        ),
+                                    ], md=6),
+                                ]),
+                                html.Hr(),
+                                dbc.Row([
+                                    dbc.Col([
+                                        dbc.Button([
+                                            html.I(className="fas fa-cloud-upload-alt me-2"),
+                                            "Upload Data"
+                                        ], id='dm-upload-btn', color="success", size="lg", className="w-100"),
+                                    ], md=4),
+                                    dbc.Col([
+                                        dbc.Button([
+                                            html.I(className="fas fa-calculator me-2"),
+                                            "Recalc V11b1"
+                                        ], id='dm-recalc-v11b1-btn', color="warning", size="lg", className="w-100"),
+                                    ], md=4),
+                                    dbc.Col([
+                                        html.Div(id='dm-upload-status', className="mt-2")
+                                    ], md=4),
+                                ]),
+                                html.Div(id='dm-v11b1-status', className="mt-2"),
+                                html.Div(id='dm-upload-log', className="mt-3",
+                                         style={'maxHeight': '300px', 'overflowY': 'auto'}),
+                            ])
+                        ], className="mb-4"),
+
                         # Stock Data Summary Card
                         dbc.Card([
                             dbc.CardHeader([
@@ -19336,6 +19419,195 @@ def recalc_v11b1(n_clicks, selected_stocks):
         return dbc.Alert(f"Database connection error: {e}", color="danger")
 
     # Build result display
+    timestamp = datetime.now().strftime('%H:%M:%S')
+    color = "success" if fail_count == 0 else ("warning" if success_count > 0 else "danger")
+
+    return dbc.Alert([
+        html.H6([
+            html.I(className="fas fa-calculator me-2"),
+            f"V11b1 Recalc Complete - {timestamp}"
+        ]),
+        html.P(f"Success: {success_count}, Failed: {fail_count}", className="mb-2"),
+        html.Div(results, style={'maxHeight': '150px', 'overflowY': 'auto'})
+    ], color=color, dismissable=True)
+
+
+# ============================================================
+# DATA MANAGEMENT TAB - UPLOAD & RECALC CALLBACKS
+# ============================================================
+
+@app.callback(
+    [Output('dm-upload-status', 'children'),
+     Output('dm-upload-log', 'children')],
+    [Input('dm-upload-btn', 'n_clicks')],
+    [State('dm-stock-select', 'value'),
+     State('dm-data-type', 'value')],
+    prevent_initial_call=True
+)
+def dm_upload_data(n_clicks, selected_stocks, data_types):
+    """Upload data from Google Drive to database (Data Management tab)"""
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    from datetime import datetime
+
+    try:
+        from gdrive_sync import sync_stock_data, check_setup_status
+    except ImportError as e:
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Error: Could not import gdrive_sync module: {str(e)}"
+            ], color="danger"),
+            None
+        )
+
+    setup_status = check_setup_status()
+    if not setup_status['ready']:
+        missing_items = [html.Li(item) for item in setup_status['missing']]
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-cog me-2"),
+                "Setup Google Drive API diperlukan"
+            ], color="warning"),
+            dbc.Alert([
+                html.Strong("Yang belum tersedia: "),
+                html.Ul(missing_items, className="text-danger small mb-0")
+            ], color="info")
+        )
+
+    if not data_types:
+        return (
+            dbc.Alert("Pilih minimal satu jenis data!", color="warning"),
+            None
+        )
+
+    if not selected_stocks or 'ALL' in selected_stocks:
+        stocks_to_sync = None
+    else:
+        stocks_to_sync = [s for s in selected_stocks if s and s != 'ALL']
+
+    try:
+        result = sync_stock_data(stocks=stocks_to_sync, data_types=data_types)
+
+        log_items = []
+        for log in result.logs:
+            icon_class = "fas fa-info-circle text-info"
+            text_class = ""
+            if log['level'] == 'error':
+                icon_class = "fas fa-times-circle text-danger"
+                text_class = "text-danger"
+            elif log['level'] == 'warning':
+                icon_class = "fas fa-exclamation-triangle text-warning"
+                text_class = "text-warning"
+            elif log['level'] == 'success':
+                icon_class = "fas fa-check-circle text-success"
+                text_class = "text-success"
+
+            log_items.append(html.Div([
+                html.Span(f"[{log['time']}] ", className="text-muted small"),
+                html.I(className=f"{icon_class} me-2"),
+                html.Span(log['message'], className=text_class)
+            ], className="mb-1"))
+
+        log_items.append(html.Hr())
+        log_items.append(dbc.Alert([
+            html.I(className="fas fa-chart-bar me-2"),
+            html.Strong("Summary: "),
+            f"{result.stats['price_records']} price, ",
+            f"{result.stats['broker_records']} broker, ",
+            f"{result.stats['fundamental_records']} fundamental records imported"
+        ], color="info" if result.success else "warning"))
+
+        if result.success:
+            status = dbc.Alert([
+                html.I(className="fas fa-check-circle me-2"),
+                f"Upload berhasil! {len(result.stocks_processed)} emiten diproses - {datetime.now().strftime('%H:%M:%S')}"
+            ], color="success")
+        else:
+            status = dbc.Alert([
+                html.I(className="fas fa-exclamation-triangle me-2"),
+                f"Upload selesai dengan error. Cek log di bawah."
+            ], color="warning")
+
+        return (
+            status,
+            html.Div(log_items, style={'maxHeight': '400px', 'overflowY': 'auto'})
+        )
+
+    except Exception as e:
+        return (
+            dbc.Alert([
+                html.I(className="fas fa-times-circle me-2"),
+                f"Error: {str(e)}"
+            ], color="danger"),
+            html.Pre(str(e), className="text-danger small")
+        )
+
+
+@app.callback(
+    Output('dm-v11b1-status', 'children'),
+    [Input('dm-recalc-v11b1-btn', 'n_clicks')],
+    [State('dm-stock-select', 'value')],
+    prevent_initial_call=True
+)
+def dm_recalc_v11b1(n_clicks, selected_stocks):
+    """Recalculate V11b1 for selected stocks (Data Management tab)"""
+    if not n_clicks:
+        raise dash.exceptions.PreventUpdate
+
+    from datetime import datetime
+    from zones_config import STOCK_ZONES
+
+    if not selected_stocks or 'ALL' in selected_stocks:
+        stocks_to_process = list(STOCK_ZONES.keys())
+    else:
+        stocks_to_process = [s for s in selected_stocks if s in STOCK_ZONES]
+
+    if not stocks_to_process:
+        return dbc.Alert("Tidak ada emiten V11b1 yang dipilih", color="warning")
+
+    try:
+        from calculate_daily_v11b1 import process_stock
+        from backtest_v11b1_universal import get_db_connection
+    except ImportError as e:
+        return dbc.Alert(f"Error import module: {e}", color="danger")
+
+    results = []
+    success_count = 0
+    fail_count = 0
+
+    try:
+        conn = get_db_connection()
+
+        for stock in stocks_to_process:
+            try:
+                success = process_stock(stock, conn)
+                if success:
+                    success_count += 1
+                    results.append(html.Div([
+                        html.I(className="fas fa-check text-success me-2"),
+                        f"{stock}: OK"
+                    ], className="small"))
+                else:
+                    fail_count += 1
+                    results.append(html.Div([
+                        html.I(className="fas fa-times text-danger me-2"),
+                        f"{stock}: Failed"
+                    ], className="small"))
+            except Exception as e:
+                fail_count += 1
+                results.append(html.Div([
+                    html.I(className="fas fa-times text-danger me-2"),
+                    f"{stock}: {str(e)[:50]}"
+                ], className="small"))
+
+        conn.commit()
+        conn.close()
+
+    except Exception as e:
+        return dbc.Alert(f"Database connection error: {e}", color="danger")
+
     timestamp = datetime.now().strftime('%H:%M:%S')
     color = "success" if fail_count == 0 else ("warning" if success_count > 0 else "danger")
 
