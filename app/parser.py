@@ -197,8 +197,8 @@ def read_excel_data(file_path: str) -> Tuple[pd.DataFrame, pd.DataFrame]:
     return broker_df, price_df
 
 def import_price_data(price_df: pd.DataFrame, stock_code: str = 'CDIA'):
-    """Import data harga ke database"""
-    print(f"Importing {len(price_df)} price records...")
+    """Import data harga ke database (replace mode: delete all lalu insert fresh)"""
+    print(f"Importing {len(price_df)} price records (replace mode)...")
 
     insert_query = """
         INSERT INTO stock_daily
@@ -224,6 +224,10 @@ def import_price_data(price_df: pd.DataFrame, stock_code: str = 'CDIA'):
 
     records_imported = 0
     with get_cursor() as cursor:
+        # Replace mode: hapus semua data price untuk stock ini, lalu insert fresh
+        cursor.execute("DELETE FROM stock_daily WHERE stock_code = %s", (stock_code,))
+        deleted = cursor.rowcount
+        print(f"  Deleted {deleted} old price records for {stock_code}")
         for _, row in price_df.iterrows():
             try:
                 # Parse date
@@ -262,10 +266,10 @@ def import_price_data(price_df: pd.DataFrame, stock_code: str = 'CDIA'):
     return records_imported
 
 def import_broker_data(broker_df: pd.DataFrame, stock_code: str = 'CDIA'):
-    """Import data broker ke database dengan BATCH INSERT (optimized for speed)"""
+    """Import data broker ke database (replace mode: delete all lalu insert fresh)"""
     from psycopg2.extras import execute_batch
 
-    print(f"Importing {len(broker_df)} broker records (batch mode)...")
+    print(f"Importing {len(broker_df)} broker records (replace mode)...")
 
     insert_query = """
         INSERT INTO broker_summary
@@ -305,16 +309,19 @@ def import_broker_data(broker_df: pd.DataFrame, stock_code: str = 'CDIA'):
     records_imported = 0
     try:
         with get_cursor() as cursor:
-            # Batch insert - much faster than individual inserts
-            # page_size=500 means 500 records per batch
+            # Replace mode: hapus semua data broker untuk stock ini, lalu insert fresh
+            cursor.execute("DELETE FROM broker_summary WHERE stock_code = %s", (stock_code,))
+            deleted = cursor.rowcount
+            print(f"  Deleted {deleted} old broker records for {stock_code}")
+
             execute_batch(cursor, insert_query, batch_data, page_size=500)
             records_imported = len(batch_data)
             print(f"Batch import successful: {records_imported} records")
     except Exception as e:
         print(f"Batch import error: {e}")
-        # Fallback to individual inserts if batch fails
         print("Falling back to individual inserts...")
         with get_cursor() as cursor:
+            cursor.execute("DELETE FROM broker_summary WHERE stock_code = %s", (stock_code,))
             for data in batch_data:
                 try:
                     cursor.execute(insert_query, data)
