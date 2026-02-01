@@ -19452,7 +19452,7 @@ def dm_upload_data(n_clicks, selected_stocks, data_types):
     from datetime import datetime
 
     try:
-        from gdrive_sync import sync_stock_data, check_setup_status
+        from gdrive_sync import sync_stock_data, check_setup_status, GDRIVE_FOLDER_EMITEN_UPDATE
     except ImportError as e:
         return (
             dbc.Alert([
@@ -19488,7 +19488,7 @@ def dm_upload_data(n_clicks, selected_stocks, data_types):
         stocks_to_sync = [s for s in selected_stocks if s and s != 'ALL']
 
     try:
-        result = sync_stock_data(stocks=stocks_to_sync, data_types=data_types)
+        result = sync_stock_data(stocks=stocks_to_sync, data_types=data_types, folder_id=GDRIVE_FOLDER_EMITEN_UPDATE)
 
         log_items = []
         for log in result.logs:

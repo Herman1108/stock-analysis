@@ -42,9 +42,12 @@ except ImportError as e:
     print(f"Warning: Could not import parser: {e}")
 
 
-# Google Drive folder ID (from URL)
-# URL: https://drive.google.com/drive/folders/1vV0mSOZRxwK3L0NrzgwzZsghK4s0AiIQ
+# Google Drive folder IDs
+# Default folder (service account shared folder)
 GDRIVE_FOLDER_ID = "1vV0mSOZRxwK3L0NrzgwzZsghK4s0AiIQ"
+# Emiten_update folder (user's personal Google Drive - used by Data Management tab)
+# URL: https://drive.google.com/drive/folders/1znqGv0F5BAuCMzh0VNseF9hH-2AK-Uo1
+GDRIVE_FOLDER_EMITEN_UPDATE = "1znqGv0F5BAuCMzh0VNseF9hH-2AK-Uo1"
 
 # Credentials can be provided via:
 # 1. GOOGLE_CREDENTIALS_JSON env var (JSON content as string) - for Railway/cloud
