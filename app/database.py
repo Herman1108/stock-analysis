@@ -54,14 +54,14 @@ def get_pool():
                 try:
                     if 'dsn' in DB_CONFIG:
                         _connection_pool = pool.ThreadedConnectionPool(
-                            minconn=2,
-                            maxconn=20,
+                            minconn=1,
+                            maxconn=5,
                             dsn=DB_CONFIG['dsn']
                         )
                     else:
                         _connection_pool = pool.ThreadedConnectionPool(
-                            minconn=2,
-                            maxconn=20,
+                            minconn=1,
+                            maxconn=5,
                             **DB_CONFIG
                         )
                     print("Connection pool created successfully")
@@ -115,11 +115,13 @@ class QueryCache:
     """
     Simple in-memory cache for database queries.
     Perfect for daily-updated data - cache expires after 1 hour.
+    Limited to max_entries to prevent unbounded memory growth.
     """
-    def __init__(self, default_ttl=3600):  # 1 hour default
+    def __init__(self, default_ttl=3600, max_entries=100):  # 1 hour default, max 100 entries
         self._cache = {}
         self._lock = threading.Lock()
         self.default_ttl = default_ttl
+        self.max_entries = max_entries
         self.hits = 0
         self.misses = 0
 
@@ -144,10 +146,14 @@ class QueryCache:
             return None
 
     def set(self, query, params, data, ttl=None):
-        """Cache query result"""
+        """Cache query result (evicts oldest if max_entries reached)"""
         key = self._make_key(query, params)
         ttl = ttl or self.default_ttl
         with self._lock:
+            # Evict oldest entries if cache is full
+            if len(self._cache) >= self.max_entries and key not in self._cache:
+                oldest_key = min(self._cache, key=lambda k: self._cache[k]['created'])
+                del self._cache[oldest_key]
             self._cache[key] = {
                 'data': data,
                 'expires': time.time() + ttl,
@@ -181,8 +187,8 @@ class QueryCache:
             'entries': len(self._cache)
         }
 
-# Global cache instance
-query_cache = QueryCache(default_ttl=3600)  # 1 hour cache
+# Global cache instance - limited to 100 entries to control memory
+query_cache = QueryCache(default_ttl=3600, max_entries=100)
 
 # ============================================================
 # CACHED QUERY EXECUTION
