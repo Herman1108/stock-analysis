@@ -3716,6 +3716,9 @@ def create_landing_page(is_admin: bool = False, is_logged_in: bool = False, is_e
 
 ADMIN_PASSWORD = "12153800"  # Same as upload password for admin actions
 
+# Lockdown mode: only this email can login and access the site
+ALLOWED_EMAIL = "herman.irawan1108@gmail.com"
+
 def get_profanity_words():
     """Get profanity words from database"""
     query = "SELECT keyword, level FROM forum_profanity ORDER BY level"
@@ -3861,6 +3864,10 @@ def verify_user_email(token: str) -> dict:
 
 def login_user(email: str, password: str) -> dict:
     """Login user and return user data"""
+    # Lockdown: only allowed email can login
+    if email.lower() != ALLOWED_EMAIL:
+        return {'success': False, 'error': 'Akses ditutup sementara. Hanya admin yang dapat login.'}
+
     query = """
         SELECT id, email, username, password_hash, is_verified, member_type, member_end
         FROM users WHERE email = %s
@@ -19150,9 +19157,27 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
     member_type = None
 
     if user_session and user_session.get('email'):
-        is_logged_in = True
         user_email = user_session.get('email')
-        
+
+        # Lockdown: force logout non-allowed users
+        if user_email.lower() != ALLOWED_EMAIL:
+            return html.Div([
+                dbc.Container([
+                    dbc.Alert([
+                        html.H4("Akses Ditutup Sementara", className="alert-heading"),
+                        html.P("Website sedang dalam maintenance. Hanya admin yang dapat mengakses saat ini."),
+                        html.Hr(),
+                        html.P("Silakan coba lagi nanti.", className="mb-0"),
+                    ], color="warning", className="mt-5"),
+                    dcc.Location(id='lockdown-redirect', refresh=True),
+                    # Clear sessions
+                    dcc.Store(id='user-session', data=None, storage_type='session'),
+                    dcc.Store(id='superadmin-session', data=None, storage_type='local'),
+                ], className="py-5")
+            ])
+
+        is_logged_in = True
+
         # Get fresh membership status from database (not from session)
         # This ensures admin changes to member_end take effect immediately
         db_status = get_user_membership_status(user_email)
@@ -19186,6 +19211,18 @@ def display_page(pathname, search, selected_stock, user_session, superadmin_sess
                     print(f"Error checking member expiry: {e}")
                     pass
     elif superadmin_session and superadmin_session.get('email'):
+        # Lockdown: force logout non-allowed superadmin sessions
+        if superadmin_session.get('email', '').lower() != ALLOWED_EMAIL:
+            return html.Div([
+                dbc.Container([
+                    dbc.Alert([
+                        html.H4("Akses Ditutup Sementara", className="alert-heading"),
+                        html.P("Website sedang dalam maintenance. Hanya admin yang dapat mengakses saat ini."),
+                        html.Hr(),
+                        html.P("Silakan coba lagi nanti.", className="mb-0"),
+                    ], color="warning", className="mt-5"),
+                ], className="py-5")
+            ])
         is_logged_in = True
         is_admin = True  # Superadmin is always admin
         member_type = 'admin'
@@ -20906,6 +20943,9 @@ def handle_maintenance_toggle(n_clicks, current_state, user_session):
 def handle_signup(n_clicks, email, username, password, confirm, membership_type):
     if not n_clicks:
         raise dash.exceptions.PreventUpdate
+
+    # Lockdown: block all new registrations
+    return dbc.Alert("Pendaftaran ditutup sementara. Website sedang dalam maintenance.", color="danger")
 
     # Validate inputs
     if not all([email, username, password, confirm]):
